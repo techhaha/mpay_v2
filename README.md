@@ -1,37 +1,70 @@
-# 码支付 V2
+<div style="padding:18px;max-width: 1024px;margin:0 auto;background-color:#fff;color:#333">
+<h1>webman</h1>
 
-#### 介绍
-码支付[mpay]是一款便捷的在线收款工具，使用webman框架开发，支持个人免签收款，三方支付聚合码收款，能通过API对接主流收款服务商平台（如微信支付、支付宝、银联官方等）
-
-#### 软件架构
-软件架构说明
+基于<a href="https://www.workerman.net" target="__blank">workerman</a>开发的超高性能PHP框架
 
 
-#### 安装教程
+<h1>学习</h1>
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+<ul>
+  <li>
+    <a href="https://www.workerman.net/webman" target="__blank">主页 / Home page</a>
+  </li>
+  <li>
+    <a href="https://webman.workerman.net" target="__blank">文档 / Document</a>
+  </li>
+  <li>
+    <a href="https://www.workerman.net/doc/webman/install.html" target="__blank">安装 / Install</a>
+  </li>
+  <li>
+    <a href="https://www.workerman.net/questions" target="__blank">问答 / Questions</a>
+  </li>
+  <li>
+    <a href="https://www.workerman.net/apps" target="__blank">市场 / Apps</a>
+  </li>
+  <li>
+    <a href="https://www.workerman.net/sponsor" target="__blank">赞助 / Sponsors</a>
+  </li>
+  <li>
+    <a href="https://www.workerman.net/doc/webman/thanks.html" target="__blank">致谢 / Thanks</a>
+  </li>
+</ul>
 
-#### 使用说明
+<div style="float:left;padding-bottom:30px;">
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+  <h1>赞助商</h1>
 
-#### 参与贡献
+  <h4>特别赞助</h4>
+  <a href="https://www.crmeb.com/?form=workerman" target="__blank">
+    <img src="https://www.workerman.net/img/sponsors/6429/20230719111500.svg" width="200">
+  </a>
 
-1.  Fork 本仓库
-2.  新建 Feat_xxx 分支
-3.  提交代码
-4.  新建 Pull Request
+  <h4>铂金赞助</h4>
+  <a href="https://www.fadetask.com/?from=workerman" target="__blank"><img src="https://www.workerman.net/img/sponsors/1/20230719084316.png" width="200"></a>
+  <a href="https://www.yilianyun.net/?from=workerman" target="__blank" style="margin-left:20px;"><img src="https://www.workerman.net/img/sponsors/6218/20230720114049.png" width="200"></a>
 
 
-#### 特技
+</div>
 
-1.  使用 Readme\_XXX.md 来支持不同的语言，例如 Readme\_en.md, Readme\_zh.md
-2.  Gitee 官方博客 [blog.gitee.com](https://blog.gitee.com)
-3.  你可以 [https://gitee.com/explore](https://gitee.com/explore) 这个地址来了解 Gitee 上的优秀开源项目
-4.  [GVP](https://gitee.com/gvp) 全称是 Gitee 最有价值开源项目，是综合评定出的优秀开源项目
-5.  Gitee 官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
-6.  Gitee 封面人物是一档用来展示 Gitee 会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+
+<div style="float:left;padding-bottom:30px;clear:both">
+
+  <h1>请作者喝咖啡</h1>
+
+<img src="https://www.workerman.net/img/wx_donate.png" width="200">
+<img src="https://www.workerman.net/img/ali_donate.png" width="200">
+<br>
+<b>如果您觉得webman对您有所帮助，欢迎捐赠。</b>
+
+
+</div>
+
+
+<div style="clear: both">
+<h1>LICENSE</h1>
+The webman is open-sourced software licensed under the MIT.
+</div>
+
+</div>
+
+
