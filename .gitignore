@@ -7,6 +7,7 @@
 /tests/tmp
 /tests/.phpunit.result.cache
 .kiro
+plugin
 
 # 部署相关文件
 deploy.bat

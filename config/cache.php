@@ -1,4 +1,5 @@
 <?php
+
 /**
  * This file is part of webman.
  *
@@ -12,8 +13,19 @@
  * @license   http://www.opensource.org/licenses/mit-license.php MIT License
  */
 
-$builder = new \DI\ContainerBuilder();
-$builder->addDefinitions(config('dependence', []));
-$builder->useAutowiring(true);
-$builder->useAttributes(true);
-return $builder->build();
+return [
+    'default' => 'file',
+    'stores' => [
+        'file' => [
+            'driver' => 'file',
+            'path' => runtime_path('cache')
+        ],
+        'redis' => [
+            'driver' => 'redis',
+            'connection' => 'default'
+        ],
+        'array' => [
+            'driver' => 'array'
+        ]
+    ]
+];
