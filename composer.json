@@ -44,7 +44,7 @@
     "guzzlehttp/guzzle": "^7.0",
     "ramsey/uuid": "^4.0",
     "nesbot/carbon": "^3.0",
-    "webman/admin": "~2.0"
+    "webman/database": "^2.1"
   },
   "suggest": {
     "ext-event": "For better performance. "

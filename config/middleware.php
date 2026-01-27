@@ -1,4 +1,5 @@
 <?php
+
 /**
  * This file is part of webman.
  *
@@ -12,4 +13,9 @@
  * @license   http://www.opensource.org/licenses/mit-license.php MIT License
  */
 
-return [];
+return [
+    // 超全局中间件-覆盖插件
+    '@'     => [
+        app\common\middleware\Cors::class, //跨域中间件
+    ],
+];

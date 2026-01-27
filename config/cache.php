@@ -14,7 +14,7 @@
  */
 
 return [
-    'default' => 'file',
+    'default' => getenv('CACHE_DRIVER') ?? 'file',
     'stores' => [
         'file' => [
             'driver' => 'file',
