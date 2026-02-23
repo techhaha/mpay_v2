@@ -1,20 +1,41 @@
 <?php
 
 /**
- * MPay V2 支付系统 - Redis配置
- * Redis 6.0+ 缓存和队列配置
+ * This file is part of webman.
+ *
+ * Licensed under The MIT License
+ * For full copyright and license information, please see the MIT-LICENSE.txt
+ * Redistributions of files must retain the above copyright notice.
+ *
+ * @author    walkor<walkor@workerman.net>
+ * @copyright walkor<walkor@workerman.net>
+ * @link      http://www.workerman.net/
+ * @license   http://www.opensource.org/licenses/mit-license.php MIT License
  */
 
 return [
-    // 默认Redis连接
     'default' => [
-        'host' => getenv('REDIS_HOST') ?? '127.0.0.1',
-        'password' => getenv('REDIS_PASSWORD') ?? '',
-        'port' => getenv('REDIS_PORT') ?? 6379,
-        'database' => getenv('REDIS_DATABASE') ?? 0,
+        'password' => env('REDIS_PASSWORD', ''),
+        'host' => env('REDIS_HOST', '127.0.0.1'),
+        'port' => env('REDIS_PORT', 6379),
+        'database' => env('REDIS_DATABASE', 0),
         'pool' => [
-            'max_connections' => 20,
-            'min_connections' => 5,
+            'max_connections' => 5,
+            'min_connections' => 1,
+            'wait_timeout' => 3,
+            'idle_timeout' => 60,
+            'heartbeat_interval' => 50,
+        ],
+    ],
+    'cache' => [
+        'password' => env('REDIS_PASSWORD', ''),
+        'host' => env('REDIS_HOST', '127.0.0.1'),
+        'port' => env('REDIS_PORT', 6379),
+        'database' => env('CACHE_REDIS_DATABASE', 1),
+        'prefix' => 'ma:cache:',
+        'pool' => [
+            'max_connections' => 5,
+            'min_connections' => 1,
             'wait_timeout' => 3,
             'idle_timeout' => 60,
             'heartbeat_interval' => 50,

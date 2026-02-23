@@ -1,17 +1,17 @@
 <?php
 return  [
-    'default' => getenv('DB_CONNECTION') ?? 'mysql',
+    'default' => 'mysql',
     'connections' => [
         'mysql' => [
-            'driver'      => getenv('DB_DRIVER') ?? 'mysql',
-            'host'        => getenv('DB_HOST') ?? '127.0.0.1',
-            'port'        => getenv('DB_PORT') ?? '3306',
-            'database'    => getenv('DB_DATABASE') ?? '',
-            'username'    => getenv('DB_USERNAME') ?? '',
-            'password'    => getenv('DB_PASSWORD') ?? '',
+            'driver'      => 'mysql',
+            'host'        => env('DB_HOST', '127.0.0.1'),
+            'port'        => env('DB_PORT', 3306),
+            'database'    => env('DB_DATABASE', ''),
+            'username'    => env('DB_USERNAME', ''),
+            'password'    => env('DB_PASSWORD', ''),
             'charset'     => 'utf8mb4',
             'collation'   => 'utf8mb4_general_ci',
-            'prefix'      => getenv('DB_PREFIX') ?? '',
+            'prefix'      => '',
             'strict'      => true,
             'engine'      => null,
             'options'   => [

@@ -14,7 +14,7 @@
  */
 
 return [
-    'default' => getenv('CACHE_DRIVER') ?? 'file',
+    'default' => env('CACHE_DRIVER', 'file'),
     'stores' => [
         'file' => [
             'driver' => 'file',
@@ -22,7 +22,7 @@ return [
         ],
         'redis' => [
             'driver' => 'redis',
-            'connection' => 'default'
+            'connection' => env('CACHE_REDIS_CONNECTION', 'default')
         ],
         'array' => [
             'driver' => 'array'

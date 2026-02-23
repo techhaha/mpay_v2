@@ -1,5 +1,4 @@
 <?php
-
 /**
  * This file is part of webman.
  *
@@ -19,6 +18,6 @@
 return [
     'enable' => true,
     'middleware' => [     // Static file Middleware
-        app\common\middleware\StaticFile::class,
+        //app\middleware\StaticFile::class,
     ],
 ];

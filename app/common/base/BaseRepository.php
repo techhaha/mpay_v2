@@ -2,57 +2,73 @@
 
 namespace app\common\base;
 
+use support\Model;
+
 /**
- * 仓库基础类
- * - 支持注入 DAO 依赖
- * - 通过魔术方法代理 DAO 的方法调用
- * - 提供通用的数据访问封装
+ * 仓储层基础父类
+ *
+ * 封装单表常用的 CRUD / 分页操作，具体仓储继承后可扩展业务查询。
  */
 abstract class BaseRepository
 {
     /**
-     * DAO 实例（可选，子类通过构造函数注入）
+     * @var Model
      */
-    protected ?BaseDao $dao = null;
+    protected Model $model;
 
-    /**
-     * 构造函数，子类可注入 DAO
-     */
-    public function __construct(?BaseDao $dao = null)
+    public function __construct(Model $model)
     {
-        $this->dao = $dao;
+        $this->model = $model;
     }
 
     /**
-     * 魔术方法：代理 DAO 的方法调用
-     * 如果仓库自身没有该方法，且存在 DAO 实例，则调用 DAO 的对应方法
+     * 根据主键查询
      */
-    public function __call(string $method, array $arguments)
+    public function find(int $id, array $columns = ['*']): ?Model
     {
-        if ($this->dao && method_exists($this->dao, $method)) {
-            return $this->dao->{$method}(...$arguments);
+        return $this->model->newQuery()->find($id, $columns);
+    }
+
+    /**
+     * 新建记录
+     */
+    public function create(array $data): Model
+    {
+        return $this->model->newQuery()->create($data);
+    }
+
+    /**
+     * 按主键更新
+     */
+    public function updateById(int $id, array $data): bool
+    {
+        return (bool) $this->model->newQuery()->whereKey($id)->update($data);
+    }
+
+    /**
+     * 按主键删除
+     */
+    public function deleteById(int $id): bool
+    {
+        return (bool) $this->model->newQuery()->whereKey($id)->delete();
+    }
+
+    /**
+     * 简单分页查询示例
+     *
+     * @param array $where  ['字段' => 值]，值为 null / '' 时会被忽略
+     */
+    public function paginate(array $where = [], int $page = 1, int $pageSize = 10, array $columns = ['*'])
+    {
+        $query = $this->model->newQuery();
+
+        foreach ($where as $field => $value) {
+            if ($value === null || $value === '') {
+                continue;
+            }
+            $query->where($field, $value);
         }
 
-        throw new \BadMethodCallException(
-            sprintf('Method %s::%s does not exist', static::class, $method)
-        );
-    }
-
-    /**
-     * 检查 DAO 是否已注入
-     */
-    protected function hasDao(): bool
-    {
-        return $this->dao !== null;
-    }
-
-    /**
-     * 获取 DAO 实例
-     */
-    protected function getDao(): ?BaseDao
-    {
-        return $this->dao;
+        return $query->paginate($pageSize, $columns, 'page', $page);
     }
 }
-
-

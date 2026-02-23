@@ -2,41 +2,62 @@
 
 namespace app\common\base;
 
-use support\Response;
 use support\Request;
+use support\Response;
 
 /**
- * 控制器基础类
- * - 提供统一的 success/fail 响应封装
+ * 控制器基础父类
  *
- * 约定：
- * - 控制器统一通过 $this->request->* 获取请求数据
- * - 为避免每个控制器构造函数重复注入 Request，本类通过 __get('request') 返回当前请求对象
+ * 约定统一的 JSON 返回结构：
+ * {
+ *   "code": 200,
+ *   "message": "success",
+ *   "data": ...
+ * }
  */
-abstract class BaseController
+class BaseController
 {
-
     /**
-     * 成功响应
+     * 成功返回
      */
     protected function success(mixed $data = null, string $message = 'success', int $code = 200): Response
     {
         return json([
-            'code' => $code,
+            'code'    => $code,
             'message' => $message,
-            'data' => $data,
+            'data'    => $data,
         ]);
     }
 
     /**
-     * 失败响应
+     * 失败返回
      */
-    protected function fail(string $message = 'fail', int $code = 500, mixed $data = null): Response
+    protected function fail(string $message = 'error', int $code = 500, mixed $data = null): Response
     {
         return json([
-            'code' => $code,
+            'code'    => $code,
             'message' => $message,
-            'data' => $data,
+            'data'    => $data,
         ]);
     }
+
+    /**
+     * 获取当前登录用户的 token 载荷
+     *
+     * 从 AuthMiddleware 注入的用户信息中获取
+     */
+    protected function currentUser(Request $request): ?array
+    {
+        return $request->user ?? null;
+    }
+
+    /**
+     * 获取当前登录用户ID
+     */
+    protected function currentUserId(Request $request): int
+    {
+        return (int) ($request->userId ?? 0);
+    }
 }
+
+

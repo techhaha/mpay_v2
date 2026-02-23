@@ -22,13 +22,11 @@ class Cors implements MiddlewareInterface
     {
         $response = strtoupper($request->method()) === 'OPTIONS' ? response('', 204) : $handler($request);
 
-        $response->withHeaders([
+        return $response->withHeaders([
             'Access-Control-Allow-Credentials' => 'true',
             'Access-Control-Allow-Origin' => $request->header('origin', '*'),
             'Access-Control-Allow-Methods' => $request->header('access-control-request-method', '*'),
             'Access-Control-Allow-Headers' => $request->header('access-control-request-headers', '*'),
         ]);
-
-        return $response;
     }
 }

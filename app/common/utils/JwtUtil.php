@@ -1,11 +1,11 @@
 <?php
 
-namespace app\services\auth;
+namespace app\common\utils;
 
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 
-class JwtService
+class JwtUtil
 {
     /**
      * 生成 JWT
@@ -46,6 +46,15 @@ class JwtService
     {
         $config = config('jwt', []);
         return (int)($config['ttl'] ?? 7200);
+    }
+
+    /**
+     * 获取缓存前缀
+     */
+    public static function getCachePrefix(): string
+    {
+        $config = config('jwt', []);
+        return $config['cache_prefix'] ?? 'token_';
     }
 }
 
