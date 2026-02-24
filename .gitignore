@@ -6,4 +6,4 @@
 /vendor
 /runtime
 *.log
-.env
+/.env

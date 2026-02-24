@@ -3,8 +3,6 @@
 namespace app\exceptions;
 
 use Webman\Exception\BusinessException;
-use Webman\Http\Request;
-use Webman\Http\Response;
 
 /**
  * 参数校验异常
@@ -19,6 +17,9 @@ class ValidationException extends BusinessException
 {
     public function __construct(string $message = '参数校验失败', int $bizCode = 422, array $data = [])
     {
-        parent::__construct($message, $bizCode, $data);
+        parent::__construct($message, $bizCode);
+        if (!empty($data)) {
+            $this->data($data);
+        }
     }
 }

@@ -1,0 +1,84 @@
+{
+  "formId": "basic-config",
+  "title": "基础设置",
+  "submitText": "保存设置",
+  "submitUrl": "/adminapi/system/base-config/submit/basic",
+  "cacheKey": "basic_config_cache",
+  "refreshAfterSubmit": true,
+  "rules": [
+    {
+      "type": "input",
+      "field": "site_name",
+      "title": "站点名称",
+      "value": "",
+      "props": {
+        "placeholder": "请输入站点名称"
+      },
+      "validate": [
+        {
+          "required": true,
+          "message": "站点名称不能为空"
+        }
+      ]
+    },
+    {
+      "type": "textarea",
+      "field": "site_description",
+      "title": "站点描述",
+      "value": "",
+      "props": {
+        "placeholder": "请输入站点描述",
+        "autoSize": {
+          "minRows": 3,
+          "maxRows": 6
+        }
+      }
+    },
+    {
+      "type": "input",
+      "field": "site_logo",
+      "title": "站点Logo",
+      "value": "",
+      "props": {
+        "placeholder": "请输入Logo地址或上传Logo"
+      }
+    },
+    {
+      "type": "input",
+      "field": "icp_number",
+      "title": "备案号",
+      "value": "",
+      "props": {
+        "placeholder": "请输入ICP备案号"
+      }
+    },
+    {
+      "type": "switch",
+      "field": "site_status",
+      "title": "站点状态",
+      "value": true,
+      "props": {
+        "checkedText": "开启",
+        "uncheckedText": "关闭"
+      }
+    },
+    {
+      "type": "inputNumber",
+      "field": "page_size",
+      "title": "每页显示数量",
+      "value": 10,
+      "props": {
+        "min": 1,
+        "max": 100,
+        "precision": 0
+      },
+      "validate": [
+        {
+          "required": true,
+          "message": "每页显示数量不能为空"
+        }
+      ]
+    }
+  ]
+}
+

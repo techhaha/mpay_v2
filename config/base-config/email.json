@@ -1,0 +1,112 @@
+{
+  "formId": "email-config",
+  "title": "邮件设置",
+  "submitText": "保存设置",
+  "submitUrl": "/adminapi/system/base-config/submit/email",
+  "cacheKey": "email_config_cache",
+  "refreshAfterSubmit": true,
+  "rules": [
+    {
+      "type": "input",
+      "field": "smtp_host",
+      "title": "SMTP服务器",
+      "value": "",
+      "props": {
+        "placeholder": "例如：smtp.qq.com"
+      },
+      "validate": [
+        {
+          "required": true,
+          "message": "SMTP服务器不能为空"
+        }
+      ]
+    },
+    {
+      "type": "inputNumber",
+      "field": "smtp_port",
+      "title": "SMTP端口",
+      "value": 465,
+      "props": {
+        "min": 1,
+        "max": 65535,
+        "precision": 0
+      },
+      "validate": [
+        {
+          "required": true,
+          "message": "SMTP端口不能为空"
+        }
+      ]
+    },
+    {
+      "type": "switch",
+      "field": "smtp_ssl",
+      "title": "启用SSL",
+      "value": true,
+      "props": {
+        "checkedText": "是",
+        "uncheckedText": "否"
+      }
+    },
+    {
+      "type": "input",
+      "field": "smtp_username",
+      "title": "SMTP用户名",
+      "value": "",
+      "props": {
+        "placeholder": "请输入SMTP用户名"
+      },
+      "validate": [
+        {
+          "required": true,
+          "message": "SMTP用户名不能为空"
+        }
+      ]
+    },
+    {
+      "type": "input",
+      "field": "smtp_password",
+      "title": "SMTP密码",
+      "value": "",
+      "props": {
+        "type": "password",
+        "placeholder": "请输入SMTP密码或授权码"
+      },
+      "validate": [
+        {
+          "required": true,
+          "message": "SMTP密码不能为空"
+        }
+      ]
+    },
+    {
+      "type": "input",
+      "field": "from_email",
+      "title": "发件人邮箱",
+      "value": "",
+      "props": {
+        "placeholder": "请输入发件人邮箱地址"
+      },
+      "validate": [
+        {
+          "required": true,
+          "message": "发件人邮箱不能为空"
+        },
+        {
+          "type": "email",
+          "message": "请输入正确的邮箱地址"
+        }
+      ]
+    },
+    {
+      "type": "input",
+      "field": "from_name",
+      "title": "发件人名称",
+      "value": "",
+      "props": {
+        "placeholder": "请输入发件人名称"
+      }
+    }
+  ]
+}
+

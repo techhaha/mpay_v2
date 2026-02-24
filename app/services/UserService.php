@@ -4,6 +4,7 @@ namespace app\services;
 
 use app\common\base\BaseService;
 use app\common\constants\RoleCode;
+use app\exceptions\NotFoundException;
 use app\repositories\UserRepository;
 
 /**
@@ -29,7 +30,7 @@ class UserService extends BaseService
     {
         $user = $this->users->find($id);
         if (!$user) {
-            throw new \RuntimeException('用户不存在', 404);
+            throw new NotFoundException('用户不存在');
         }
 
         $userArray = $user->toArray();

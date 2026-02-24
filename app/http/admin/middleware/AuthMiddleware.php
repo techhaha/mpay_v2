@@ -3,9 +3,10 @@
 namespace app\http\admin\middleware;
 
 use Webman\MiddlewareInterface;
-use Webman\Http\Response;
 use Webman\Http\Request;
+use Webman\Http\Response;
 use app\common\utils\JwtUtil;
+use app\exceptions\UnauthorizedException;
 
 /**
  * JWT 认证中间件
@@ -25,7 +26,7 @@ class AuthMiddleware implements MiddlewareInterface
         // 从请求头中获取 token
         $auth = $request->header('Authorization', '');
         if (!$auth) {
-            return $this->unauthorized('缺少认证令牌');
+            throw new UnauthorizedException('缺少认证令牌');
         }
 
         // 兼容 "Bearer xxx" 或直接 "xxx"
@@ -36,7 +37,7 @@ class AuthMiddleware implements MiddlewareInterface
         }
 
         if (!$token) {
-            return $this->unauthorized('认证令牌格式错误');
+            throw new UnauthorizedException('认证令牌格式错误');
         }
 
         try {
@@ -44,7 +45,7 @@ class AuthMiddleware implements MiddlewareInterface
             $payload = JwtUtil::parseToken($token);
             
             if (empty($payload) || !isset($payload['user_id'])) {
-                return $this->unauthorized('认证令牌无效');
+                throw new UnauthorizedException('认证令牌无效');
             }
 
             // 将用户信息存储到请求对象中，供控制器使用
@@ -53,29 +54,20 @@ class AuthMiddleware implements MiddlewareInterface
 
             // 继续处理请求
             return $handler($request);
+        } catch (UnauthorizedException $e) {
+            // 重新抛出业务异常，让框架处理
+            throw $e;
         } catch (\Throwable $e) {
             // 根据异常类型返回不同的错误信息
             $message = $e->getMessage();
             if (str_contains($message, 'expired') || str_contains($message, 'Expired')) {
-                return $this->unauthorized('认证令牌已过期', 401);
+                throw new UnauthorizedException('认证令牌已过期');
             } elseif (str_contains($message, 'signature') || str_contains($message, 'Signature')) {
-                return $this->unauthorized('认证令牌签名无效', 401);
+                throw new UnauthorizedException('认证令牌签名无效');
             } else {
-                return $this->unauthorized('认证令牌验证失败：' . $message, 401);
+                throw new UnauthorizedException('认证令牌验证失败：' . $message);
             }
         }
-    }
-
-    /**
-     * 返回未授权响应
-     */
-    private function unauthorized(string $message, int $code = 401): Response
-    {
-        return json([
-            'code' => $code,
-            'message' => $message,
-            'data' => null,
-        ], $code);
     }
 }
 

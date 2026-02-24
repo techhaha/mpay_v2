@@ -33,12 +33,8 @@ class UserController extends BaseController
             return $this->fail('未获取到用户信息，请先登录', 401);
         }
 
-        try {
-            $data = $this->userService->getUserInfoById($userId);
-            return $this->success($data);
-        } catch (\RuntimeException $e) {
-            return $this->fail($e->getMessage(), $e->getCode() ?: 500);
-        }
+        $data = $this->userService->getUserInfoById($userId);
+        return $this->success($data);
     }
 }
 

@@ -30,5 +30,10 @@ Route::group('/adminapi', function () {
         
         // 系统相关（需要JWT验证）
         Route::get('/system/getDict[/{code}]', [SystemController::class, 'getDict']);
+        
+        // 系统配置相关（需要JWT验证）
+        Route::get('/system/base-config/tabs', [SystemController::class, 'getTabsConfig']);
+        Route::get('/system/base-config/form/{tabKey}', [SystemController::class, 'getFormConfig']);
+        Route::post('/system/base-config/submit/{tabKey}', [SystemController::class, 'submitConfig']);
     })->middleware([AuthMiddleware::class]);
 })->middleware([Cors::class]);

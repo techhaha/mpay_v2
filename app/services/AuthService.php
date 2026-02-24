@@ -4,6 +4,7 @@ namespace app\services;
 
 use app\common\base\BaseService;
 use app\common\utils\JwtUtil;
+use app\exceptions\{BadRequestException, ForbiddenException, UnauthorizedException};
 use app\repositories\UserRepository;
 use support\Cache;
 
@@ -30,29 +31,28 @@ class AuthService extends BaseService
      * @param string $verifyCode 验证码
      * @param string $captchaId 验证码ID
      * @return array ['token' => string]
-     * @throws \RuntimeException
      */
     public function login(string $username, string $password, string $verifyCode, string $captchaId): array
     {
         // 1. 校验验证码
         if (!$this->captchaService->validate($captchaId, $verifyCode)) {
-            throw new \RuntimeException('验证码错误或已失效', 400);
+            throw new BadRequestException('验证码错误或已失效');
         }
 
         // 2. 查询用户
         $user = $this->userRepository->findByUserName($username);
         if (!$user) {
-            throw new \RuntimeException('账号或密码错误', 401);
+            throw new UnauthorizedException('账号或密码错误');
         }
 
         // 3. 校验密码
         if (!$this->validatePassword($password, $user->password)) {
-            throw new \RuntimeException('账号或密码错误', 401);
+            throw new UnauthorizedException('账号或密码错误');
         }
 
         // 4. 检查用户状态
         if ($user->status !== 1) {
-            throw new \RuntimeException('账号已被禁用', 403);
+            throw new ForbiddenException('账号已被禁用');
         }
 
         // 5. 生成 JWT token（包含用户ID、用户名、昵称等信息）

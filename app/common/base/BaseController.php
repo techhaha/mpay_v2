@@ -24,7 +24,7 @@ class BaseController
     {
         return json([
             'code'    => $code,
-            'message' => $message,
+            'msg' => $message,
             'data'    => $data,
         ]);
     }
@@ -36,7 +36,7 @@ class BaseController
     {
         return json([
             'code'    => $code,
-            'message' => $message,
+            'msg' => $message,
             'data'    => $data,
         ]);
     }
@@ -59,5 +59,3 @@ class BaseController
         return (int) ($request->userId ?? 0);
     }
 }
-
-

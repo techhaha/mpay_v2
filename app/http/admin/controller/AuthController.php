@@ -27,12 +27,8 @@ class AuthController extends BaseController
      */
     public function captcha(Request $request)
     {
-        try {
-            $data = $this->captchaService->generate();
-            return $this->success($data);
-        } catch (\Throwable $e) {
-            return $this->fail('验证码生成失败：' . $e->getMessage(), 500);
-        }
+        $data = $this->captchaService->generate();
+        return $this->success($data);
     }
 
     /**
@@ -52,14 +48,8 @@ class AuthController extends BaseController
             return $this->fail('请填写完整登录信息', 400);
         }
 
-        try {
-            $data = $this->authService->login($username, $password, $verifyCode, $captchaId);
-            return $this->success($data);
-        } catch (\RuntimeException $e) {
-            return $this->fail($e->getMessage(), $e->getCode() ?: 500);
-        } catch (\Throwable $e) {
-            return $this->fail('登录失败：' . $e->getMessage(), 500);
-        }
+        $data = $this->authService->login($username, $password, $verifyCode, $captchaId);
+        return $this->success($data);
     }
 }
 
