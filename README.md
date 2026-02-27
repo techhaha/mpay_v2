@@ -16,6 +16,10 @@ MPay V2 Webman 是一个采用 Webman 高性能 PHP 框架构建的支付系统�
 - **缓存**: Redis
 - **认证**: JWT
 
+## 图片展示
+<img src="doc/img/1.png" width=640 />
+<img src="doc/img/2.png" width=640 />
+
 ## 项目结构
 
 ```

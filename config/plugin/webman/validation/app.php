@@ -1,6 +1,6 @@
 <?php
 
-use support\validation\ValidationException;
+use app\exceptions\ValidationException;
 
 return [
     'enable' => true,
