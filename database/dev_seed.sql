@@ -48,4 +48,145 @@ ON DUPLICATE KEY UPDATE
   `class_name`  = VALUES(`class_name`),
   `status`      = VALUES(`status`),
   `updated_at`  = NOW();
+ 
+-- 6) 系统配置（开发环境默认配置，可根据需要修改）
+INSERT INTO `ma_system_config` (`config_key`, `config_value`, `created_at`, `updated_at`) VALUES
+('site_name',              'Mpay',                NOW(), NOW()),
+('site_description',       '码支付',              NOW(), NOW()),
+('site_logo',              '',                    NOW(), NOW()),
+('icp_number',             '',                    NOW(), NOW()),
+('site_status',            '1',                   NOW(), NOW()),
+('page_size',              '10',                  NOW(), NOW()),
+('enable_permission',      '1',                   NOW(), NOW()),
+('session_timeout',        '15',                  NOW(), NOW()),
+('password_min_length',    '8',                   NOW(), NOW()),
+('require_strong_password','1',                   NOW(), NOW()),
+('max_login_attempts',     '5',                   NOW(), NOW()),
+('lockout_duration',       '30',                  NOW(), NOW()),
+('smtp_host',              'smtp.example.com',    NOW(), NOW()),
+('smtp_port',              '465',                 NOW(), NOW()),
+('smtp_ssl',               '1',                   NOW(), NOW()),
+('smtp_username',          'noreply@example.com', NOW(), NOW()),
+('smtp_password',          'dev_smtp_password',   NOW(), NOW()),
+('from_email',             'noreply@example.com', NOW(), NOW()),
+('from_name',              'Mpay',                NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+  `config_value` = VALUES(`config_value`),
+  `updated_at`   = NOW();
 
+-- 7) 支付通道（为测试商户 M001 / 应用 1001 初始化拉卡拉通道）
+INSERT INTO `ma_pay_channel` (
+  `merchant_id`,
+  `merchant_app_id`,
+  `chan_code`,
+  `chan_name`,
+  `plugin_code`,
+  `method_id`,
+  `config_json`,
+  `split_ratio`,
+  `chan_cost`,
+  `chan_mode`,
+  `daily_limit`,
+  `daily_cnt`,
+  `min_amount`,
+  `max_amount`,
+  `status`,
+  `sort`,
+  `created_at`,
+  `updated_at`
+)
+SELECT
+  m.id        AS merchant_id,
+  app.id      AS merchant_app_id,
+  'lakala_alipay' AS chan_code,
+  '拉卡拉-支付宝' AS chan_name,
+  'lakala'    AS plugin_code,
+  pm.id       AS method_id,
+  JSON_OBJECT('notify_url', 'https://example.com/notify') AS config_json,
+  100.00      AS split_ratio,
+  0.00        AS chan_cost,
+  'wallet'    AS chan_mode,
+  0.00        AS daily_limit,
+  0           AS daily_cnt,
+  0.01        AS min_amount,
+  NULL        AS max_amount,
+  1           AS status,
+  10          AS sort,
+  NOW()       AS created_at,
+  NOW()       AS updated_at
+FROM `ma_merchant` m
+JOIN `ma_merchant_app` app ON app.merchant_id = m.id AND app.app_id = '1001'
+JOIN `ma_pay_method` pm ON pm.method_code = 'alipay'
+ON DUPLICATE KEY UPDATE
+  `chan_name`   = VALUES(`chan_name`),
+  `plugin_code` = VALUES(`plugin_code`),
+  `method_id`   = VALUES(`method_id`),
+  `config_json` = VALUES(`config_json`),
+  `split_ratio` = VALUES(`split_ratio`),
+  `chan_cost`   = VALUES(`chan_cost`),
+  `chan_mode`   = VALUES(`chan_mode`),
+  `daily_limit` = VALUES(`daily_limit`),
+  `daily_cnt`   = VALUES(`daily_cnt`),
+  `min_amount`  = VALUES(`min_amount`),
+  `max_amount`  = VALUES(`max_amount`),
+  `status`      = VALUES(`status`),
+  `sort`        = VALUES(`sort`),
+  `updated_at`  = NOW();
+
+INSERT INTO `ma_pay_channel` (
+  `merchant_id`,
+  `merchant_app_id`,
+  `chan_code`,
+  `chan_name`,
+  `plugin_code`,
+  `method_id`,
+  `config_json`,
+  `split_ratio`,
+  `chan_cost`,
+  `chan_mode`,
+  `daily_limit`,
+  `daily_cnt`,
+  `min_amount`,
+  `max_amount`,
+  `status`,
+  `sort`,
+  `created_at`,
+  `updated_at`
+)
+SELECT
+  m.id        AS merchant_id,
+  app.id      AS merchant_app_id,
+  'lakala_wechat' AS chan_code,
+  '拉卡拉-微信支付' AS chan_name,
+  'lakala'    AS plugin_code,
+  pm.id       AS method_id,
+  JSON_OBJECT('notify_url', 'https://example.com/notify') AS config_json,
+  100.00      AS split_ratio,
+  0.00        AS chan_cost,
+  'wallet'    AS chan_mode,
+  0.00        AS daily_limit,
+  0           AS daily_cnt,
+  0.01        AS min_amount,
+  NULL        AS max_amount,
+  1           AS status,
+  20          AS sort,
+  NOW()       AS created_at,
+  NOW()       AS updated_at
+FROM `ma_merchant` m
+JOIN `ma_merchant_app` app ON app.merchant_id = m.id AND app.app_id = '1001'
+JOIN `ma_pay_method` pm ON pm.method_code = 'wechat'
+ON DUPLICATE KEY UPDATE
+  `chan_name`   = VALUES(`chan_name`),
+  `plugin_code` = VALUES(`plugin_code`),
+  `method_id`   = VALUES(`method_id`),
+  `config_json` = VALUES(`config_json`),
+  `split_ratio` = VALUES(`split_ratio`),
+  `chan_cost`   = VALUES(`chan_cost`),
+  `chan_mode`   = VALUES(`chan_mode`),
+  `daily_limit` = VALUES(`daily_limit`),
+  `daily_cnt`   = VALUES(`daily_cnt`),
+  `min_amount`  = VALUES(`min_amount`),
+  `max_amount`  = VALUES(`max_amount`),
+  `status`      = VALUES(`status`),
+  `sort`        = VALUES(`sort`),
+  `updated_at`  = NOW();
