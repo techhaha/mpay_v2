@@ -53,4 +53,43 @@ class PaymentOrderRepository extends BaseRepository
         }
         return $this->updateById($order->id, $data);
     }
+
+    /**
+     * 后台订单列表：支持筛选与模糊搜索
+     */
+    public function searchPaginate(array $filters = [], int $page = 1, int $pageSize = 10)
+    {
+        $query = $this->model->newQuery();
+
+        if (!empty($filters['merchant_id'])) {
+            $query->where('merchant_id', (int)$filters['merchant_id']);
+        }
+        if (!empty($filters['merchant_app_id'])) {
+            $query->where('merchant_app_id', (int)$filters['merchant_app_id']);
+        }
+        if (!empty($filters['method_id'])) {
+            $query->where('method_id', (int)$filters['method_id']);
+        }
+        if (!empty($filters['channel_id'])) {
+            $query->where('channel_id', (int)$filters['channel_id']);
+        }
+        if (($filters['status'] ?? '') !== '' && $filters['status'] !== null) {
+            $query->where('status', (int)$filters['status']);
+        }
+        if (!empty($filters['order_id'])) {
+            $query->where('order_id', 'like', '%' . $filters['order_id'] . '%');
+        }
+        if (!empty($filters['mch_order_no'])) {
+            $query->where('mch_order_no', 'like', '%' . $filters['mch_order_no'] . '%');
+        }
+        if (!empty($filters['created_from'])) {
+            $query->where('created_at', '>=', $filters['created_from']);
+        }
+        if (!empty($filters['created_to'])) {
+            $query->where('created_at', '<=', $filters['created_to']);
+        }
+
+        $query->orderByDesc('id');
+        return $query->paginate($pageSize, ['*'], 'page', $page);
+    }
 }

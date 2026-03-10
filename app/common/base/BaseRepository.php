@@ -62,11 +62,8 @@ abstract class BaseRepository
     {
         $query = $this->model->newQuery();
 
-        foreach ($where as $field => $value) {
-            if ($value === null || $value === '') {
-                continue;
-            }
-            $query->where($field, $value);
+        if (!empty($where)) {
+            $query->where($where);
         }
 
         return $query->paginate($pageSize, $columns, 'page', $page);

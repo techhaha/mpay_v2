@@ -39,7 +39,8 @@
     "workerman/crontab": "^1.0",
     "webman/redis-queue": "^2.1",
     "firebase/php-jwt": "^7.0",
-    "webman/validation": "^2.2"
+    "webman/validation": "^2.2",
+    "illuminate/pagination": "^12.53"
   },
   "suggest": {
     "ext-event": "For better performance. "

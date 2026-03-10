@@ -42,6 +42,30 @@ class BaseController
     }
 
     /**
+     * 统一分页返回结构
+     *
+     * @param mixed $paginator Laravel/Eloquent paginator
+     */
+    protected function page(mixed $paginator): Response
+    {
+        if (!is_object($paginator) || !method_exists($paginator, 'items')) {
+            return $this->success([
+                'list' => [],
+                'total' => 0,
+                'page' => 1,
+                'size' => 10,
+            ]);
+        }
+
+        return $this->success([
+            'list'         => $paginator->items(),
+            'total'        => $paginator->total(),
+            'page'         => $paginator->currentPage(),
+            'size'         => $paginator->perPage(),
+        ]);
+    }
+
+    /**
      * 获取当前登录用户的 token 载荷
      *
      * 从 AuthMiddleware 注入的用户信息中获取

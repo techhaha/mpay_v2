@@ -17,6 +17,12 @@ use Webman\Route;
 use support\Response;
 use support\Request;
 
+// 管理后台路由
+require_once base_path() . '/app/routes/admin.php';
+
+// API 路由
+require_once base_path() . '/app/routes/api.php';
+
 // 匹配所有options路由（CORS 预检请求）
 Route::options('[{path:.+}]', function (Request $request){
     $response = response('', 204);
@@ -27,13 +33,6 @@ Route::options('[{path:.+}]', function (Request $request){
         'Access-Control-Allow-Headers' => $request->header('access-control-request-headers', '*'),
     ]);
 });
-
-// 管理后台路由
-require_once base_path() . '/app/routes/admin.php';
-
-// API 路由
-require_once base_path() . '/app/routes/api.php';
-
 /**
  * 关闭默认路由
  */

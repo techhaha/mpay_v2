@@ -31,4 +31,36 @@ class PaymentMethodRepository extends BaseRepository
             ->where('status', 1)
             ->first();
     }
+
+    /**
+     * 后台按 code 查询（不过滤状态）
+     */
+    public function findAnyByCode(string $methodCode): ?PaymentMethod
+    {
+        return $this->model->newQuery()
+            ->where('method_code', $methodCode)
+            ->first();
+    }
+
+    /**
+     * 后台列表：支持筛选与排序
+     */
+    public function searchPaginate(array $filters = [], int $page = 1, int $pageSize = 10)
+    {
+        $query = $this->model->newQuery();
+
+        if (($filters['status'] ?? '') !== '' && $filters['status'] !== null) {
+            $query->where('status', (int)$filters['status']);
+        }
+        if (!empty($filters['method_code'])) {
+            $query->where('method_code', 'like', '%' . $filters['method_code'] . '%');
+        }
+        if (!empty($filters['method_name'])) {
+            $query->where('method_name', 'like', '%' . $filters['method_name'] . '%');
+        }
+
+        $query->orderBy('sort', 'asc')->orderByDesc('id');
+
+        return $query->paginate($pageSize, ['*'], 'page', $page);
+    }
 }
