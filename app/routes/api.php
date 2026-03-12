@@ -6,7 +6,6 @@
 
 use Webman\Route;
 use app\http\api\controller\EpayController;
-use app\http\api\middleware\EpayAuthMiddleware;
 
 Route::group('', function () {
     // 页面跳转支付
@@ -17,4 +16,4 @@ Route::group('', function () {
 
     // API接口
     Route::get('/api.php', [EpayController::class, 'api']);
-})->middleware([EpayAuthMiddleware::class]);
+});

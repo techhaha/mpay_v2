@@ -22,7 +22,11 @@ class EpayController extends BaseController
      */
     public function submit(Request $request)
     {
-        $data = array_merge($request->get(), $request->post());
+        $data = match ($request->method()) {
+            'GET'  => $request->get(),
+            'POST' => $request->post(),
+            default => array_merge($request->get(), $request->post()),
+        };
 
         try {
             // 参数校验（使用自定义 Validator + 场景）
@@ -40,6 +44,9 @@ class EpayController extends BaseController
             }
 
             if (($payParams['type'] ?? '') === 'form') {
+                if (!empty($payParams['html'])) {
+                    return response($payParams['html'])->withHeaders(['Content-Type' => 'text/html; charset=UTF-8']);
+                }
                 return $this->renderForm($payParams);
             }
 

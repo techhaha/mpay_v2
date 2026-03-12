@@ -42,7 +42,9 @@ ON DUPLICATE KEY UPDATE
 
 -- 5) 插件注册表（按项目约定：app\\common\\payment\\{Code}Payment）
 INSERT INTO `ma_pay_plugin` (`plugin_code`, `plugin_name`, `class_name`, `status`, `created_at`, `updated_at`)
-VALUES ('lakala', '拉卡拉（示例）', 'app\\\\common\\\\payment\\\\LakalaPayment', 1, NOW(), NOW())
+VALUES 
+  ('lakala', '拉卡拉（示例）', 'app\\\\common\\\\payment\\\\LakalaPayment', 1, NOW(), NOW()),
+  ('alipay',  '支付宝直连',   'app\\\\common\\\\payment\\\\AlipayPayment', 1, NOW(), NOW())
 ON DUPLICATE KEY UPDATE
   `plugin_name` = VALUES(`plugin_name`),
   `class_name`  = VALUES(`class_name`),

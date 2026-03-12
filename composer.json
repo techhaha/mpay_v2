@@ -40,7 +40,8 @@
     "webman/redis-queue": "^2.1",
     "firebase/php-jwt": "^7.0",
     "webman/validation": "^2.2",
-    "illuminate/pagination": "^12.53"
+    "illuminate/pagination": "^12.53",
+    "yansongda/pay": "~3.7.0"
   },
   "suggest": {
     "ext-event": "For better performance. "

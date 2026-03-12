@@ -55,8 +55,9 @@ class PaymentOrder extends BaseModel
         'expire_at' => 'datetime',
     ];
 
-    const STATUS_PENDING = 0;
-    const STATUS_SUCCESS = 1;
-    const STATUS_FAIL = 2;
-    const STATUS_CLOSED = 3;
+    /* 订单状态 */
+    const STATUS_PENDING = 0; // 待支付
+    const STATUS_SUCCESS = 1; // 支付成功
+    const STATUS_FAIL = 2; // 支付失败
+    const STATUS_CLOSED = 3; // 已关闭
 }

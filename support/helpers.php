@@ -36,3 +36,24 @@ if (!function_exists('container_make')) {
         return Container::make($name, $parameters);
     }
 }
+
+if (!function_exists('sys_config')) {
+    /**
+     * 获取系统配置项（带默认值）
+     *
+     * 读取来源：ma_system_config 表，通过 SystemConfigService + 缓存。
+     *
+     * @param string $key     配置键名（config_key）
+     * @param mixed  $default 默认值（未配置或为 null 时返回）
+     * @return mixed
+     *
+     * @example
+     * $siteName = sys_config('site_name', 'MyPay');
+     */
+    function sys_config(string $key, mixed $default = null): mixed
+    {
+        /** @var \app\services\SystemConfigService $service */
+        $service = Container::get(\app\services\SystemConfigService::class);
+        return $service->getValue($key, $default);
+    }
+}

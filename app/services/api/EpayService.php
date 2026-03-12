@@ -3,11 +3,12 @@
 namespace app\services\api;
 
 use app\common\base\BaseService;
+use app\common\utils\EpayUtil;
 use app\services\PayOrderService;
 use app\services\PayService;
 use app\repositories\{MerchantAppRepository, PaymentMethodRepository, PaymentOrderRepository};
 use app\models\PaymentOrder;
-use app\exceptions\{BadRequestException, NotFoundException};
+use app\exceptions\{BadRequestException, NotFoundException, UnauthorizedException};
 use support\Request;
 
 /**
@@ -37,7 +38,7 @@ class EpayService extends BaseService
             throw new BadRequestException('暂不支持收银台模式，请指定支付方式 type');
         }
 
-        return $this->createUnifiedOrder($data, $request);
+        return $this->createOrder($data, $request);
     }
 
     /**
@@ -49,7 +50,7 @@ class EpayService extends BaseService
      */
     public function mapi(array $data, Request $request): array
     {
-        $result = $this->createUnifiedOrder($data, $request);
+        $result = $this->createOrder($data, $request);
         $payParams = $result['pay_params'] ?? [];
 
         $response = [
@@ -142,7 +143,7 @@ class EpayService extends BaseService
             'trade_no'     => $order->order_id,
             'out_trade_no' => $order->mch_order_no,
             'api_trade_no' => $order->chan_trade_no ?? '',
-            'type'         => $this->mapMethodToEpayType($methodCode),
+            'type'         => $methodCode,
             'pid'          => (int)$pid,
             'addtime'      => $order->created_at,
             'endtime'      => $order->pay_at,
@@ -210,11 +211,11 @@ class EpayService extends BaseService
      * @param Request $request
      * @return array
      */
-    private function createUnifiedOrder(array $data, Request $request): array
+    private function createOrder(array $data, Request $request): array
     {
         $pid = (int)($data['pid'] ?? 0);
         if ($pid <= 0) {
-            throw new BadRequestException('商户ID不能为空');
+            throw new BadRequestException('应用ID不能为空');
         }
 
         // 根据 pid 映射应用（约定 pid = app_id）
@@ -223,14 +224,21 @@ class EpayService extends BaseService
             throw new NotFoundException('商户应用不存在或已禁用');
         }
 
-        $methodCode = $this->mapEpayTypeToMethod($data['type'] ?? '');
+        // 易支付签名校验：使用 app_secret 作为 key
+        $signType = strtolower((string)($data['sign_type'] ?? 'md5'));
+        if ($signType !== 'md5') {
+            throw new BadRequestException('不支持的签名类型：' . ($data['sign_type'] ?? ''));
+        }
+        if (!EpayUtil::verify($data, (string)$app->app_secret)) {
+            throw new UnauthorizedException('签名验证失败');
+        }
+
         $orderData  = [
-            'merchant_id'  => $app->merchant_id,
+            'mch_id'       => $app->merchant_id,
             'app_id'       => $app->id,
             'mch_order_no' => $data['out_trade_no'],
-            'method_code'  => $methodCode,
-            'amount'       => (float)$data['money'],
-            'currency'     => 'CNY',
+            'pay_type'     => $data['type'],
+            'amount'       => sprintf('%.2f', (float)$data['money']),
             'subject'      => $data['name'],
             'body'         => $data['name'],
             'client_ip'    => $data['clientip'] ?? $request->getRemoteIp(),
@@ -242,24 +250,10 @@ class EpayService extends BaseService
         ];
 
         // 调用通用支付服务完成通道选择与插件下单
-        return $this->payService->unifiedPay($orderData, [
+        return $this->payService->pay($orderData, [
             'device'  => $data['device'] ?? '',
             'request' => $request,
         ]);
-    }
-
-    /**
-     * 映射易支付 type 到内部 method_code
-     */
-    private function mapEpayTypeToMethod(string $type): string
-    {
-        $mapping = [
-            'alipay' => 'alipay',
-            'wxpay'  => 'wechat',
-            'qqpay'  => 'qq',
-        ];
-
-        return $mapping[$type] ?? $type;
     }
 
     /**
@@ -270,19 +264,4 @@ class EpayService extends BaseService
         $method = $this->methodRepository->find($order->method_id);
         return $method ? $method->method_code : '';
     }
-
-    /**
-     * 映射内部 method_code 到易支付 type
-     */
-    private function mapMethodToEpayType(string $methodCode): string
-    {
-        $mapping = [
-            'alipay' => 'alipay',
-            'wechat' => 'wxpay',
-            'qq'     => 'qqpay',
-        ];
-
-        return $mapping[$methodCode] ?? $methodCode;
-    }
-
 }

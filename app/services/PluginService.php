@@ -3,7 +3,8 @@
 namespace app\services;
 
 use app\common\base\BaseService;
-use app\common\contracts\AbstractPayPlugin;
+use app\common\contracts\PaymentInterface;
+use app\common\contracts\PayPluginInterface;
 use app\exceptions\NotFoundException;
 use app\repositories\PaymentPluginRepository;
 
@@ -36,8 +37,8 @@ class PluginService extends BaseService
                 $plugin = $this->resolvePlugin($pluginCode, $row->class_name);
                 $plugins[] = [
                     'code'             => $pluginCode,
-                    'name'             => $plugin::getName(),
-                    'supported_methods'=> $plugin::getSupportedMethods(),
+                    'name'             => $plugin->getName(),
+                    'supported_methods'=> $plugin->getEnabledPayTypes(),
                 ];
             } catch (\Throwable $e) {
                 // 忽略无法实例化的插件
@@ -54,7 +55,7 @@ class PluginService extends BaseService
     public function getConfigSchema(string $pluginCode, string $methodCode): array
     {
         $plugin = $this->getPluginInstance($pluginCode);
-        return $plugin::getConfigSchema($methodCode);
+        return $plugin->getConfigSchema();
     }
 
     /**
@@ -62,8 +63,12 @@ class PluginService extends BaseService
      */
     public function getSupportedProducts(string $pluginCode, string $methodCode): array
     {
+        /** @var mixed $plugin */
         $plugin = $this->getPluginInstance($pluginCode);
-        return $plugin::getSupportedProducts($methodCode);
+        if (method_exists($plugin, 'getSupportedProducts')) {
+            return (array)$plugin->getSupportedProducts($methodCode);
+        }
+        return [];
     }
 
     /**
@@ -72,7 +77,7 @@ class PluginService extends BaseService
     public function buildConfigFromForm(string $pluginCode, string $methodCode, array $formData): array
     {
         $plugin       = $this->getPluginInstance($pluginCode);
-        $configSchema = $plugin::getConfigSchema($methodCode);
+        $configSchema = $plugin->getConfigSchema();
 
         $configJson = [];
         if (isset($configSchema['fields']) && is_array($configSchema['fields'])) {
@@ -90,7 +95,7 @@ class PluginService extends BaseService
     /**
      * 对外统一提供：根据插件编码获取插件实例
      */
-    public function getPluginInstance(string $pluginCode): AbstractPayPlugin
+    public function getPluginInstance(string $pluginCode): PaymentInterface&PayPluginInterface
     {
         $row = $this->pluginRepository->findActiveByCode($pluginCode);
         if (!$row) {
@@ -103,7 +108,7 @@ class PluginService extends BaseService
     /**
      * 根据插件编码和 class_name 解析并实例化插件
      */
-    private function resolvePlugin(string $pluginCode, ?string $className = null): AbstractPayPlugin
+    private function resolvePlugin(string $pluginCode, ?string $className = null): PaymentInterface&PayPluginInterface
     {
         $class = $className ?: 'app\\common\\payment\\' . ucfirst($pluginCode) . 'Payment';
 
@@ -112,7 +117,7 @@ class PluginService extends BaseService
         }
 
         $plugin = new $class();
-        if (!$plugin instanceof AbstractPayPlugin) {
+        if (!$plugin instanceof PaymentInterface || !$plugin instanceof PayPluginInterface) {
             throw new NotFoundException('支付插件类型错误：' . $class);
         }
 

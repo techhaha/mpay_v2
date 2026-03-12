@@ -6,6 +6,7 @@ use app\common\base\BaseService;
 use app\exceptions\{BadRequestException, NotFoundException};
 use app\models\PaymentOrder;
 use app\repositories\{MerchantAppRepository, PaymentChannelRepository, PaymentMethodRepository, PaymentOrderRepository};
+use Illuminate\Database\QueryException;
 
 /**
  * 支付订单服务
@@ -28,11 +29,11 @@ class PayOrderService extends BaseService
     public function createOrder(array $data)
     {
         // 1. 基本参数校验
-        $mchId = (int)($data['mch_id'] ?? $data['merchant_id'] ?? 0);
+        $mchId = (int)($data['mch_id'] ?? 0);
         $appId = (int)($data['app_id'] ?? 0);
-        $mchNo = trim((string)($data['mch_no'] ?? $data['mch_order_no'] ?? ''));
-        $methodCode = trim((string)($data['method_code'] ?? ''));
-        $amount = (float)($data['amount'] ?? 0);
+        $mchNo = trim((string)($data['mch_order_no'] ?? ''));
+        $payType = trim((string)($data['pay_type'] ?? ''));
+        $amountFloat = (float)($data['amount'] ?? 0);
         $subject = trim((string)($data['subject'] ?? ''));
 
         if ($mchId <= 0 || $appId <= 0) {
@@ -41,10 +42,10 @@ class PayOrderService extends BaseService
         if ($mchNo === '') {
             throw new BadRequestException('商户订单号不能为空');
         }
-        if ($methodCode === '') {
+        if ($payType === '') {
             throw new BadRequestException('支付方式不能为空');
         }
-        if ($amount <= 0) {
+        if ($amountFloat <= 0) {
             throw new BadRequestException('订单金额必须大于0');
         }
         if ($subject === '') {
@@ -52,12 +53,13 @@ class PayOrderService extends BaseService
         }
 
         // 2. 查询支付方式ID
-        $method = $this->methodRepository->findByCode($methodCode);
+        $method = $this->methodRepository->findByCode($payType);
         if (!$method) {
             throw new BadRequestException('支付方式不存在');
         }
 
         // 3. 幂等校验：同一商户应用下相同商户订单号只保留一条
+        // 先查一次（减少异常成本），并发场景再用唯一键冲突兜底
         $existing = $this->orderRepository->findByMchNo($mchId, $appId, $mchNo);
         if ($existing) {
             return $existing;
@@ -65,25 +67,34 @@ class PayOrderService extends BaseService
 
         // 4. 生成系统订单号
         $orderId = $this->generateOrderId();
+        $amount = sprintf('%.2f', $amountFloat);
 
         // 5. 创建订单
-        return $this->orderRepository->create([
-            'order_id' => $orderId,
-            'merchant_id' => $mchId,
-            'merchant_app_id' => $appId,
-            'mch_order_no' => $mchNo,
-            'method_id' => $method->id,
-            'channel_id' => $data['channel_id'] ?? $data['chan_id'] ?? 0,
-            'amount' => $amount,
-            'real_amount' => $amount,
-            'fee' => $data['fee'] ?? 0.00,
-            'subject' => $subject,
-            'body' => $data['body'] ?? $subject,
-            'status' => PaymentOrder::STATUS_PENDING,
-            'client_ip' => $data['client_ip'] ?? '',
-            'expire_at' => $data['expire_at'] ?? $data['expire_time'] ?? date('Y-m-d H:i:s', time() + 1800),
-            'extra' => $data['extra'] ?? [],
-        ]);
+        $expireTime = (int)sys_config('order_expire_time', 0); // 0 表示不设置过期时间
+        try {
+            return $this->orderRepository->create([
+                'order_id' => $orderId,
+                'merchant_id' => $mchId,
+                'merchant_app_id' => $appId,
+                'mch_order_no' => $mchNo,
+                'method_id' => $method->id,
+                'amount' => $amount,
+                'real_amount' => $amount,
+                'subject' => $subject,
+                'body' => $data['body'] ?? $subject,
+                'status' => PaymentOrder::STATUS_PENDING,
+                'client_ip' => $data['client_ip'] ?? '',
+                'expire_at' => $expireTime > 0 ? date('Y-m-d H:i:s', time() + $expireTime) : null,
+                'extra' => $data['extra'] ?? [],
+            ]);
+        } catch (QueryException $e) {
+            // 并发场景：唯一键 uk_mch_order 冲突时回查返回已有订单
+            $existing = $this->orderRepository->findByMchNo($mchId, $appId, $mchNo);
+            if ($existing) {
+                return $existing;
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -142,7 +153,7 @@ class PayOrderService extends BaseService
             $channel->getConfigArray(),
             ['enabled_products' => $channel->getEnabledProducts()]
         );
-        $plugin->init($method->method_code, $channelConfig);
+        $plugin->init($channelConfig);
 
         // 7. 调用插件退款
         $refundData = [
@@ -153,7 +164,7 @@ class PayOrderService extends BaseService
             'refund_reason' => $data['refund_reason'] ?? '',
         ];
 
-        $refundResult = $plugin->refund($refundData, $channelConfig);
+        $refundResult = $plugin->refund($refundData);
 
         // 8. 如果是全额退款则关闭订单
         if ($refundAmount >= $order->amount) {

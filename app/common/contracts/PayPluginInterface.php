@@ -1,103 +1,49 @@
 <?php
+declare(strict_types=1);
 
 namespace app\common\contracts;
 
 /**
- * 支付插件接口
- * 
- * 所有支付插件必须实现此接口
+ * 支付插件“基础契约”接口
+ *
+ * 职责边界：
+ * - `PayPluginInterface`：插件生命周期 + 元信息（后台可展示/可配置/可路由）。
+ * - `PaymentInterface`：支付动作能力（下单/查询/关单/退款/回调）。
+ *
+ * 约定：
+ * - `init()` 会在每次发起支付/退款等动作前由服务层调用，用于注入该通道的 `config_json`。
+ * - 元信息方法应为“纯读取”，不要依赖外部状态或数据库。
  */
 interface PayPluginInterface
 {
     /**
-     * 获取插件代码（唯一标识）
-     * 
-     * @return string
+     * 初始化插件（注入通道配置）
+     *
+     * 典型来源：`ma_pay_channel.config_json`（以及服务层合并的 enabled_products 等）。
+     * 插件应在这里完成：缓存配置、初始化 SDK/HTTP 客户端等。
+     *
+     * @param array<string, mixed> $channelConfig
      */
-    public static function getCode(): string;
-    
+    public function init(array $channelConfig): void;
+
+    /** 插件代码（与 ma_pay_plugin.plugin_code 对应） */
+    public function getCode(): string;
+
+    /** 插件名称（用于后台展示） */
+    public function getName(): string;
+
     /**
-     * 获取插件名称
-     * 
-     * @return string
+     * 插件声明支持的支付方式编码
+     *
+     * @return array<string>
      */
-    public static function getName(): string;
-    
+    public function getEnabledPayTypes(): array;
+
     /**
-     * 获取插件支持的支付方式列表
-     * 
-     * @return array<string> 支付方式代码数组，如 ['alipay', 'wechat']
+     * 插件配置结构（用于后台渲染表单/校验）
+     *
+     * @return array<string, mixed>
      */
-    public static function getSupportedMethods(): array;
-    
-    /**
-     * 获取指定支付方式支持的产品列表
-     * 
-     * @param string $methodCode 支付方式代码
-     * @return array<string, string> 产品代码 => 产品名称
-     */
-    public static function getSupportedProducts(string $methodCode): array;
-    
-    /**
-     * 获取指定支付方式的配置表单结构
-     * 
-     * @param string $methodCode 支付方式代码
-     * @return array 表单字段定义数组
-     */
-    public static function getConfigSchema(string $methodCode): array;
-    
-    /**
-     * 初始化插件（切换到指定支付方式）
-     * 
-     * @param string $methodCode 支付方式代码
-     * @param array $channelConfig 通道配置
-     * @return void
-     */
-    public function init(string $methodCode, array $channelConfig): void;
-    
-    /**
-     * 统一下单
-     * 
-     * @param array $orderData 订单数据
-     * @param array $channelConfig 通道配置
-     * @param string $requestEnv 请求环境（PC/H5/WECHAT/ALIPAY_CLIENT）
-     * @return array 支付结果，包含：
-     *   - product_code: 选择的产品代码
-     *   - channel_order_no: 渠道订单号（如果有）
-     *   - pay_params: 支付参数（根据产品类型不同，结构不同）
-     */
-    public function unifiedOrder(array $orderData, array $channelConfig, string $requestEnv): array;
-    
-    /**
-     * 查询订单
-     * 
-     * @param array $orderData 订单数据（至少包含 pay_order_id 或 channel_order_no）
-     * @param array $channelConfig 通道配置
-     * @return array 订单状态信息
-     */
-    public function query(array $orderData, array $channelConfig): array;
-    
-    /**
-     * 退款
-     * 
-     * @param array $refundData 退款数据
-     * @param array $channelConfig 通道配置
-     * @return array 退款结果
-     */
-    public function refund(array $refundData, array $channelConfig): array;
-    
-    /**
-     * 解析回调通知
-     * 
-     * @param array $requestData 回调请求数据
-     * @param array $channelConfig 通道配置
-     * @return array 解析结果，包含：
-     *   - status: 订单状态（SUCCESS/FAIL/PENDING）
-     *   - pay_order_id: 系统订单号
-     *   - channel_trade_no: 渠道交易号
-     *   - amount: 支付金额
-     *   - pay_time: 支付时间
-     */
-    public function parseNotify(array $requestData, array $channelConfig): array;
+    public function getConfigSchema(): array;
 }
 

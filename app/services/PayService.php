@@ -3,10 +3,10 @@
 namespace app\services;
 
 use app\common\base\BaseService;
+use app\common\contracts\PayPluginInterface;
 use app\exceptions\NotFoundException;
 use app\models\PaymentOrder;
 use app\repositories\{PaymentMethodRepository, PaymentOrderRepository};
-use app\common\contracts\AbstractPayPlugin;
 use support\Request;
 
 /**
@@ -37,7 +37,7 @@ class PayService extends BaseService
      *   - mch_no
      *   - pay_params
      */
-    public function unifiedPay(array $orderData, array $options = []): array
+    public function pay(array $orderData, array $options = []): array
     {
         // 1. 创建订单（幂等）
         /** @var PaymentOrder $order */
@@ -63,7 +63,7 @@ class PayService extends BaseService
             $channel->getConfigArray(),
             ['enabled_products' => $channel->getEnabledProducts()]
         );
-        $plugin->init($method->method_code, $channelConfig);
+        $plugin->init($channelConfig);
 
         // 5. 环境检测
         $device = $options['device'] ?? '';
@@ -75,23 +75,27 @@ class PayService extends BaseService
         } elseif ($request instanceof Request) {
             $env = $this->detectEnvironment($request);
         } else {
-            $env = AbstractPayPlugin::ENV_PC;
+            $env = 'pc';
         }
 
         // 6. 调用插件统一下单
         $pluginOrderData = [
             'order_id' => $order->order_id,
-            'mch_no' => $order->mch_order_no,
-            'amount' => $order->amount,
-            'subject' => $order->subject,
-            'body' => $order->body,
+            'mch_no'   => $order->mch_order_no,
+            'amount'   => $order->amount,
+            'subject'  => $order->subject,
+            'body'     => $order->body,
+            'extra'    => $order->extra ?? [],
+            '_env'     => $env,
         ];
 
-        $payResult = $plugin->unifiedOrder($pluginOrderData, $channelConfig, $env);
+        $payResult = $plugin->pay($pluginOrderData);
 
         // 7. 计算实际支付金额（扣除手续费）
-        $fee = $order->fee > 0 ? $order->fee : ($order->amount * ($channel->chan_cost / 100));
-        $realAmount = $order->amount - $fee;
+        $amount = (float)$order->amount;
+        $chanCost = (float)$channel->chan_cost;
+        $fee = ((float)$order->fee) > 0 ? (float)$order->fee : round($amount * ($chanCost / 100), 2);
+        $realAmount = round($amount - $fee, 2);
 
         // 8. 更新订单（通道、支付参数、实际金额）
         $extra = $order->extra ?? [];
@@ -103,8 +107,8 @@ class PayService extends BaseService
             'channel_id' => $channel->id,
             'chan_order_no' => $chanOrderNo,
             'chan_trade_no' => $chanTradeNo,
-            'real_amount' => $realAmount,
-            'fee' => $fee,
+            'real_amount' => sprintf('%.2f', $realAmount),
+            'fee' => sprintf('%.2f', $fee),
             'extra' => $extra,
         ]);
 
@@ -123,21 +127,21 @@ class PayService extends BaseService
         $ua = strtolower($request->header('User-Agent', ''));
 
         if (strpos($ua, 'alipayclient') !== false) {
-            return AbstractPayPlugin::ENV_ALIPAY_CLIENT;
+            return 'alipay';
         }
 
         if (strpos($ua, 'micromessenger') !== false) {
-            return AbstractPayPlugin::ENV_WECHAT;
+            return 'wechat';
         }
 
         $mobileKeywords = ['mobile', 'android', 'iphone', 'ipad', 'ipod', 'blackberry', 'windows phone'];
         foreach ($mobileKeywords as $keyword) {
             if (strpos($ua, $keyword) !== false) {
-                return AbstractPayPlugin::ENV_H5;
+                return 'h5';
             }
         }
 
-        return AbstractPayPlugin::ENV_PC;
+        return 'pc';
     }
 
     /**
@@ -146,15 +150,15 @@ class PayService extends BaseService
     private function mapDeviceToEnv(string $device): string
     {
         $mapping = [
-            'pc'     => AbstractPayPlugin::ENV_PC,
-            'mobile' => AbstractPayPlugin::ENV_H5,
-            'qq'     => AbstractPayPlugin::ENV_H5,
-            'wechat' => AbstractPayPlugin::ENV_WECHAT,
-            'alipay' => AbstractPayPlugin::ENV_ALIPAY_CLIENT,
-            'jump'   => AbstractPayPlugin::ENV_PC,
+            'pc'     => 'pc',
+            'mobile' => 'h5',
+            'qq'     => 'h5',
+            'wechat' => 'wechat',
+            'alipay' => 'alipay',
+            'jump'   => 'pc',
         ];
 
-        return $mapping[strtolower($device)] ?? AbstractPayPlugin::ENV_PC;
+        return $mapping[strtolower($device)] ?? 'pc';
     }
 }
 
