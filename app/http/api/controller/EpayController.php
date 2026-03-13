@@ -25,7 +25,7 @@ class EpayController extends BaseController
         $data = match ($request->method()) {
             'GET'  => $request->get(),
             'POST' => $request->post(),
-            default => array_merge($request->get(), $request->post()),
+            default => $request->all(),
         };
 
         try {
