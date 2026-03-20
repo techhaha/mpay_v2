@@ -19,13 +19,20 @@ class PaymentPluginRepository extends BaseRepository
     {
         return $this->model->newQuery()
             ->where('status', 1)
-            ->get(['plugin_code', 'class_name']);
+            ->get([
+                'code',
+                'name',
+                'class_name',
+                'pay_types',
+                'transfer_types',
+                'config_schema',
+            ]);
     }
 
     public function findActiveByCode(string $pluginCode): ?PaymentPlugin
     {
         return $this->model->newQuery()
-            ->where('plugin_code', $pluginCode)
+            ->where('code', $pluginCode)
             ->where('status', 1)
             ->first();
     }
@@ -36,7 +43,7 @@ class PaymentPluginRepository extends BaseRepository
     public function findByCode(string $pluginCode): ?PaymentPlugin
     {
         return $this->model->newQuery()
-            ->where('plugin_code', $pluginCode)
+            ->where('code', $pluginCode)
             ->first();
     }
 
@@ -51,10 +58,10 @@ class PaymentPluginRepository extends BaseRepository
             $query->where('status', (int)$filters['status']);
         }
         if (!empty($filters['plugin_code'])) {
-            $query->where('plugin_code', 'like', '%' . $filters['plugin_code'] . '%');
+            $query->where('code', 'like', '%' . $filters['plugin_code'] . '%');
         }
         if (!empty($filters['plugin_name'])) {
-            $query->where('plugin_name', 'like', '%' . $filters['plugin_name'] . '%');
+            $query->where('name', 'like', '%' . $filters['plugin_name'] . '%');
         }
 
         $query->orderByDesc('created_at');
@@ -69,12 +76,12 @@ class PaymentPluginRepository extends BaseRepository
         $row = $this->findByCode($pluginCode);
         if ($row) {
             $this->model->newQuery()
-                ->where('plugin_code', $pluginCode)
+                ->where('code', $pluginCode)
                 ->update($data);
             return $this->findByCode($pluginCode) ?: $row;
         }
 
-        $data['plugin_code'] = $pluginCode;
+        $data['code'] = $pluginCode;
         /** @var PaymentPlugin $created */
         $created = $this->create($data);
         return $created;
@@ -83,7 +90,7 @@ class PaymentPluginRepository extends BaseRepository
     public function updateStatus(string $pluginCode, int $status): bool
     {
         return (bool)$this->model->newQuery()
-            ->where('plugin_code', $pluginCode)
+            ->where('code', $pluginCode)
             ->update(['status' => $status]);
     }
 }

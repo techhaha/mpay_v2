@@ -31,19 +31,29 @@ class PluginService extends BaseService
 
         $plugins = [];
         foreach ($rows as $row) {
-            $pluginCode = $row->plugin_code;
+            $pluginCode = $row->code;
 
-            try {
-                $plugin = $this->resolvePlugin($pluginCode, $row->class_name);
-                $plugins[] = [
-                    'code'             => $pluginCode,
-                    'name'             => $plugin->getName(),
-                    'supported_methods'=> $plugin->getEnabledPayTypes(),
-                ];
-            } catch (\Throwable $e) {
-                // 忽略无法实例化的插件
-                continue;
+            $pluginName = (string)($row->name ?? '');
+            $supportedMethods = is_array($row->pay_types ?? null) ? (array)$row->pay_types : [];
+
+            // 如果数据库里缺少元信息，则回退到实例化插件并写回数据库
+            if ($pluginName === '' || $supportedMethods === []) {
+                try {
+                    $plugin = $this->resolvePlugin($pluginCode, (string)($row->class_name ?? ''));
+                    $this->syncPluginMeta($pluginCode, $plugin);
+                    $pluginName = $plugin->getName();
+                    $supportedMethods = (array)$plugin->getEnabledPayTypes();
+                } catch (\Throwable $e) {
+                    // 忽略无法实例化的插件
+                    continue;
+                }
             }
+
+            $plugins[] = [
+                'code'              => $pluginCode,
+                'name'              => $pluginName,
+                'supported_methods' => $supportedMethods,
+            ];
         }
 
         return $plugins;
@@ -54,8 +64,15 @@ class PluginService extends BaseService
      */
     public function getConfigSchema(string $pluginCode, string $methodCode): array
     {
+        $row = $this->pluginRepository->findActiveByCode($pluginCode);
+        if ($row && is_array($row->config_schema ?? null) && $row->config_schema !== []) {
+            return (array)$row->config_schema;
+        }
+
         $plugin = $this->getPluginInstance($pluginCode);
-        return $plugin->getConfigSchema();
+        $schema = (array)$plugin->getConfigSchema();
+        $this->syncPluginMeta($pluginCode, $plugin);
+        return $schema;
     }
 
     /**
@@ -76,8 +93,7 @@ class PluginService extends BaseService
      */
     public function buildConfigFromForm(string $pluginCode, string $methodCode, array $formData): array
     {
-        $plugin       = $this->getPluginInstance($pluginCode);
-        $configSchema = $plugin->getConfigSchema();
+        $configSchema = $this->getConfigSchema($pluginCode, $methodCode);
 
         $configJson = [];
         if (isset($configSchema['fields']) && is_array($configSchema['fields'])) {
@@ -110,7 +126,11 @@ class PluginService extends BaseService
      */
     private function resolvePlugin(string $pluginCode, ?string $className = null): PaymentInterface&PayPluginInterface
     {
-        $class = $className ?: 'app\\common\\payment\\' . ucfirst($pluginCode) . 'Payment';
+        $class = $className ?: (ucfirst($pluginCode) . 'Payment');
+        // 允许 DB 中只存短类名（如 AlipayPayment），这里统一补全命名空间
+        if ($class !== '' && !str_contains($class, '\\')) {
+            $class = 'app\\common\\payment\\' . $class;
+        }
 
         if (!class_exists($class)) {
             throw new NotFoundException('支付插件类不存在：' . $class);
@@ -122,6 +142,28 @@ class PluginService extends BaseService
         }
 
         return $plugin;
+    }
+
+    /**
+     * 把插件元信息写回数据库，供“列表/Schema 直接从DB读取”
+     */
+    private function syncPluginMeta(string $pluginCode, PaymentInterface&PayPluginInterface $plugin): void
+    {
+        $payTypes = (array)$plugin->getEnabledPayTypes();
+        $transferTypes = method_exists($plugin, 'getEnabledTransferTypes') ? (array)$plugin->getEnabledTransferTypes() : [];
+        $configSchema = (array)$plugin->getConfigSchema();
+
+        $author = method_exists($plugin, 'getAuthorName') ? (string)$plugin->getAuthorName() : '';
+        $link = method_exists($plugin, 'getAuthorLink') ? (string)$plugin->getAuthorLink() : '';
+
+        $this->pluginRepository->upsertByCode($pluginCode, [
+            'name'            => $plugin->getName(),
+            'pay_types'      => $payTypes,
+            'transfer_types' => $transferTypes,
+            'config_schema'  => $configSchema,
+            'author'         => $author,
+            'link'           => $link,
+        ]);
     }
 }
 

@@ -54,11 +54,11 @@ class PayPluginController extends BaseController
 
         if ($className === '') {
             // 默认约定类名
-            $className = 'app\\common\\payment\\' . ucfirst($pluginCode) . 'Payment';
+            $className = ucfirst($pluginCode) . 'Payment';
         }
 
         $this->pluginRepository->upsertByCode($pluginCode, [
-            'plugin_name' => $pluginName,
+            'name' => $pluginName,
             'class_name' => $className,
             'status' => $status,
         ]);

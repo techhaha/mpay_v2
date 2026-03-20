@@ -40,13 +40,13 @@ ON DUPLICATE KEY UPDATE
   `status`      = VALUES(`status`),
   `updated_at`  = NOW();
 
--- 5) 插件注册表（按项目约定：app\\common\\payment\\{Code}Payment）
-INSERT INTO `ma_pay_plugin` (`plugin_code`, `plugin_name`, `class_name`, `status`, `created_at`, `updated_at`)
+-- 5) 插件注册表（按项目约定：类名短写，如 AlipayPayment）
+INSERT INTO `ma_pay_plugin` (`code`, `name`, `class_name`, `status`, `created_at`, `updated_at`)
 VALUES 
-  ('lakala', '拉卡拉（示例）', 'app\\\\common\\\\payment\\\\LakalaPayment', 1, NOW(), NOW()),
-  ('alipay',  '支付宝直连',   'app\\\\common\\\\payment\\\\AlipayPayment', 1, NOW(), NOW())
+  ('lakala', '拉卡拉（示例）', 'LakalaPayment', 1, NOW(), NOW()),
+  ('alipay',  '支付宝直连',   'AlipayPayment', 1, NOW(), NOW())
 ON DUPLICATE KEY UPDATE
-  `plugin_name` = VALUES(`plugin_name`),
+  `name` = VALUES(`name`),
   `class_name`  = VALUES(`class_name`),
   `status`      = VALUES(`status`),
   `updated_at`  = NOW();

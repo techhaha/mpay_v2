@@ -62,13 +62,16 @@ CREATE TABLE `ma_pay_method` (
 -- =======================
 DROP TABLE IF EXISTS `ma_pay_plugin`;
 CREATE TABLE `ma_pay_plugin` (
-  `plugin_code` varchar(32) NOT NULL DEFAULT '' COMMENT '插件编码（主键）',
-  `plugin_name` varchar(50) NOT NULL DEFAULT '' COMMENT '插件名称',
-  `class_name` varchar(255) NOT NULL DEFAULT '' COMMENT '插件类名（完整命名空间）',
+  `code` varchar(32) NOT NULL DEFAULT '' COMMENT '插件编码（主键）',
+  `name` varchar(50) NOT NULL DEFAULT '' COMMENT '插件名称',
+  `class_name` varchar(255) NOT NULL DEFAULT '' COMMENT '插件类名（短类名）',
+  `config_schema` json DEFAULT NULL COMMENT '插件配置schema(JSON)',
+  `pay_types` json DEFAULT NULL COMMENT '插件支持支付类型(JSON)',
+  `transfer_types` json DEFAULT NULL COMMENT '插件支持转账类型(JSON)',
   `status` tinyint(1) NOT NULL DEFAULT 1 COMMENT '状态：0-禁用, 1-启用',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
-  PRIMARY KEY (`plugin_code`)
+  PRIMARY KEY (`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付插件注册表';
 
 -- =======================
