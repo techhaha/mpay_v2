@@ -1,27 +1,26 @@
-[
+﻿[
   {
     "key": "basic",
-    "title": "基础设置",
+    "title": "基础配置",
     "icon": "settings",
-    "description": "配置系统基础信息，包括站点名称、Logo、备案号等",
+    "description": "配置系统基础信息，包括站点名称、Logo、备案号和分页默认值。",
     "sort": 1,
     "disabled": false
   },
   {
     "key": "email",
-    "title": "邮件设置",
+    "title": "邮件配置",
     "icon": "email",
-    "description": "配置邮件服务器相关参数，包括SMTP服务器、端口、账号密码等",
+    "description": "配置 SMTP 主机、端口、账号和发件人信息，用于通知发送与联通检查。",
     "sort": 2,
     "disabled": false
   },
   {
     "key": "permission",
-    "title": "权限设置",
+    "title": "权限配置",
     "icon": "lock",
-    "description": "配置系统权限相关参数，预留权限控制功能",
+    "description": "配置后台权限控制、会话超时、密码强度和登录限制等安全参数。",
     "sort": 3,
     "disabled": false
   }
 ]
-

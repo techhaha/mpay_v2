@@ -7,6 +7,7 @@ use app\common\base\BasePayment;
 use app\common\contracts\PaymentInterface;
 use app\exceptions\PaymentException;
 use support\Request;
+use support\Response;
 
 /**
  * 拉卡拉支付插件（最小可用示例）
@@ -74,5 +75,13 @@ class LakalaPayment extends BasePayment implements PaymentInterface
     {
         throw new PaymentException('LakalaPayment::notify 暂未实现', 402);
     }
-}
+    public function notifySuccess(): string|Response
+    {
+        return 'success';
+    }
 
+    public function notifyFail(): string|Response
+    {
+        return 'fail';
+    }
+}

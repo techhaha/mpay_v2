@@ -1,7 +1,7 @@
-{
+﻿{
   "formId": "basic-config",
-  "title": "基础设置",
-  "submitText": "保存设置",
+  "title": "基础配置",
+  "submitText": "保存配置",
   "submitUrl": "/adminapi/system/base-config/submit/basic",
   "cacheKey": "basic_config_cache",
   "refreshAfterSubmit": true,
@@ -37,10 +37,10 @@
     {
       "type": "input",
       "field": "site_logo",
-      "title": "站点Logo",
+      "title": "站点 Logo",
       "value": "",
       "props": {
-        "placeholder": "请输入Logo地址或上传Logo"
+        "placeholder": "请输入 Logo 地址"
       }
     },
     {
@@ -49,7 +49,7 @@
       "title": "备案号",
       "value": "",
       "props": {
-        "placeholder": "请输入ICP备案号"
+        "placeholder": "请输入 ICP 备案号"
       }
     },
     {
@@ -81,4 +81,3 @@
     }
   ]
 }
-

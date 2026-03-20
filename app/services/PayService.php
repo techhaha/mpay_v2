@@ -42,6 +42,7 @@ class PayService extends BaseService
         // 1. 创建订单（幂等）
         /** @var PaymentOrder $order */
         $order = $this->payOrderService->createOrder($orderData);
+        $extra = $order->extra ?? [];
 
         // 2. 查询支付方式
         $method = $this->methodRepository->find($order->method_id);
@@ -50,11 +51,30 @@ class PayService extends BaseService
         }
 
         // 3. 通道路由
-        $channel = $this->channelRouterService->chooseChannel(
-            $order->merchant_id,
-            $order->merchant_app_id,
-            $order->method_id
-        );
+        try {
+            $routeDecision = $this->channelRouterService->chooseChannelWithDecision(
+                (int)$order->merchant_id,
+                (int)$order->merchant_app_id,
+                (int)$order->method_id,
+                (float)$order->amount
+            );
+        } catch (\Throwable $e) {
+            $extra['route_error'] = [
+                'message' => $e->getMessage(),
+                'at' => date('Y-m-d H:i:s'),
+            ];
+            $this->orderRepository->updateById((int)$order->id, ['extra' => $extra]);
+            throw $e;
+        }
+
+        /** @var \app\models\PaymentChannel $channel */
+        $channel = $routeDecision['channel'];
+        unset($extra['route_error']);
+        $extra['routing'] = $this->buildRoutingSnapshot($routeDecision, $channel);
+        $this->orderRepository->updateById((int)$order->id, [
+            'channel_id' => (int)$channel->id,
+            'extra' => $extra,
+        ]);
 
         // 4. 实例化插件并初始化（通过插件服务）
         $plugin = $this->pluginService->getPluginInstance($channel->plugin_code);
@@ -85,7 +105,7 @@ class PayService extends BaseService
             'amount'   => $order->amount,
             'subject'  => $order->subject,
             'body'     => $order->body,
-            'extra'    => $order->extra ?? [],
+            'extra'    => $extra,
             '_env'     => $env,
         ];
 
@@ -98,7 +118,6 @@ class PayService extends BaseService
         $realAmount = round($amount - $fee, 2);
 
         // 8. 更新订单（通道、支付参数、实际金额）
-        $extra = $order->extra ?? [];
         $extra['pay_params'] = $payResult['pay_params'] ?? null;
         $chanOrderNo = $payResult['chan_order_no'] ?? $payResult['channel_order_no'] ?? '';
         $chanTradeNo = $payResult['chan_trade_no'] ?? $payResult['channel_trade_no'] ?? '';
@@ -116,6 +135,35 @@ class PayService extends BaseService
             'order_id' => $order->order_id,
             'mch_no' => $order->mch_order_no,
             'pay_params' => $payResult['pay_params'] ?? null,
+        ];
+    }
+
+    private function buildRoutingSnapshot(array $routeDecision, \app\models\PaymentChannel $channel): array
+    {
+        $policy = is_array($routeDecision['policy'] ?? null) ? $routeDecision['policy'] : null;
+        $candidates = [];
+        foreach (($routeDecision['candidates'] ?? []) as $candidate) {
+            $candidates[] = [
+                'channel_id' => (int)($candidate['channel_id'] ?? 0),
+                'chan_code' => (string)($candidate['chan_code'] ?? ''),
+                'chan_name' => (string)($candidate['chan_name'] ?? ''),
+                'available' => (bool)($candidate['available'] ?? false),
+                'priority' => (int)($candidate['priority'] ?? 0),
+                'weight' => (int)($candidate['weight'] ?? 0),
+                'role' => (string)($candidate['role'] ?? ''),
+                'reasons' => array_values($candidate['reasons'] ?? []),
+            ];
+        }
+
+        return [
+            'source' => (string)($routeDecision['source'] ?? 'fallback'),
+            'route_mode' => (string)($routeDecision['route_mode'] ?? 'sort'),
+            'policy' => $policy,
+            'selected_channel_id' => (int)$channel->id,
+            'selected_channel_code' => (string)$channel->chan_code,
+            'selected_channel_name' => (string)$channel->chan_name,
+            'candidates' => array_slice($candidates, 0, 10),
+            'selected_at' => date('Y-m-d H:i:s'),
         ];
     }
 

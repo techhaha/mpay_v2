@@ -1,7 +1,7 @@
-{
+﻿{
   "formId": "permission-config",
-  "title": "权限设置",
-  "submitText": "保存设置",
+  "title": "权限配置",
+  "submitText": "保存配置",
   "submitUrl": "/adminapi/system/base-config/submit/permission",
   "cacheKey": "permission_config_cache",
   "refreshAfterSubmit": true,
@@ -96,4 +96,3 @@
     }
   ]
 }
-

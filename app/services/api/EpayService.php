@@ -199,7 +199,7 @@ class EpayService extends BaseService
         ]);
 
         return [
-            'code' => 0,
+            'code' => 1,
             'msg'  => '退款成功',
         ];
     }

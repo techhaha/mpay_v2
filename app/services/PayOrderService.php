@@ -21,6 +21,7 @@ class PayOrderService extends BaseService
         protected PaymentOrderRepository $orderRepository,
         protected PaymentMethodRepository $methodRepository,
         protected PluginService $pluginService,
+        protected PaymentStateService $paymentStateService,
     ) {}
 
     /**
@@ -168,12 +169,7 @@ class PayOrderService extends BaseService
 
         // 8. 如果是全额退款则关闭订单
         if ($refundAmount >= $order->amount) {
-            $this->orderRepository->updateById($order->id, [
-                'status' => PaymentOrder::STATUS_CLOSED,
-                'extra' => array_merge($order->extra ?? [], [
-                    'refund_info' => $refundResult,
-                ]),
-            ]);
+            $this->paymentStateService->closeAfterFullRefund($order, $refundResult);
         }
 
         return [

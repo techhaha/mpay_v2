@@ -9,6 +9,7 @@ use app\common\contracts\PaymentInterface;
 use app\exceptions\PaymentException;
 use Psr\Http\Message\ResponseInterface;
 use support\Request;
+use support\Response;
 use Yansongda\Pay\Pay;
 use Yansongda\Supports\Collection;
 
@@ -266,5 +267,14 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         } catch (\Throwable $e) {
             throw new PaymentException('支付宝回调验签失败：' . $e->getMessage(), 402);
         }
+    }
+    public function notifySuccess(): string|Response
+    {
+        return 'success';
+    }
+
+    public function notifyFail(): string|Response
+    {
+        return 'fail';
     }
 }

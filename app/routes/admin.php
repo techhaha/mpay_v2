@@ -1,84 +1,230 @@
-<?php
+﻿<?php
 
-/**
- * 管理后台路由定义
- *
- * 接口前缀：/adminapi
- * 跨域中间件：Cors
- */
-
-use Webman\Route;
-use app\http\admin\controller\AuthController;
+use app\common\middleware\Cors;
 use app\http\admin\controller\AdminController;
-use app\http\admin\controller\MenuController;
-use app\http\admin\controller\SystemController;
+use app\http\admin\controller\AuthController;
 use app\http\admin\controller\ChannelController;
-use app\http\admin\controller\PluginController;
-use app\http\admin\controller\MerchantController;
+use app\http\admin\controller\FinanceController;
+use app\http\admin\controller\MenuController;
 use app\http\admin\controller\MerchantAppController;
+use app\http\admin\controller\MerchantController;
+use app\http\admin\controller\OrderController;
 use app\http\admin\controller\PayMethodController;
 use app\http\admin\controller\PayPluginController;
-use app\http\admin\controller\OrderController;
-use app\common\middleware\Cors;
+use app\http\admin\controller\PluginController;
+use app\http\admin\controller\SystemController;
 use app\http\admin\middleware\AuthMiddleware;
+use Webman\Route;
 
 Route::group('/adminapi', function () {
-    // 认证相关（无需JWT验证）
-    Route::get('/captcha', [AuthController::class, 'captcha'])->name('captcha')->setParams(['real_name' => '验证码']);
-    Route::post('/login', [AuthController::class, 'login'])->name('login')->setParams(['real_name' => '登录']);
+    Route::get('/captcha', [AuthController::class, 'captcha'])
+        ->name('captcha')
+        ->setParams(['real_name' => 'adminCaptcha']);
+    Route::post('/login', [AuthController::class, 'login'])
+        ->name('login')
+        ->setParams(['real_name' => 'adminLogin']);
 
-    // 需要认证的路由组
     Route::group('', function () {
-        // 用户相关（需要JWT验证）
-        Route::get('/user/getUserInfo', [AdminController::class, 'getUserInfo'])->name('getUserInfo')->setParams(['real_name' => '获取管理员信息']);
-        
-        // 菜单相关（需要JWT验证）
-        Route::get('/menu/getRouters', [MenuController::class, 'getRouters'])->name('getRouters')->setParams(['real_name' => '获取菜单']);
-        
-        // 系统相关（需要JWT验证）
-        Route::get('/system/getDict[/{code}]', [SystemController::class, 'getDict'])->name('getDict')->setParams(['real_name' => '获取字典']);
-        
-        // 系统配置相关（需要JWT验证）
-        Route::get('/system/base-config/tabs', [SystemController::class, 'getTabsConfig'])->name('getTabsConfig')->setParams(['real_name' => '获取系统配置tabs']);
-        Route::get('/system/base-config/form/{tabKey}', [SystemController::class, 'getFormConfig'])->name('getFormConfig')->setParams(['real_name' => '获取系统配置form']);
-        Route::post('/system/base-config/submit/{tabKey}', [SystemController::class, 'submitConfig'])->name('submitConfig')->setParams(['real_name' => '提交系统配置']);
-        
-        // 通道管理相关（需要JWT验证）
-        Route::get('/channel/list', [ChannelController::class, 'list'])->name('list')->setParams(['real_name' => '获取通道列表']);
-        Route::get('/channel/detail', [ChannelController::class, 'detail'])->name('detail')->setParams(['real_name' => '获取通道详情']);
-        Route::post('/channel/save', [ChannelController::class, 'save'])->name('save')->setParams(['real_name' => '保存通道']);
-        
-        // 插件管理相关（需要JWT验证）
-        Route::get('/channel/plugins', [PluginController::class, 'plugins'])->name('plugins')->setParams(['real_name' => '获取插件列表']);
-        Route::get('/channel/plugin/config-schema', [PluginController::class, 'configSchema'])->name('configSchema')->setParams(['real_name' => '获取插件配置schema']);
-        Route::get('/channel/plugin/products', [PluginController::class, 'products'])->name('products')->setParams(['real_name' => '获取插件产品列表']);
+        Route::get('/user/getUserInfo', [AdminController::class, 'getUserInfo'])
+            ->name('getUserInfo')
+            ->setParams(['real_name' => 'getUserInfo']);
+        Route::get('/menu/getRouters', [MenuController::class, 'getRouters'])
+            ->name('getRouters')
+            ->setParams(['real_name' => 'getRouters']);
 
-        // 商户管理
-        Route::get('/merchant/list', [MerchantController::class, 'list'])->name('merchantList')->setParams(['real_name' => '商户列表']);
-        Route::get('/merchant/detail', [MerchantController::class, 'detail'])->name('merchantDetail')->setParams(['real_name' => '商户详情']);
-        Route::post('/merchant/save', [MerchantController::class, 'save'])->name('merchantSave')->setParams(['real_name' => '保存商户']);
-        Route::post('/merchant/toggle', [MerchantController::class, 'toggle'])->name('merchantToggle')->setParams(['real_name' => '启用禁用商户']);
+        Route::get('/system/getDict[/{code}]', [SystemController::class, 'getDict'])
+            ->name('getDict')
+            ->setParams(['real_name' => 'getSystemDict']);
+        Route::get('/system/base-config/tabs', [SystemController::class, 'getTabsConfig'])
+            ->name('getTabsConfig')
+            ->setParams(['real_name' => 'getSystemTabs']);
+        Route::get('/system/base-config/form/{tabKey}', [SystemController::class, 'getFormConfig'])
+            ->name('getFormConfig')
+            ->setParams(['real_name' => 'getSystemForm']);
+        Route::post('/system/base-config/submit/{tabKey}', [SystemController::class, 'submitConfig'])
+            ->name('submitConfig')
+            ->setParams(['real_name' => 'submitSystemConfig']);
+        Route::get('/system/log/files', [SystemController::class, 'logFiles'])
+            ->name('systemLogFiles')
+            ->setParams(['real_name' => 'systemLogFiles']);
+        Route::get('/system/log/summary', [SystemController::class, 'logSummary'])
+            ->name('systemLogSummary')
+            ->setParams(['real_name' => 'systemLogSummary']);
+        Route::get('/system/log/content', [SystemController::class, 'logContent'])
+            ->name('systemLogContent')
+            ->setParams(['real_name' => 'systemLogContent']);
+        Route::get('/system/notice/overview', [SystemController::class, 'noticeOverview'])
+            ->name('systemNoticeOverview')
+            ->setParams(['real_name' => 'systemNoticeOverview']);
+        Route::post('/system/notice/test', [SystemController::class, 'noticeTest'])
+            ->name('systemNoticeTest')
+            ->setParams(['real_name' => 'systemNoticeTest']);
 
-        // 商户应用管理
-        Route::get('/merchant-app/list', [MerchantAppController::class, 'list'])->name('merchantAppList')->setParams(['real_name' => '商户应用列表']);
-        Route::get('/merchant-app/detail', [MerchantAppController::class, 'detail'])->name('merchantAppDetail')->setParams(['real_name' => '商户应用详情']);
-        Route::post('/merchant-app/save', [MerchantAppController::class, 'save'])->name('merchantAppSave')->setParams(['real_name' => '保存商户应用']);
-        Route::post('/merchant-app/reset-secret', [MerchantAppController::class, 'resetSecret'])->name('merchantAppResetSecret')->setParams(['real_name' => '重置应用密钥']);
-        Route::post('/merchant-app/toggle', [MerchantAppController::class, 'toggle'])->name('merchantAppToggle')->setParams(['real_name' => '启用禁用商户应用']);
+        Route::get('/finance/reconciliation', [FinanceController::class, 'reconciliation'])
+            ->name('financeReconciliation')
+            ->setParams(['real_name' => 'financeReconciliation']);
+        Route::get('/finance/settlement', [FinanceController::class, 'settlement'])
+            ->name('financeSettlement')
+            ->setParams(['real_name' => 'financeSettlement']);
+        Route::get('/finance/batch-settlement', [FinanceController::class, 'batchSettlement'])
+            ->name('financeBatchSettlement')
+            ->setParams(['real_name' => 'financeBatchSettlement']);
+        Route::get('/finance/settlement-record', [FinanceController::class, 'settlementRecord'])
+            ->name('financeSettlementRecord')
+            ->setParams(['real_name' => 'financeSettlementRecord']);
+        Route::get('/finance/split', [FinanceController::class, 'split'])
+            ->name('financeSplit')
+            ->setParams(['real_name' => 'financeSplit']);
+        Route::get('/finance/fee', [FinanceController::class, 'fee'])
+            ->name('financeFee')
+            ->setParams(['real_name' => 'financeFee']);
+        Route::get('/finance/invoice', [FinanceController::class, 'invoice'])
+            ->name('financeInvoice')
+            ->setParams(['real_name' => 'financeInvoice']);
 
-        // 支付方式管理
-        Route::get('/pay-method/list', [PayMethodController::class, 'list'])->name('payMethodList')->setParams(['real_name' => '支付方式列表']);
-        Route::post('/pay-method/save', [PayMethodController::class, 'save'])->name('payMethodSave')->setParams(['real_name' => '保存支付方式']);
-        Route::post('/pay-method/toggle', [PayMethodController::class, 'toggle'])->name('payMethodToggle')->setParams(['real_name' => '启用禁用支付方式']);
+        Route::get('/channel/list', [ChannelController::class, 'list'])
+            ->name('channelList')
+            ->setParams(['real_name' => 'channelList']);
+        Route::get('/channel/detail', [ChannelController::class, 'detail'])
+            ->name('channelDetail')
+            ->setParams(['real_name' => 'channelDetail']);
+        Route::get('/channel/monitor', [ChannelController::class, 'monitor'])
+            ->name('channelMonitor')
+            ->setParams(['real_name' => 'channelMonitor']);
+        Route::get('/channel/polling', [ChannelController::class, 'polling'])
+            ->name('channelPolling')
+            ->setParams(['real_name' => 'channelPolling']);
+        Route::get('/channel/policy/list', [ChannelController::class, 'policyList'])
+            ->name('channelPolicyList')
+            ->setParams(['real_name' => 'channelPolicyList']);
+        Route::post('/channel/save', [ChannelController::class, 'save'])
+            ->name('channelSave')
+            ->setParams(['real_name' => 'channelSave']);
+        Route::post('/channel/toggle', [ChannelController::class, 'toggle'])
+            ->name('channelToggle')
+            ->setParams(['real_name' => 'channelToggle']);
+        Route::post('/channel/policy/save', [ChannelController::class, 'policySave'])
+            ->name('channelPolicySave')
+            ->setParams(['real_name' => 'channelPolicySave']);
+        Route::post('/channel/policy/preview', [ChannelController::class, 'policyPreview'])
+            ->name('channelPolicyPreview')
+            ->setParams(['real_name' => 'channelPolicyPreview']);
+        Route::post('/channel/policy/delete', [ChannelController::class, 'policyDelete'])
+            ->name('channelPolicyDelete')
+            ->setParams(['real_name' => 'channelPolicyDelete']);
 
-        // 插件注册表管理
-        Route::get('/pay-plugin/list', [PayPluginController::class, 'list'])->name('payPluginList')->setParams(['real_name' => '支付插件注册表列表']);
-        Route::post('/pay-plugin/save', [PayPluginController::class, 'save'])->name('payPluginSave')->setParams(['real_name' => '保存支付插件注册表']);
-        Route::post('/pay-plugin/toggle', [PayPluginController::class, 'toggle'])->name('payPluginToggle')->setParams(['real_name' => '启用禁用支付插件']);
+        Route::get('/channel/plugins', [PluginController::class, 'plugins'])
+            ->name('channelPlugins')
+            ->setParams(['real_name' => 'channelPlugins']);
+        Route::get('/channel/plugin/config-schema', [PluginController::class, 'configSchema'])
+            ->name('channelPluginConfigSchema')
+            ->setParams(['real_name' => 'channelPluginConfigSchema']);
+        Route::get('/channel/plugin/products', [PluginController::class, 'products'])
+            ->name('channelPluginProducts')
+            ->setParams(['real_name' => 'channelPluginProducts']);
 
-        // 订单管理
-        Route::get('/order/list', [OrderController::class, 'list'])->name('orderList')->setParams(['real_name' => '订单列表']);
-        Route::get('/order/detail', [OrderController::class, 'detail'])->name('orderDetail')->setParams(['real_name' => '订单详情']);
-        Route::post('/order/refund', [OrderController::class, 'refund'])->name('orderRefund')->setParams(['real_name' => '订单退款']);
+        Route::get('/merchant/list', [MerchantController::class, 'list'])
+            ->name('merchantList')
+            ->setParams(['real_name' => 'merchantList']);
+        Route::get('/merchant/detail', [MerchantController::class, 'detail'])
+            ->name('merchantDetail')
+            ->setParams(['real_name' => 'merchantDetail']);
+        Route::get('/merchant/profile/detail', [MerchantController::class, 'profileDetail'])
+            ->name('merchantProfileDetail')
+            ->setParams(['real_name' => 'merchantProfileDetail']);
+        Route::get('/merchant/statistics', [MerchantController::class, 'statistics'])
+            ->name('merchantStatistics')
+            ->setParams(['real_name' => 'merchantStatistics']);
+        Route::get('/merchant/funds', [MerchantController::class, 'funds'])
+            ->name('merchantFunds')
+            ->setParams(['real_name' => 'merchantFunds']);
+        Route::get('/merchant/audit', [MerchantController::class, 'audit'])
+            ->name('merchantAudit')
+            ->setParams(['real_name' => 'merchantAudit']);
+        Route::get('/merchant/group/list', [MerchantController::class, 'groupList'])
+            ->name('merchantGroupList')
+            ->setParams(['real_name' => 'merchantGroupList']);
+        Route::post('/merchant/group/save', [MerchantController::class, 'groupSave'])
+            ->name('merchantGroupSave')
+            ->setParams(['real_name' => 'merchantGroupSave']);
+        Route::post('/merchant/group/delete', [MerchantController::class, 'groupDelete'])
+            ->name('merchantGroupDelete')
+            ->setParams(['real_name' => 'merchantGroupDelete']);
+        Route::get('/merchant/package/list', [MerchantController::class, 'packageList'])
+            ->name('merchantPackageList')
+            ->setParams(['real_name' => 'merchantPackageList']);
+        Route::post('/merchant/package/save', [MerchantController::class, 'packageSave'])
+            ->name('merchantPackageSave')
+            ->setParams(['real_name' => 'merchantPackageSave']);
+        Route::post('/merchant/package/delete', [MerchantController::class, 'packageDelete'])
+            ->name('merchantPackageDelete')
+            ->setParams(['real_name' => 'merchantPackageDelete']);
+        Route::post('/merchant/save', [MerchantController::class, 'save'])
+            ->name('merchantSave')
+            ->setParams(['real_name' => 'merchantSave']);
+        Route::post('/merchant/profile/save', [MerchantController::class, 'profileSave'])
+            ->name('merchantProfileSave')
+            ->setParams(['real_name' => 'merchantProfileSave']);
+        Route::post('/merchant/audit-action', [MerchantController::class, 'auditAction'])
+            ->name('merchantAuditAction')
+            ->setParams(['real_name' => 'merchantAuditAction']);
+        Route::post('/merchant/toggle', [MerchantController::class, 'toggle'])
+            ->name('merchantToggle')
+            ->setParams(['real_name' => 'merchantToggle']);
+
+        Route::get('/merchant-app/list', [MerchantAppController::class, 'list'])
+            ->name('merchantAppList')
+            ->setParams(['real_name' => 'merchantAppList']);
+        Route::get('/merchant-app/detail', [MerchantAppController::class, 'detail'])
+            ->name('merchantAppDetail')
+            ->setParams(['real_name' => 'merchantAppDetail']);
+        Route::get('/merchant-app/config/detail', [MerchantAppController::class, 'configDetail'])
+            ->name('merchantAppConfigDetail')
+            ->setParams(['real_name' => 'merchantAppConfigDetail']);
+        Route::post('/merchant-app/save', [MerchantAppController::class, 'save'])
+            ->name('merchantAppSave')
+            ->setParams(['real_name' => 'merchantAppSave']);
+        Route::post('/merchant-app/config/save', [MerchantAppController::class, 'configSave'])
+            ->name('merchantAppConfigSave')
+            ->setParams(['real_name' => 'merchantAppConfigSave']);
+        Route::post('/merchant-app/reset-secret', [MerchantAppController::class, 'resetSecret'])
+            ->name('merchantAppResetSecret')
+            ->setParams(['real_name' => 'merchantAppResetSecret']);
+        Route::post('/merchant-app/toggle', [MerchantAppController::class, 'toggle'])
+            ->name('merchantAppToggle')
+            ->setParams(['real_name' => 'merchantAppToggle']);
+
+        Route::get('/pay-method/list', [PayMethodController::class, 'list'])
+            ->name('payMethodList')
+            ->setParams(['real_name' => 'payMethodList']);
+        Route::post('/pay-method/save', [PayMethodController::class, 'save'])
+            ->name('payMethodSave')
+            ->setParams(['real_name' => 'payMethodSave']);
+        Route::post('/pay-method/toggle', [PayMethodController::class, 'toggle'])
+            ->name('payMethodToggle')
+            ->setParams(['real_name' => 'payMethodToggle']);
+
+        Route::get('/pay-plugin/list', [PayPluginController::class, 'list'])
+            ->name('payPluginList')
+            ->setParams(['real_name' => 'payPluginList']);
+        Route::post('/pay-plugin/save', [PayPluginController::class, 'save'])
+            ->name('payPluginSave')
+            ->setParams(['real_name' => 'payPluginSave']);
+        Route::post('/pay-plugin/toggle', [PayPluginController::class, 'toggle'])
+            ->name('payPluginToggle')
+            ->setParams(['real_name' => 'payPluginToggle']);
+
+        Route::get('/order/list', [OrderController::class, 'list'])
+            ->name('orderList')
+            ->setParams(['real_name' => 'orderList']);
+        Route::get('/order/export', [OrderController::class, 'export'])
+            ->name('orderExport')
+            ->setParams(['real_name' => 'orderExport']);
+        Route::get('/order/detail', [OrderController::class, 'detail'])
+            ->name('orderDetail')
+            ->setParams(['real_name' => 'orderDetail']);
+        Route::post('/order/refund', [OrderController::class, 'refund'])
+            ->name('orderRefund')
+            ->setParams(['real_name' => 'orderRefund']);
     })->middleware([AuthMiddleware::class]);
 })->middleware([Cors::class]);

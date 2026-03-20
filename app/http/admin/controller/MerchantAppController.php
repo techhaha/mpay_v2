@@ -5,22 +5,18 @@ namespace app\http\admin\controller;
 use app\common\base\BaseController;
 use app\repositories\MerchantAppRepository;
 use app\repositories\MerchantRepository;
+use app\services\SystemConfigService;
 use support\Request;
 
-/**
- * 商户应用管理
- */
 class MerchantAppController extends BaseController
 {
     public function __construct(
         protected MerchantAppRepository $merchantAppRepository,
         protected MerchantRepository $merchantRepository,
+        protected SystemConfigService $systemConfigService,
     ) {
     }
 
-    /**
-     * GET /adminapi/merchant-app/list
-     */
     public function list(Request $request)
     {
         $page = (int)$request->get('page', 1);
@@ -35,30 +31,59 @@ class MerchantAppController extends BaseController
         ];
 
         $paginator = $this->merchantAppRepository->searchPaginate($filters, $page, $pageSize);
-        return $this->page($paginator);
+        $packageMap = $this->buildPackageMap();
+        $items = [];
+        foreach ($paginator->items() as $row) {
+            $item = (array)$row;
+            $config = $this->getConfigObject($this->appConfigKey((int)($item['id'] ?? 0)));
+            $packageCode = trim((string)($config['package_code'] ?? ''));
+            $item['package_code'] = $packageCode;
+            $item['package_name'] = $packageCode !== '' ? ($packageMap[$packageCode] ?? $packageCode) : '';
+            $items[] = $item;
+        }
+
+        return $this->success([
+            'list' => $items,
+            'total' => $paginator->total(),
+            'page' => $paginator->currentPage(),
+            'size' => $paginator->perPage(),
+        ]);
     }
 
-    /**
-     * GET /adminapi/merchant-app/detail?id=1
-     */
     public function detail(Request $request)
     {
         $id = (int)$request->get('id', 0);
         if ($id <= 0) {
-            return $this->fail('应用ID不能为空', 400);
+            return $this->fail('app id is required', 400);
         }
 
         $row = $this->merchantAppRepository->find($id);
         if (!$row) {
-            return $this->fail('应用不存在', 404);
+            return $this->fail('app not found', 404);
         }
 
         return $this->success($row);
     }
 
-    /**
-     * POST /adminapi/merchant-app/save
-     */
+    public function configDetail(Request $request)
+    {
+        $id = (int)$request->get('id', 0);
+        if ($id <= 0) {
+            return $this->fail('app id is required', 400);
+        }
+
+        $app = $this->merchantAppRepository->find($id);
+        if (!$app) {
+            return $this->fail('app not found', 404);
+        }
+
+        $config = array_merge($this->defaultAppConfig(), $this->getConfigObject($this->appConfigKey($id)));
+        return $this->success([
+            'app' => $app,
+            'config' => $config,
+        ]);
+    }
+
     public function save(Request $request)
     {
         $data = $request->post();
@@ -71,29 +96,28 @@ class MerchantAppController extends BaseController
         $status = (int)($data['status'] ?? 1);
 
         if ($merchantId <= 0 || $appId === '' || $appName === '') {
-            return $this->fail('商户、应用ID、应用名称不能为空', 400);
+            return $this->fail('merchant_id, app_id and app_name are required', 400);
         }
 
         $merchant = $this->merchantRepository->find($merchantId);
         if (!$merchant) {
-            return $this->fail('商户不存在', 404);
+            return $this->fail('merchant not found', 404);
         }
 
         if (!in_array($apiType, ['openapi', 'epay', 'custom', 'default'], true)) {
-            return $this->fail('api_type 不合法', 400);
+            return $this->fail('invalid api_type', 400);
         }
 
         if ($id > 0) {
             $row = $this->merchantAppRepository->find($id);
             if (!$row) {
-                return $this->fail('应用不存在', 404);
+                return $this->fail('app not found', 404);
             }
 
-            // app_id 变更需校验唯一
             if ($row->app_id !== $appId) {
                 $exists = $this->merchantAppRepository->findAnyByAppId($appId);
                 if ($exists) {
-                    return $this->fail('应用ID已存在', 400);
+                    return $this->fail('app_id already exists', 400);
                 }
             }
 
@@ -105,7 +129,6 @@ class MerchantAppController extends BaseController
                 'status' => $status,
             ];
 
-            // 可选：前端传入 app_secret 才更新
             if (!empty($data['app_secret'])) {
                 $update['app_secret'] = (string)$data['app_secret'];
             }
@@ -114,7 +137,7 @@ class MerchantAppController extends BaseController
         } else {
             $exists = $this->merchantAppRepository->findAnyByAppId($appId);
             if ($exists) {
-                return $this->fail('应用ID已存在', 400);
+                return $this->fail('app_id already exists', 400);
             }
 
             $secret = !empty($data['app_secret']) ? (string)$data['app_secret'] : $this->generateSecret();
@@ -128,44 +151,95 @@ class MerchantAppController extends BaseController
             ]);
         }
 
-        return $this->success(null, '保存成功');
+        return $this->success(null, 'saved');
     }
 
-    /**
-     * POST /adminapi/merchant-app/reset-secret
-     */
     public function resetSecret(Request $request)
     {
         $id = (int)$request->post('id', 0);
         if ($id <= 0) {
-            return $this->fail('应用ID不能为空', 400);
+            return $this->fail('app id is required', 400);
         }
 
         $row = $this->merchantAppRepository->find($id);
         if (!$row) {
-            return $this->fail('应用不存在', 404);
+            return $this->fail('app not found', 404);
         }
 
         $secret = $this->generateSecret();
         $this->merchantAppRepository->updateById($id, ['app_secret' => $secret]);
 
-        return $this->success(['app_secret' => $secret], '重置成功');
+        return $this->success(['app_secret' => $secret], 'reset success');
     }
 
-    /**
-     * POST /adminapi/merchant-app/toggle
-     */
     public function toggle(Request $request)
     {
         $id = (int)$request->post('id', 0);
         $status = $request->post('status', null);
 
         if ($id <= 0 || $status === null) {
-            return $this->fail('参数错误', 400);
+            return $this->fail('invalid params', 400);
         }
 
         $ok = $this->merchantAppRepository->updateById($id, ['status' => (int)$status]);
-        return $ok ? $this->success(null, '操作成功') : $this->fail('操作失败', 500);
+        return $ok ? $this->success(null, 'updated') : $this->fail('update failed', 500);
+    }
+
+    public function configSave(Request $request)
+    {
+        $id = (int)$request->post('id', 0);
+        if ($id <= 0) {
+            return $this->fail('app id is required', 400);
+        }
+
+        $app = $this->merchantAppRepository->find($id);
+        if (!$app) {
+            return $this->fail('app not found', 404);
+        }
+
+        $signType = trim((string)$request->post('sign_type', 'md5'));
+        $callbackMode = trim((string)$request->post('callback_mode', 'server'));
+        if (!in_array($signType, ['md5', 'sha256', 'hmac-sha256'], true)) {
+            return $this->fail('invalid sign_type', 400);
+        }
+        if (!in_array($callbackMode, ['server', 'server+page', 'manual'], true)) {
+            return $this->fail('invalid callback_mode', 400);
+        }
+
+        $config = [
+            'package_code' => trim((string)$request->post('package_code', '')),
+            'notify_url' => trim((string)$request->post('notify_url', '')),
+            'return_url' => trim((string)$request->post('return_url', '')),
+            'callback_mode' => $callbackMode,
+            'sign_type' => $signType,
+            'order_expire_minutes' => max(0, (int)$request->post('order_expire_minutes', 30)),
+            'callback_retry_limit' => max(0, (int)$request->post('callback_retry_limit', 6)),
+            'ip_whitelist' => trim((string)$request->post('ip_whitelist', '')),
+            'amount_min' => max(0, (float)$request->post('amount_min', 0)),
+            'amount_max' => max(0, (float)$request->post('amount_max', 0)),
+            'daily_limit' => max(0, (float)$request->post('daily_limit', 0)),
+            'notify_enabled' => (int)$request->post('notify_enabled', 1) === 1 ? 1 : 0,
+            'remark' => trim((string)$request->post('remark', '')),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ];
+
+        if ($config['package_code'] !== '') {
+            $packageExists = false;
+            foreach ($this->getConfigEntries('merchant_packages') as $package) {
+                if (($package['package_code'] ?? '') === $config['package_code']) {
+                    $packageExists = true;
+                    break;
+                }
+            }
+            if (!$packageExists) {
+                return $this->fail('package_code not found', 400);
+            }
+        }
+
+        $stored = array_merge($this->defaultAppConfig(), $this->getConfigObject($this->appConfigKey($id)), $config);
+        $this->systemConfigService->setValue($this->appConfigKey($id), $stored);
+
+        return $this->success(null, 'saved');
     }
 
     private function generateSecret(): string
@@ -173,5 +247,69 @@ class MerchantAppController extends BaseController
         $raw = random_bytes(24);
         return rtrim(strtr(base64_encode($raw), '+/', '-_'), '=');
     }
-}
 
+    private function appConfigKey(int $appId): string
+    {
+        return 'merchant_app_config_' . $appId;
+    }
+
+    private function defaultAppConfig(): array
+    {
+        return [
+            'package_code' => '',
+            'notify_url' => '',
+            'return_url' => '',
+            'callback_mode' => 'server',
+            'sign_type' => 'md5',
+            'order_expire_minutes' => 30,
+            'callback_retry_limit' => 6,
+            'ip_whitelist' => '',
+            'amount_min' => 0,
+            'amount_max' => 0,
+            'daily_limit' => 0,
+            'notify_enabled' => 1,
+            'remark' => '',
+            'updated_at' => '',
+        ];
+    }
+
+    private function getConfigObject(string $configKey): array
+    {
+        $raw = $this->systemConfigService->getValue($configKey, '{}');
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function getConfigEntries(string $configKey): array
+    {
+        $raw = $this->systemConfigService->getValue($configKey, '[]');
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        return array_values(array_filter($decoded, 'is_array'));
+    }
+
+    private function buildPackageMap(): array
+    {
+        $map = [];
+        foreach ($this->getConfigEntries('merchant_packages') as $package) {
+            $packageCode = trim((string)($package['package_code'] ?? ''));
+            if ($packageCode === '') {
+                continue;
+            }
+            $map[$packageCode] = trim((string)($package['package_name'] ?? $packageCode));
+        }
+
+        return $map;
+    }
+}

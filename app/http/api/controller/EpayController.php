@@ -3,8 +3,7 @@
 namespace app\http\api\controller;
 
 use app\common\base\BaseController;
-use app\services\api\EpayService;
-use app\validation\EpayValidator;
+use app\services\api\EpayProtocolService;
 use support\Request;
 use support\Response;
 
@@ -14,43 +13,32 @@ use support\Response;
 class EpayController extends BaseController
 {
     public function __construct(
-        protected EpayService $epayService
-    ) {}
+        protected EpayProtocolService $epayProtocolService
+    ) {
+    }
 
     /**
      * 页面跳转支付
      */
     public function submit(Request $request)
     {
-        $data = match ($request->method()) {
-            'GET'  => $request->get(),
-            'POST' => $request->post(),
-            default => $request->all(),
-        };
-
         try {
-            // 参数校验（使用自定义 Validator + 场景）
-            $params = EpayValidator::make($data)
-                ->withScene('submit')
-                ->validate();
+            $result = $this->epayProtocolService->handleSubmit($request);
+            $type = $result['response_type'] ?? '';
 
-            // 业务处理：创建订单并获取支付参数
-            $result    = $this->epayService->submit($params, $request);
-            $payParams = $result['pay_params'] ?? [];
-
-            // 根据支付参数类型返回响应
-            if (($payParams['type'] ?? '') === 'redirect' && !empty($payParams['url'])) {
-                return redirect($payParams['url']);
+            if ($type === 'redirect' && !empty($result['url'])) {
+                return redirect($result['url']);
             }
 
-            if (($payParams['type'] ?? '') === 'form') {
-                if (!empty($payParams['html'])) {
-                    return response($payParams['html'])->withHeaders(['Content-Type' => 'text/html; charset=UTF-8']);
-                }
-                return $this->renderForm($payParams);
+            if ($type === 'form_html') {
+                return response((string)($result['html'] ?? ''))
+                    ->withHeaders(['Content-Type' => 'text/html; charset=UTF-8']);
             }
 
-            // 如果没有匹配的类型，返回错误
+            if ($type === 'form_params') {
+                return $this->renderForm((array)($result['form'] ?? []));
+            }
+
             return $this->fail('支付参数生成失败');
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage());
@@ -62,20 +50,12 @@ class EpayController extends BaseController
      */
     public function mapi(Request $request)
     {
-        $data = $request->post();
-
         try {
-            $params = EpayValidator::make($data)
-                ->withScene('mapi')
-                ->validate();
-
-            $result = $this->epayService->mapi($params, $request);
-
-            return json($result);
+            return json($this->epayProtocolService->handleMapi($request));
         } catch (\Throwable $e) {
             return json([
                 'code' => 0,
-                'msg'  => $e->getMessage(),
+                'msg' => $e->getMessage(),
             ]);
         }
     }
@@ -85,33 +65,12 @@ class EpayController extends BaseController
      */
     public function api(Request $request)
     {
-        $data = array_merge($request->get(), $request->post());
-
         try {
-            $act = strtolower($data['act'] ?? '');
-
-            if ($act === 'order') {
-                $params = EpayValidator::make($data)
-                    ->withScene('api_order')
-                    ->validate();
-                $result = $this->epayService->api($params);
-            } elseif ($act === 'refund') {
-                $params = EpayValidator::make($data)
-                    ->withScene('api_refund')
-                    ->validate();
-                $result = $this->epayService->api($params);
-            } else {
-                $result = [
-                    'code' => 0,
-                    'msg'  => '不支持的操作类型',
-                ];
-            }
-
-            return json($result);
+            return json($this->epayProtocolService->handleApi($request));
         } catch (\Throwable $e) {
             return json([
                 'code' => 0,
-                'msg'  => $e->getMessage(),
+                'msg' => $e->getMessage(),
             ]);
         }
     }

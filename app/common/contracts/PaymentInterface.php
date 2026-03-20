@@ -6,6 +6,7 @@ namespace app\common\contracts;
 
 use app\exceptions\PaymentException;
 use support\Request;
+use support\Response;
 
 /**
  * 支付插件接口
@@ -81,4 +82,8 @@ interface PaymentInterface
      * @throws PaymentException 验签失败、数据异常等
      */
     public function notify(Request $request): array;
+
+    public function notifySuccess(): string|Response;
+
+    public function notifyFail(): string|Response;
 }
