@@ -25,18 +25,15 @@ class MerchantController extends BaseController
             'status' => $request->get('status', ''),
             'merchant_no' => trim((string)$request->get('merchant_no', '')),
             'merchant_name' => trim((string)$request->get('merchant_name', '')),
+            'email' => trim((string)$request->get('email', '')),
+            'balance' => trim((string)$request->get('balance', '')),
         ];
 
         $paginator = $this->merchantRepository->searchPaginate($filters, $page, $pageSize);
-        $groupMap = $this->buildGroupMap();
         $items = [];
         foreach ($paginator->items() as $row) {
-            $item = (array)$row;
-            $profile = $this->getConfigObject($this->merchantProfileKey((int)($item['id'] ?? 0)));
-            $groupCode = trim((string)($profile['group_code'] ?? ''));
-            $item['group_code'] = $groupCode;
-            $item['group_name'] = $groupCode !== '' ? ($groupMap[$groupCode] ?? $groupCode) : '';
-            $items[] = $item;
+            $item = method_exists($row, 'toArray') ? $row->toArray() : (array)$row;
+            $items[] = $this->normalizeMerchantRow($item);
         }
 
         return $this->success([
@@ -59,7 +56,8 @@ class MerchantController extends BaseController
             return $this->fail('merchant not found', 404);
         }
 
-        return $this->success($row);
+        $merchant = method_exists($row, 'toArray') ? $row->toArray() : (array)$row;
+        return $this->success($this->normalizeMerchantRow($merchant));
     }
 
     public function profileDetail(Request $request)
@@ -74,10 +72,10 @@ class MerchantController extends BaseController
             return $this->fail('merchant not found', 404);
         }
 
-        $profile = array_merge($this->defaultMerchantProfile(), $this->getConfigObject($this->merchantProfileKey($id)));
+        $merchantRow = method_exists($merchant, 'toArray') ? $merchant->toArray() : (array)$merchant;
         return $this->success([
-            'merchant' => $merchant,
-            'profile' => $profile,
+            'merchant' => $this->normalizeMerchantRow($merchantRow),
+            'profile' => $this->buildMerchantProfile($merchantRow),
         ]);
     }
 
@@ -88,23 +86,24 @@ class MerchantController extends BaseController
 
         $merchantNo = trim((string)($data['merchant_no'] ?? ''));
         $merchantName = trim((string)($data['merchant_name'] ?? ''));
-        $fundsMode = trim((string)($data['funds_mode'] ?? 'direct'));
+        $balance = max(0, (float)($data['balance'] ?? 0));
+        $email = trim((string)($data['email'] ?? $data['notify_email'] ?? ''));
         $status = (int)($data['status'] ?? 1);
+        $remark = trim((string)($data['remark'] ?? ''));
 
         if ($merchantNo === '' || $merchantName === '') {
             return $this->fail('merchant_no and merchant_name are required', 400);
-        }
-
-        if (!in_array($fundsMode, ['direct', 'wallet', 'hybrid'], true)) {
-            return $this->fail('invalid funds_mode', 400);
         }
 
         if ($id > 0) {
             $this->merchantRepository->updateById($id, [
                 'merchant_no' => $merchantNo,
                 'merchant_name' => $merchantName,
-                'funds_mode' => $fundsMode,
+                'balance' => $balance,
+                'email' => $email,
                 'status' => $status,
+                'remark' => $remark,
+                'updated_at' => date('Y-m-d H:i:s'),
             ]);
         } else {
             $exists = $this->merchantRepository->findByMerchantNo($merchantNo);
@@ -115,8 +114,12 @@ class MerchantController extends BaseController
             $this->merchantRepository->create([
                 'merchant_no' => $merchantNo,
                 'merchant_name' => $merchantName,
-                'funds_mode' => $fundsMode,
+                'balance' => $balance,
+                'email' => $email,
                 'status' => $status,
+                'remark' => $remark,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
             ]);
         }
 
@@ -148,46 +151,17 @@ class MerchantController extends BaseController
             return $this->fail('merchant not found', 404);
         }
 
-        $riskLevel = trim((string)$request->post('risk_level', 'standard'));
-        $settlementCycle = trim((string)$request->post('settlement_cycle', 't1'));
-        if (!in_array($riskLevel, ['low', 'standard', 'high'], true)) {
-            return $this->fail('invalid risk_level', 400);
-        }
-        if (!in_array($settlementCycle, ['d0', 't1', 'manual'], true)) {
-            return $this->fail('invalid settlement_cycle', 400);
-        }
+        $merchantRow = method_exists($merchant, 'toArray') ? $merchant->toArray() : (array)$merchant;
 
         $profile = [
-            'group_code' => trim((string)$request->post('group_code', '')),
-            'contact_name' => trim((string)$request->post('contact_name', '')),
-            'contact_phone' => trim((string)$request->post('contact_phone', '')),
-            'notify_email' => trim((string)$request->post('notify_email', '')),
-            'callback_domain' => trim((string)$request->post('callback_domain', '')),
-            'callback_ip_whitelist' => trim((string)$request->post('callback_ip_whitelist', '')),
-            'risk_level' => $riskLevel,
-            'single_limit' => max(0, (float)$request->post('single_limit', 0)),
-            'daily_limit' => max(0, (float)$request->post('daily_limit', 0)),
-            'settlement_cycle' => $settlementCycle,
-            'tech_support' => trim((string)$request->post('tech_support', '')),
+            'email' => trim((string)$request->post('email', $request->post('notify_email', ''))),
             'remark' => trim((string)$request->post('remark', '')),
-            'updated_at' => date('Y-m-d H:i:s'),
+            'balance' => max(0, (float)$request->post('balance', $merchantRow['balance'] ?? 0)),
         ];
 
-        if ($profile['group_code'] !== '') {
-            $groupExists = false;
-            foreach ($this->getConfigEntries('merchant_groups') as $group) {
-                if (($group['group_code'] ?? '') === $profile['group_code']) {
-                    $groupExists = true;
-                    break;
-                }
-            }
-            if (!$groupExists) {
-                return $this->fail('group_code not found', 400);
-            }
-        }
-
-        $stored = array_merge($this->defaultMerchantProfile(), $this->getConfigObject($this->merchantProfileKey($merchantId)), $profile);
-        $this->systemConfigService->setValue($this->merchantProfileKey($merchantId), $stored);
+        $updateData = $profile;
+        $updateData['updated_at'] = date('Y-m-d H:i:s');
+        $this->merchantRepository->updateById($merchantId, $updateData);
 
         return $this->success(null, 'saved');
     }
@@ -198,9 +172,9 @@ class MerchantController extends BaseController
         $pageSize = (int)$request->get('page_size', 10);
         $filters = $this->buildOpFilters($request);
 
-        $summaryQuery = Db::table('ma_merchant as m')
-            ->leftJoin('ma_merchant_app as ma', 'ma.merchant_id', '=', 'm.id')
-            ->leftJoin('ma_pay_channel as pc', 'pc.merchant_id', '=', 'm.id')
+        $summaryQuery = Db::table('ma_mer as m')
+            ->leftJoin('ma_pay_app as ma', 'ma.mer_id', '=', 'm.id')
+            ->leftJoin('ma_pay_channel as pc', 'pc.mer_id', '=', 'm.id')
             ->leftJoin('ma_pay_order as o', function ($join) use ($filters) {
                 $join->on('o.merchant_id', '=', 'm.id');
                 if (!empty($filters['created_from'])) {
@@ -225,9 +199,9 @@ class MerchantController extends BaseController
             )
             ->first();
 
-        $listQuery = Db::table('ma_merchant as m')
-            ->leftJoin('ma_merchant_app as ma', 'ma.merchant_id', '=', 'm.id')
-            ->leftJoin('ma_pay_channel as pc', 'pc.merchant_id', '=', 'm.id')
+        $listQuery = Db::table('ma_mer as m')
+            ->leftJoin('ma_pay_app as ma', 'ma.mer_id', '=', 'm.id')
+            ->leftJoin('ma_pay_channel as pc', 'pc.mer_id', '=', 'm.id')
             ->leftJoin('ma_pay_order as o', function ($join) use ($filters) {
                 $join->on('o.merchant_id', '=', 'm.id');
                 if (!empty($filters['created_from'])) {
@@ -241,7 +215,7 @@ class MerchantController extends BaseController
 
         $paginator = $listQuery
             ->selectRaw(
-                'm.id, m.merchant_no, m.merchant_name, m.funds_mode, m.status, m.created_at,
+                'm.id, m.merchant_no, m.merchant_name, m.balance, m.email, m.status, m.remark, m.created_at,
                 COUNT(DISTINCT ma.id) AS app_count,
                 COUNT(DISTINCT CASE WHEN ma.status = 1 THEN ma.id END) AS active_app_count,
                 COUNT(DISTINCT pc.id) AS channel_count,
@@ -252,7 +226,7 @@ class MerchantController extends BaseController
                 COALESCE(SUM(CASE WHEN o.status = 1 THEN o.fee ELSE 0 END), 0) AS fee_amount,
                 MAX(o.created_at) AS last_order_at'
             )
-            ->groupBy('m.id', 'm.merchant_no', 'm.merchant_name', 'm.funds_mode', 'm.status', 'm.created_at')
+            ->groupBy('m.id', 'm.merchant_no', 'm.merchant_name', 'm.balance', 'm.email', 'm.status', 'm.remark', 'm.created_at')
             ->orderByDesc('m.id')
             ->paginate($pageSize, ['*'], 'page', $page);
 
@@ -280,7 +254,7 @@ class MerchantController extends BaseController
         $pageSize = (int)$request->get('page_size', 10);
         $filters = $this->buildOpFilters($request);
 
-        $summaryQuery = Db::table('ma_merchant as m')
+        $summaryQuery = Db::table('ma_mer as m')
             ->leftJoin('ma_pay_order as o', function ($join) use ($filters) {
                 $join->on('o.merchant_id', '=', 'm.id');
                 if (!empty($filters['created_from'])) {
@@ -303,7 +277,7 @@ class MerchantController extends BaseController
             )
             ->first();
 
-        $listQuery = Db::table('ma_merchant as m')
+        $listQuery = Db::table('ma_mer as m')
             ->leftJoin('ma_pay_order as o', function ($join) use ($filters) {
                 $join->on('o.merchant_id', '=', 'm.id');
                 if (!empty($filters['created_from'])) {
@@ -317,7 +291,7 @@ class MerchantController extends BaseController
 
         $paginator = $listQuery
             ->selectRaw(
-                'm.id, m.merchant_no, m.merchant_name, m.funds_mode, m.status, m.created_at,
+                'm.id, m.merchant_no, m.merchant_name, m.balance, m.email, m.status, m.remark, m.created_at,
                 COUNT(DISTINCT CASE WHEN o.status = 1 THEN o.id END) AS success_order_count,
                 COUNT(DISTINCT CASE WHEN o.status = 0 THEN o.id END) AS pending_order_count,
                 COUNT(DISTINCT CASE WHEN o.notify_stat = 0 THEN o.id END) AS notify_pending_orders,
@@ -327,7 +301,7 @@ class MerchantController extends BaseController
                 COALESCE(SUM(CASE WHEN o.status = 1 THEN o.real_amount - o.fee ELSE 0 END), 0) AS net_amount,
                 MAX(o.pay_at) AS last_pay_at'
             )
-            ->groupBy('m.id', 'm.merchant_no', 'm.merchant_name', 'm.funds_mode', 'm.status', 'm.created_at')
+            ->groupBy('m.id', 'm.merchant_no', 'm.merchant_name', 'm.balance', 'm.email', 'm.status', 'm.remark', 'm.created_at')
             ->orderByRaw('COALESCE(SUM(CASE WHEN o.status = 1 THEN o.real_amount - o.fee ELSE 0 END), 0) DESC')
             ->paginate($pageSize, ['*'], 'page', $page);
 
@@ -354,7 +328,7 @@ class MerchantController extends BaseController
         $auditStatus = trim((string)$request->get('audit_status', ''));
         $keyword = trim((string)$request->get('keyword', ''));
 
-        $summaryQuery = Db::table('ma_merchant as m');
+        $summaryQuery = Db::table('ma_mer as m');
         if ($keyword !== '') {
             $summaryQuery->where(function ($query) use ($keyword) {
                 $query->where('m.merchant_no', 'like', '%' . $keyword . '%')
@@ -375,8 +349,8 @@ class MerchantController extends BaseController
             )
             ->first();
 
-        $listQuery = Db::table('ma_merchant as m')
-            ->leftJoin('ma_merchant_app as ma', 'ma.merchant_id', '=', 'm.id');
+        $listQuery = Db::table('ma_mer as m')
+            ->leftJoin('ma_pay_app as ma', 'ma.mer_id', '=', 'm.id');
         if ($keyword !== '') {
             $listQuery->where(function ($query) use ($keyword) {
                 $query->where('m.merchant_no', 'like', '%' . $keyword . '%')
@@ -391,12 +365,12 @@ class MerchantController extends BaseController
 
         $paginator = $listQuery
             ->selectRaw(
-                'm.id, m.merchant_no, m.merchant_name, m.funds_mode, m.status, m.created_at, m.updated_at,
+                'm.id, m.merchant_no, m.merchant_name, m.balance, m.email, m.status, m.remark, m.created_at, m.updated_at,
                 COUNT(DISTINCT ma.id) AS app_count,
                 COUNT(DISTINCT CASE WHEN ma.status = 1 THEN ma.id END) AS active_app_count,
                 COUNT(DISTINCT CASE WHEN ma.status = 0 THEN ma.id END) AS disabled_app_count'
             )
-            ->groupBy('m.id', 'm.merchant_no', 'm.merchant_name', 'm.funds_mode', 'm.status', 'm.created_at', 'm.updated_at')
+            ->groupBy('m.id', 'm.merchant_no', 'm.merchant_name', 'm.balance', 'm.email', 'm.status', 'm.remark', 'm.created_at', 'm.updated_at')
             ->orderBy('m.status', 'asc')
             ->orderByDesc('m.id')
             ->paginate($pageSize, ['*'], 'page', $page);
@@ -433,11 +407,11 @@ class MerchantController extends BaseController
 
         $status = $action === 'approve' ? 1 : 0;
         Db::connection()->transaction(function () use ($id, $status) {
-            Db::table('ma_merchant')->where('id', $id)->update([
+            Db::table('ma_mer')->where('id', $id)->update([
                 'status' => $status,
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
-            Db::table('ma_merchant_app')->where('merchant_id', $id)->update([
+            Db::table('ma_pay_app')->where('mer_id', $id)->update([
                 'status' => $status,
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
@@ -733,6 +707,8 @@ class MerchantController extends BaseController
             'merchant_id' => (int)$request->get('merchant_id', 0),
             'status' => (string)$request->get('status', ''),
             'keyword' => trim((string)$request->get('keyword', '')),
+            'email' => trim((string)$request->get('email', '')),
+            'balance' => trim((string)$request->get('balance', '')),
             'created_from' => trim((string)$request->get('created_from', '')),
             'created_to' => trim((string)$request->get('created_to', '')),
         ];
@@ -749,8 +725,15 @@ class MerchantController extends BaseController
         if (!empty($filters['keyword'])) {
             $query->where(function ($builder) use ($filters) {
                 $builder->where('m.merchant_no', 'like', '%' . $filters['keyword'] . '%')
-                    ->orWhere('m.merchant_name', 'like', '%' . $filters['keyword'] . '%');
+                    ->orWhere('m.merchant_name', 'like', '%' . $filters['keyword'] . '%')
+                    ->orWhere('m.email', 'like', '%' . $filters['keyword'] . '%');
             });
+        }
+        if (!empty($filters['email'])) {
+            $query->where('m.email', 'like', '%' . $filters['email'] . '%');
+        }
+        if (isset($filters['balance']) && $filters['balance'] !== '') {
+            $query->where('m.balance', (string)$filters['balance']);
         }
     }
 
@@ -861,6 +844,31 @@ class MerchantController extends BaseController
         }
 
         return $map;
+    }
+
+    private function normalizeMerchantRow(array $merchant): array
+    {
+        $merchant['merchant_no'] = trim((string)($merchant['merchant_no'] ?? ''));
+        $merchant['merchant_name'] = trim((string)($merchant['merchant_name'] ?? ''));
+        $merchant['balance'] = (string)($merchant['balance'] ?? '0.00');
+        $merchant['email'] = trim((string)($merchant['email'] ?? ''));
+        $merchant['remark'] = trim((string)($merchant['remark'] ?? ''));
+        $merchant['status'] = (int)($merchant['status'] ?? 1);
+        $merchant['created_at'] = (string)($merchant['created_at'] ?? '');
+        $merchant['updated_at'] = (string)($merchant['updated_at'] ?? '');
+        return $merchant;
+    }
+
+    private function buildMerchantProfile(array $merchant): array
+    {
+        return [
+            'merchant_no' => trim((string)($merchant['merchant_no'] ?? '')),
+            'merchant_name' => trim((string)($merchant['merchant_name'] ?? '')),
+            'balance' => (string)($merchant['balance'] ?? '0.00'),
+            'email' => trim((string)($merchant['email'] ?? '')),
+            'status' => (int)($merchant['status'] ?? 1),
+            'remark' => trim((string)($merchant['remark'] ?? '')),
+        ];
     }
 
     private function getConfigObject(string $configKey): array

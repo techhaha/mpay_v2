@@ -34,9 +34,8 @@ class MerchantAppController extends BaseController
         $packageMap = $this->buildPackageMap();
         $items = [];
         foreach ($paginator->items() as $row) {
-            $item = (array)$row;
-            $config = $this->getConfigObject($this->appConfigKey((int)($item['id'] ?? 0)));
-            $packageCode = trim((string)($config['package_code'] ?? ''));
+            $item = method_exists($row, 'toArray') ? $row->toArray() : (array)$row;
+            $packageCode = trim((string)($item['package_code'] ?? ''));
             $item['package_code'] = $packageCode;
             $item['package_name'] = $packageCode !== '' ? ($packageMap[$packageCode] ?? $packageCode) : '';
             $items[] = $item;
@@ -62,7 +61,7 @@ class MerchantAppController extends BaseController
             return $this->fail('app not found', 404);
         }
 
-        return $this->success($row);
+        return $this->success(method_exists($row, 'toArray') ? $row->toArray() : (array)$row);
     }
 
     public function configDetail(Request $request)
@@ -77,7 +76,8 @@ class MerchantAppController extends BaseController
             return $this->fail('app not found', 404);
         }
 
-        $config = array_merge($this->defaultAppConfig(), $this->getConfigObject($this->appConfigKey($id)));
+        $appRow = method_exists($app, 'toArray') ? $app->toArray() : (array)$app;
+        $config = $this->buildAppConfig($appRow);
         return $this->success([
             'app' => $app,
             'config' => $config,
@@ -122,11 +122,12 @@ class MerchantAppController extends BaseController
             }
 
             $update = [
-                'merchant_id' => $merchantId,
+                'mer_id' => $merchantId,
                 'api_type' => $apiType,
-                'app_id' => $appId,
+                'app_code' => $appId,
                 'app_name' => $appName,
                 'status' => $status,
+                'updated_at' => date('Y-m-d H:i:s'),
             ];
 
             if (!empty($data['app_secret'])) {
@@ -142,12 +143,14 @@ class MerchantAppController extends BaseController
 
             $secret = !empty($data['app_secret']) ? (string)$data['app_secret'] : $this->generateSecret();
             $this->merchantAppRepository->create([
-                'merchant_id' => $merchantId,
+                'mer_id' => $merchantId,
                 'api_type' => $apiType,
-                'app_id' => $appId,
+                'app_code' => $appId,
                 'app_secret' => $secret,
                 'app_name' => $appName,
                 'status' => $status,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
             ]);
         }
 
@@ -236,8 +239,9 @@ class MerchantAppController extends BaseController
             }
         }
 
-        $stored = array_merge($this->defaultAppConfig(), $this->getConfigObject($this->appConfigKey($id)), $config);
-        $this->systemConfigService->setValue($this->appConfigKey($id), $stored);
+        $updateData = $config;
+        $updateData['updated_at'] = date('Y-m-d H:i:s');
+        $this->merchantAppRepository->updateById($id, $updateData);
 
         return $this->success(null, 'saved');
     }
@@ -246,42 +250,6 @@ class MerchantAppController extends BaseController
     {
         $raw = random_bytes(24);
         return rtrim(strtr(base64_encode($raw), '+/', '-_'), '=');
-    }
-
-    private function appConfigKey(int $appId): string
-    {
-        return 'merchant_app_config_' . $appId;
-    }
-
-    private function defaultAppConfig(): array
-    {
-        return [
-            'package_code' => '',
-            'notify_url' => '',
-            'return_url' => '',
-            'callback_mode' => 'server',
-            'sign_type' => 'md5',
-            'order_expire_minutes' => 30,
-            'callback_retry_limit' => 6,
-            'ip_whitelist' => '',
-            'amount_min' => 0,
-            'amount_max' => 0,
-            'daily_limit' => 0,
-            'notify_enabled' => 1,
-            'remark' => '',
-            'updated_at' => '',
-        ];
-    }
-
-    private function getConfigObject(string $configKey): array
-    {
-        $raw = $this->systemConfigService->getValue($configKey, '{}');
-        if (!is_string($raw) || $raw === '') {
-            return [];
-        }
-
-        $decoded = json_decode($raw, true);
-        return is_array($decoded) ? $decoded : [];
     }
 
     private function getConfigEntries(string $configKey): array
@@ -297,6 +265,26 @@ class MerchantAppController extends BaseController
         }
 
         return array_values(array_filter($decoded, 'is_array'));
+    }
+
+    private function buildAppConfig(array $app): array
+    {
+        return [
+            'package_code' => trim((string)($app['package_code'] ?? '')),
+            'notify_url' => trim((string)($app['notify_url'] ?? '')),
+            'return_url' => trim((string)($app['return_url'] ?? '')),
+            'callback_mode' => trim((string)($app['callback_mode'] ?? 'server')) ?: 'server',
+            'sign_type' => trim((string)($app['sign_type'] ?? 'md5')) ?: 'md5',
+            'order_expire_minutes' => (int)($app['order_expire_minutes'] ?? 30),
+            'callback_retry_limit' => (int)($app['callback_retry_limit'] ?? 6),
+            'ip_whitelist' => trim((string)($app['ip_whitelist'] ?? '')),
+            'amount_min' => (string)($app['amount_min'] ?? '0.00'),
+            'amount_max' => (string)($app['amount_max'] ?? '0.00'),
+            'daily_limit' => (string)($app['daily_limit'] ?? '0.00'),
+            'notify_enabled' => (int)($app['notify_enabled'] ?? 1),
+            'remark' => trim((string)($app['remark'] ?? '')),
+            'updated_at' => (string)($app['updated_at'] ?? ''),
+        ];
     }
 
     private function buildPackageMap(): array

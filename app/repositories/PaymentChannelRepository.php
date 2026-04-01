@@ -15,9 +15,9 @@ class PaymentChannelRepository extends BaseRepository
     public function findAvailableChannel(int $merchantId, int $merchantAppId, int $methodId): ?PaymentChannel
     {
         return $this->model->newQuery()
-            ->where('merchant_id', $merchantId)
-            ->where('merchant_app_id', $merchantAppId)
-            ->where('method_id', $methodId)
+            ->where('mer_id', $merchantId)
+            ->where('app_id', $merchantAppId)
+            ->where('pay_type_id', $methodId)
             ->where('status', 1)
             ->orderBy('sort', 'asc')
             ->first();
@@ -51,13 +51,13 @@ class PaymentChannelRepository extends BaseRepository
         $query = $this->model->newQuery();
 
         if (!empty($filters['merchant_id'])) {
-            $query->where('merchant_id', (int)$filters['merchant_id']);
+            $query->where('mer_id', (int)$filters['merchant_id']);
         }
         if (!empty($filters['merchant_app_id'])) {
-            $query->where('merchant_app_id', (int)$filters['merchant_app_id']);
+            $query->where('app_id', (int)$filters['merchant_app_id']);
         }
         if (!empty($filters['method_id'])) {
-            $query->where('method_id', (int)$filters['method_id']);
+            $query->where('pay_type_id', (int)$filters['method_id']);
         }
         if (($filters['status'] ?? '') !== '' && $filters['status'] !== null) {
             $query->where('status', (int)$filters['status']);

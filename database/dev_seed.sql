@@ -78,13 +78,13 @@ ON DUPLICATE KEY UPDATE
 
 -- 7) 支付通道（为测试商户 M001 / 应用 1001 初始化拉卡拉通道）
 INSERT INTO `ma_pay_channel` (
-  `merchant_id`,
-  `merchant_app_id`,
+  `mer_id`,
+  `app_id`,
   `chan_code`,
   `chan_name`,
   `plugin_code`,
-  `method_id`,
-  `config_json`,
+  `pay_type_id`,
+  `config`,
   `split_ratio`,
   `chan_cost`,
   `chan_mode`,
@@ -98,16 +98,16 @@ INSERT INTO `ma_pay_channel` (
   `updated_at`
 )
 SELECT
-  m.id        AS merchant_id,
-  app.id      AS merchant_app_id,
+  m.id        AS mer_id,
+  app.id      AS app_id,
   'lakala_alipay' AS chan_code,
   '拉卡拉-支付宝' AS chan_name,
   'lakala'    AS plugin_code,
-  pm.id       AS method_id,
-  JSON_OBJECT('notify_url', 'https://example.com/notify') AS config_json,
+  pm.id       AS pay_type_id,
+  JSON_OBJECT('notify_url', 'https://example.com/notify') AS config,
   100.00      AS split_ratio,
   0.00        AS chan_cost,
-  'wallet'    AS chan_mode,
+  0           AS chan_mode,
   0.00        AS daily_limit,
   0           AS daily_cnt,
   0.01        AS min_amount,
@@ -122,8 +122,8 @@ JOIN `ma_pay_method` pm ON pm.method_code = 'alipay'
 ON DUPLICATE KEY UPDATE
   `chan_name`   = VALUES(`chan_name`),
   `plugin_code` = VALUES(`plugin_code`),
-  `method_id`   = VALUES(`method_id`),
-  `config_json` = VALUES(`config_json`),
+  `pay_type_id` = VALUES(`pay_type_id`),
+  `config`      = VALUES(`config`),
   `split_ratio` = VALUES(`split_ratio`),
   `chan_cost`   = VALUES(`chan_cost`),
   `chan_mode`   = VALUES(`chan_mode`),
@@ -136,13 +136,13 @@ ON DUPLICATE KEY UPDATE
   `updated_at`  = NOW();
 
 INSERT INTO `ma_pay_channel` (
-  `merchant_id`,
-  `merchant_app_id`,
+  `mer_id`,
+  `app_id`,
   `chan_code`,
   `chan_name`,
   `plugin_code`,
-  `method_id`,
-  `config_json`,
+  `pay_type_id`,
+  `config`,
   `split_ratio`,
   `chan_cost`,
   `chan_mode`,
@@ -156,16 +156,16 @@ INSERT INTO `ma_pay_channel` (
   `updated_at`
 )
 SELECT
-  m.id        AS merchant_id,
-  app.id      AS merchant_app_id,
+  m.id        AS mer_id,
+  app.id      AS app_id,
   'lakala_wechat' AS chan_code,
   '拉卡拉-微信支付' AS chan_name,
   'lakala'    AS plugin_code,
-  pm.id       AS method_id,
-  JSON_OBJECT('notify_url', 'https://example.com/notify') AS config_json,
+  pm.id       AS pay_type_id,
+  JSON_OBJECT('notify_url', 'https://example.com/notify') AS config,
   100.00      AS split_ratio,
   0.00        AS chan_cost,
-  'wallet'    AS chan_mode,
+  0           AS chan_mode,
   0.00        AS daily_limit,
   0           AS daily_cnt,
   0.01        AS min_amount,
@@ -180,8 +180,8 @@ JOIN `ma_pay_method` pm ON pm.method_code = 'wechat'
 ON DUPLICATE KEY UPDATE
   `chan_name`   = VALUES(`chan_name`),
   `plugin_code` = VALUES(`plugin_code`),
-  `method_id`   = VALUES(`method_id`),
-  `config_json` = VALUES(`config_json`),
+  `pay_type_id` = VALUES(`pay_type_id`),
+  `config`      = VALUES(`config`),
   `split_ratio` = VALUES(`split_ratio`),
   `chan_cost`   = VALUES(`chan_cost`),
   `chan_mode`   = VALUES(`chan_mode`),

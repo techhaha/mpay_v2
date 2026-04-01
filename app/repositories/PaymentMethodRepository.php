@@ -27,7 +27,7 @@ class PaymentMethodRepository extends BaseRepository
     public function findByCode(string $methodCode): ?PaymentMethod
     {
         return $this->model->newQuery()
-            ->where('method_code', $methodCode)
+            ->where('type', $methodCode)
             ->where('status', 1)
             ->first();
     }
@@ -38,7 +38,7 @@ class PaymentMethodRepository extends BaseRepository
     public function findAnyByCode(string $methodCode): ?PaymentMethod
     {
         return $this->model->newQuery()
-            ->where('method_code', $methodCode)
+            ->where('type', $methodCode)
             ->first();
     }
 
@@ -53,10 +53,10 @@ class PaymentMethodRepository extends BaseRepository
             $query->where('status', (int)$filters['status']);
         }
         if (!empty($filters['method_code'])) {
-            $query->where('method_code', 'like', '%' . $filters['method_code'] . '%');
+            $query->where('type', 'like', '%' . $filters['method_code'] . '%');
         }
         if (!empty($filters['method_name'])) {
-            $query->where('method_name', 'like', '%' . $filters['method_name'] . '%');
+            $query->where('name', 'like', '%' . $filters['method_name'] . '%');
         }
 
         $query->orderBy('sort', 'asc')->orderByDesc('id');

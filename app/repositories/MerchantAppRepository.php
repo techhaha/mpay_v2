@@ -21,7 +21,7 @@ class MerchantAppRepository extends BaseRepository
     public function findByAppId(string $appId): ?MerchantApp
     {
         return $this->model->newQuery()
-            ->where('app_id', $appId)
+            ->where('app_code', $appId)
             ->where('status', 1)
             ->first();
     }
@@ -32,9 +32,20 @@ class MerchantAppRepository extends BaseRepository
     public function findByMerchantAndApp(int $merchantId, int $appId): ?MerchantApp
     {
         return $this->model->newQuery()
-            ->where('merchant_id', $merchantId)
+            ->where('mer_id', $merchantId)
             ->where('id', $appId)
             ->where('status', 1)
+            ->first();
+    }
+
+    /**
+     * 根据商户ID和应用ID（app_id）查询
+     */
+    public function findByMerchantAndAppId(int $merchantId, string $appId): ?MerchantApp
+    {
+        return $this->model->newQuery()
+            ->where('mer_id', $merchantId)
+            ->where('app_code', $appId)
             ->first();
     }
 
@@ -44,7 +55,7 @@ class MerchantAppRepository extends BaseRepository
     public function findAnyByAppId(string $appId): ?MerchantApp
     {
         return $this->model->newQuery()
-            ->where('app_id', $appId)
+            ->where('app_code', $appId)
             ->first();
     }
 
@@ -56,19 +67,28 @@ class MerchantAppRepository extends BaseRepository
         $query = $this->model->newQuery();
 
         if (!empty($filters['merchant_id'])) {
-            $query->where('merchant_id', (int)$filters['merchant_id']);
+            $query->where('mer_id', (int)$filters['merchant_id']);
         }
         if (($filters['status'] ?? '') !== '' && $filters['status'] !== null) {
             $query->where('status', (int)$filters['status']);
         }
         if (!empty($filters['app_id'])) {
-            $query->where('app_id', 'like', '%' . $filters['app_id'] . '%');
+            $query->where('app_code', 'like', '%' . $filters['app_id'] . '%');
         }
         if (!empty($filters['app_name'])) {
             $query->where('app_name', 'like', '%' . $filters['app_name'] . '%');
         }
         if (!empty($filters['api_type'])) {
             $query->where('api_type', (string)$filters['api_type']);
+        }
+        if (!empty($filters['package_code'])) {
+            $query->where('package_code', (string)$filters['package_code']);
+        }
+        if (($filters['notify_enabled'] ?? '') !== '' && $filters['notify_enabled'] !== null) {
+            $query->where('notify_enabled', (int)$filters['notify_enabled']);
+        }
+        if (!empty($filters['callback_mode'])) {
+            $query->where('callback_mode', (string)$filters['callback_mode']);
         }
 
         $query->orderByDesc('id');

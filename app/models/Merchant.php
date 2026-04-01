@@ -9,19 +9,25 @@ use app\common\base\BaseModel;
  */
 class Merchant extends BaseModel
 {
-    protected $table = 'ma_merchant';
+    protected $table = 'ma_mer';
     
     protected $fillable = [
         'merchant_no',
         'merchant_name',
+        'balance',
+        'email',
         'funds_mode',
         'status',
+        'remark',
+        'extra',
     ];
     
     public $timestamps = true;
     
     protected $casts = [
+        'balance' => 'decimal:2',
         'status' => 'integer',
+        'extra' => 'array',
     ];
 }
 

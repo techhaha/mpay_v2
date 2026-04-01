@@ -116,18 +116,18 @@ class ChannelController extends BaseController
         }
 
         $channelData = [
-            'merchant_id' => $merchantId,
-            'merchant_app_id' => $merchantAppId,
+            'mer_id' => $merchantId,
+            'app_id' => $merchantAppId,
             'chan_code' => $channelCode !== '' ? $channelCode : 'CH' . date('YmdHis') . mt_rand(1000, 9999),
             'chan_name' => $channelName,
             'plugin_code' => $pluginCode,
-            'method_id' => (int)$method->id,
-            'config_json' => array_merge($configJson, [
+            'pay_type_id' => (int)$method->id,
+            'config' => array_merge($configJson, [
                 'enabled_products' => is_array($enabledProducts) ? array_values($enabledProducts) : [],
             ]),
             'split_ratio' => isset($data['split_ratio']) ? (float)$data['split_ratio'] : 100,
             'chan_cost' => isset($data['channel_cost']) ? (float)$data['channel_cost'] : 0,
-            'chan_mode' => trim((string)($data['channel_mode'] ?? 'wallet')) ?: 'wallet',
+            'chan_mode' => in_array(strtolower(trim((string)($data['channel_mode'] ?? 'wallet'))), ['1', 'direct', 'merchant'], true) ? 1 : 0,
             'daily_limit' => isset($data['daily_limit']) ? (float)$data['daily_limit'] : 0,
             'daily_cnt' => isset($data['daily_count']) ? (int)$data['daily_count'] : 0,
             'min_amount' => isset($data['min_amount']) && $data['min_amount'] !== '' ? (float)$data['min_amount'] : null,

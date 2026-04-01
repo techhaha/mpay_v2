@@ -54,8 +54,8 @@ class PayMethodController extends BaseController
 
         if ($id > 0) {
             $this->methodRepository->updateById($id, [
-                'method_code' => $code,
-                'method_name' => $name,
+                'type' => $code,
+                'name' => $name,
                 'icon' => $icon,
                 'sort' => $sort,
                 'status' => $status,
@@ -66,8 +66,8 @@ class PayMethodController extends BaseController
                 return $this->fail('支付方式编码已存在', 400);
             }
             $this->methodRepository->create([
-                'method_code' => $code,
-                'method_name' => $name,
+                'type' => $code,
+                'name' => $name,
                 'icon' => $icon,
                 'sort' => $sort,
                 'status' => $status,

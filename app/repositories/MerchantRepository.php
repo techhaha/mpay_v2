@@ -41,6 +41,12 @@ class MerchantRepository extends BaseRepository
         if (!empty($filters['merchant_name'])) {
             $query->where('merchant_name', 'like', '%' . $filters['merchant_name'] . '%');
         }
+        if (!empty($filters['email'])) {
+            $query->where('email', 'like', '%' . $filters['email'] . '%');
+        }
+        if (isset($filters['balance']) && $filters['balance'] !== '') {
+            $query->where('balance', (string)$filters['balance']);
+        }
 
         $query->orderByDesc('id');
 
