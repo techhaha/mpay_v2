@@ -24,6 +24,10 @@ MPay V2 Webman 是一个采用 Webman 高性能 PHP 框架构建的支付系统�
 <img src="doc/img/5.png" width=640 />
 <img src="doc/img/6.png" width=640 />
 <img src="doc/img/7.png" width=640 />
+<img src="doc/img/8.png" width=640 />
+<img src="doc/img/9.png" width=640 />
+<img src="doc/img/10.png" width=640 />
+<img src="doc/img/11.png" width=640 />
 
 ## 项目结构
 
