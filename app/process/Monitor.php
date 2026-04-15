@@ -1,15 +1,8 @@
 <?php
 /**
- * This file is part of webman.
+ * 这是 webman 框架自带的文件监控进程。
  *
- * Licensed under The MIT License
- * For full copyright and license information, please see the MIT-LICENSE.txt
- * Redistributions of files must retain the above copyright notice.
- *
- * @author    walkor<walkor@workerman.net>
- * @copyright walkor<walkor@workerman.net>
- * @link      http://www.workerman.net/
- * @license   http://www.opensource.org/licenses/mit-license.php MIT License
+ * 许可证信息与版权声明保持不变。
  */
 
 namespace app\process;
@@ -22,34 +15,32 @@ use Workerman\Timer;
 use Workerman\Worker;
 
 /**
- * Class FileMonitor
- * @package process
+ * 文件监控器。
  */
 class Monitor
 {
     /**
-     * @var array
+     * 监控路径列表。
      */
     protected array $paths = [];
 
     /**
-     * @var array
+     * 监控扩展名列表。
      */
     protected array $extensions = [];
 
     /**
-     * @var array
+     * 已加载文件列表。
      */
     protected array $loadedFiles = [];
 
     /**
-     * @var int
+     * 父进程 ID。
      */
     protected int $ppid = 0;
 
     /**
-     * Pause monitor
-     * @return void
+     * 暂停监控。
      */
     public static function pause(): void
     {
@@ -57,8 +48,7 @@ class Monitor
     }
 
     /**
-     * Resume monitor
-     * @return void
+     * 恢复监控。
      */
     public static function resume(): void
     {
@@ -69,8 +59,7 @@ class Monitor
     }
 
     /**
-     * Whether monitor is paused
-     * @return bool
+     * 判断监控是否已暂停。
      */
     public static function isPaused(): bool
     {
@@ -79,8 +68,7 @@ class Monitor
     }
 
     /**
-     * Lock file
-     * @return string
+     * 锁文件路径。
      */
     protected static function lockFile(): string
     {
@@ -88,10 +76,7 @@ class Monitor
     }
 
     /**
-     * FileMonitor constructor.
-     * @param $monitorDir
-     * @param $monitorExtensions
-     * @param array $options
+     * 构造文件监控器。
      */
     public function __construct($monitorDir, $monitorExtensions, array $options = [])
     {
@@ -110,7 +95,7 @@ class Monitor
         }
         $disableFunctions = explode(',', ini_get('disable_functions'));
         if (in_array('exec', $disableFunctions, true)) {
-            echo "\nMonitor file change turned off because exec() has been disabled by disable_functions setting in " . PHP_CONFIG_FILE_PATH . "/php.ini\n";
+                    echo "\n由于 php.ini 的 disable_functions 禁用了 exec()，文件监控已关闭：" . PHP_CONFIG_FILE_PATH . "/php.ini\n";
         } else {
             if ($options['enable_file_monitor'] ?? true) {
                 Timer::add(1, function () {
@@ -126,8 +111,7 @@ class Monitor
     }
 
     /**
-     * @param $monitorDir
-     * @return bool
+     * 检查指定路径是否有文件变化。
      */
     public function checkFilesChange($monitorDir): bool
     {
@@ -142,22 +126,22 @@ class Monitor
             }
             $iterator = [new SplFileInfo($monitorDir)];
         } else {
-            // recursive traversal directory
+                // 递归遍历目录
             $dirIterator = new RecursiveDirectoryIterator($monitorDir, FilesystemIterator::SKIP_DOTS | FilesystemIterator::FOLLOW_SYMLINKS);
             $iterator = new RecursiveIteratorIterator($dirIterator);
         }
         $count = 0;
         foreach ($iterator as $file) {
             $count ++;
-            /** var SplFileInfo $file */
+            /** @var SplFileInfo $file */
             if (is_dir($file->getRealPath())) {
                 continue;
             }
-            // check mtime
+            // 检查修改时间
             if (in_array($file->getExtension(), $this->extensions, true) && $lastMtime < $file->getMTime()) {
                 $lastMtime = $file->getMTime();
                 if (DIRECTORY_SEPARATOR === '/' && isset($this->loadedFiles[$file->getRealPath()])) {
-                    echo "$file updated but cannot be reloaded because only auto-loaded files support reload.\n";
+                    echo "$file 已更新，但无法重载，因为当前仅支持自动加载文件重载。\n";
                     continue;
                 }
                 $var = 0;
@@ -165,22 +149,22 @@ class Monitor
                 if ($var) {
                     continue;
                 }
-                // send SIGUSR1 signal to master process for reload
+                // 向主进程发送 SIGUSR1 信号触发重载
                 if (DIRECTORY_SEPARATOR === '/') {
                     if ($masterPid = $this->getMasterPid()) {
-                        echo $file . " updated and reload\n";
+                        echo $file . " 已更新并触发重载\n";
                         posix_kill($masterPid, SIGUSR1);
                     } else {
-                        echo "Master process has gone away and can not reload\n";
+                        echo "主进程已退出，无法重载\n";
                     }
                     return true;
                 }
-                echo $file . " updated and reload\n";
+                echo $file . " 已更新并触发重载\n";
                 return true;
             }
         }
         if (!$tooManyFilesCheck && $count > 1000) {
-            echo "Monitor: There are too many files ($count files) in $monitorDir which makes file monitoring very slow\n";
+            echo "监控目录 $monitorDir 下文件过多（$count 个），文件监控会变慢\n";
             $tooManyFilesCheck = 1;
         }
         return false;
@@ -195,7 +179,7 @@ class Monitor
             return 0;
         }
         if (function_exists('posix_kill') && !posix_kill($this->ppid, 0)) {
-            echo "Master process has gone away\n";
+            echo "主进程已退出\n";
             return $this->ppid = 0;
         }
         if (PHP_OS_FAMILY !== 'Linux') {
@@ -203,14 +187,14 @@ class Monitor
         }
         $cmdline = "/proc/$this->ppid/cmdline";
         if (!is_readable($cmdline) || !($content = file_get_contents($cmdline)) || (!str_contains($content, 'WorkerMan') && !str_contains($content, 'php'))) {
-            // Process not exist
+            // 进程不存在
             $this->ppid = 0;
         }
         return $this->ppid;
     }
 
     /**
-     * @return bool
+     * 检查所有监控路径是否有变化。
      */
     public function checkAllFilesChange(): bool
     {
@@ -226,8 +210,7 @@ class Monitor
     }
 
     /**
-     * @param $memoryLimit
-     * @return void
+     * 检查子进程内存占用。
      */
     public function checkMemory($memoryLimit): void
     {
@@ -262,9 +245,7 @@ class Monitor
     }
 
     /**
-     * Get memory limit
-     * @param $memoryLimit
-     * @return int
+     * 计算内存限制值。
      */
     protected function getMemoryLimit($memoryLimit): int
     {

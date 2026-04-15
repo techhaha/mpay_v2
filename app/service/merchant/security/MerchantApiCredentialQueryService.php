@@ -1,0 +1,128 @@
+<?php
+
+namespace app\service\merchant\security;
+
+use app\common\base\BaseService;
+use app\common\constant\AuthConstant;
+use app\model\merchant\MerchantApiCredential;
+use app\repository\merchant\credential\MerchantApiCredentialRepository;
+
+/**
+ * 商户接口凭证查询服务。
+ *
+ * 负责凭证列表和详情展示，不承载验签和写入逻辑。
+ */
+class MerchantApiCredentialQueryService extends BaseService
+{
+    /**
+     * 构造函数，注入对应依赖。
+     */
+    public function __construct(
+        protected MerchantApiCredentialRepository $merchantApiCredentialRepository
+    ) {
+    }
+
+    /**
+     * 分页查询商户接口凭证。
+     */
+    public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
+    {
+        $query = $this->baseQuery(true);
+
+        $keyword = trim((string) ($filters['keyword'] ?? ''));
+        if ($keyword !== '') {
+            $query->where(function ($builder) use ($keyword) {
+                $builder->where('m.merchant_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
+                    ->orWhere('c.api_key', 'like', '%' . $keyword . '%');
+            });
+        }
+
+        $merchantId = (string) ($filters['merchant_id'] ?? '');
+        if ($merchantId !== '') {
+            $query->where('c.merchant_id', (int) $merchantId);
+        }
+
+        $status = (string) ($filters['status'] ?? '');
+        if ($status !== '') {
+            $query->where('c.status', (int) $status);
+        }
+
+        $paginator = $query
+            ->orderByDesc('c.id')
+            ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
+
+        $paginator->getCollection()->transform(function ($row) {
+            $row->sign_type_text = $this->textFromMap((int) $row->sign_type, AuthConstant::signTypeMap());
+            $row->status_text = (int) $row->status === AuthConstant::LOGIN_STATUS_ENABLED ? '启用' : '禁用';
+
+            return $row;
+        });
+
+        return $paginator;
+    }
+
+    /**
+     * 查询商户接口凭证详情。
+     */
+    public function findById(int $id): ?MerchantApiCredential
+    {
+        $row = $this->baseQuery(false)->where('c.id', $id)->first();
+        return $this->decorateRow($row);
+    }
+
+    /**
+     * 查询商户对应的接口凭证详情。
+     */
+    public function findByMerchantId(int $merchantId): ?MerchantApiCredential
+    {
+        $row = $this->baseQuery(false)->where('c.merchant_id', $merchantId)->first();
+        return $this->decorateRow($row);
+    }
+
+    /**
+     * 统一构造查询对象。
+     */
+    private function baseQuery(bool $maskCredentialValue = false)
+    {
+        $query = $this->merchantApiCredentialRepository->query()
+            ->from('ma_merchant_api_credential as c')
+            ->leftJoin('ma_merchant as m', 'c.merchant_id', '=', 'm.id')
+            ->select([
+                'c.id',
+                'c.merchant_id',
+                'c.sign_type',
+                'c.status',
+                'c.last_used_at',
+                'c.created_at',
+                'c.updated_at',
+            ])
+            ->selectRaw("COALESCE(m.merchant_no, '') AS merchant_no")
+            ->selectRaw("COALESCE(m.merchant_name, '') AS merchant_name");
+
+        if ($maskCredentialValue) {
+            $query->selectRaw("CASE WHEN c.api_key IS NULL OR c.api_key = '' THEN '' ELSE CONCAT(LEFT(c.api_key, 4), '****', RIGHT(c.api_key, 4)) END AS api_key_preview");
+        } else {
+            $query->addSelect('c.api_key');
+            $query->selectRaw("COALESCE(c.api_key, '') AS api_key_full");
+        }
+
+        return $query;
+    }
+
+    /**
+     * 给详情行补充展示字段。
+     */
+    private function decorateRow(mixed $row): ?MerchantApiCredential
+    {
+        if (!$row) {
+            return null;
+        }
+
+        $row->api_key_preview = $this->maskCredentialValue((string) ($row->api_key ?? ''), false);
+        $row->sign_type_text = $this->textFromMap((int) $row->sign_type, AuthConstant::signTypeMap());
+        $row->status_text = (int) $row->status === AuthConstant::LOGIN_STATUS_ENABLED ? '启用' : '禁用';
+
+        return $row;
+    }
+}

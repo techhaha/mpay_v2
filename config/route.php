@@ -1,5 +1,4 @@
 <?php
-
 /**
  * This file is part of webman.
  *
@@ -14,16 +13,19 @@
  */
 
 use Webman\Route;
-use support\Response;
 use support\Request;
+use support\Response;
 
 // 管理后台路由
-require_once base_path() . '/app/routes/admin.php';
+require_once app_path('route/admin.php');
 
-// API 路由
-require_once base_path() . '/app/routes/api.php';
+// 商户后台路由
+require_once app_path('route/mer.php');
 
-// 匹配所有options路由（CORS 预检请求）
+// 用户路由
+require_once app_path('route/api.php');
+
+// 预检路由
 Route::options('[{path:.+}]', function (Request $request){
     $response = response('', 204);
     return $response->withHeaders([
@@ -33,7 +35,11 @@ Route::options('[{path:.+}]', function (Request $request){
         'Access-Control-Allow-Headers' => $request->header('access-control-request-headers', '*'),
     ]);
 });
-/**
- * 关闭默认路由
- */
+
+// 关闭默认路由
 Route::disableDefaultRoute();
+
+
+
+
+

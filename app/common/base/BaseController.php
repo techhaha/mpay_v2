@@ -2,49 +2,44 @@
 
 namespace app\common\base;
 
+use app\exception\ValidationException;
+use support\Context;
 use support\Request;
 use support\Response;
 
 /**
- * 控制器基础父类
+ * HTTP 层基础控制器。
  *
- * 约定统一的 JSON 返回结构：
- * {
- *   "code": 200,
- *   "message": "success",
- *   "data": ...
- * }
+ * 统一提供响应封装、参数校验、请求上下文读取等通用能力。
  */
 class BaseController
 {
     /**
-     * 成功返回
+     * 返回成功响应。
      */
-    protected function success(mixed $data = null, string $message = 'success', int $code = 200): Response
+    protected function success(mixed $data = null, string $message = '操作成功', int $code = 200): Response
     {
         return json([
-            'code'    => $code,
+            'code' => $code,
             'msg' => $message,
-            'data'    => $data,
+            'data' => $data,
         ]);
     }
 
     /**
-     * 失败返回
+     * 返回失败响应。
      */
-    protected function fail(string $message = 'error', int $code = 500, mixed $data = null): Response
+    protected function fail(string $message = '操作失败', int $code = 500, mixed $data = null): Response
     {
         return json([
-            'code'    => $code,
+            'code' => $code,
             'msg' => $message,
-            'data'    => $data,
+            'data' => $data,
         ]);
     }
 
     /**
-     * 统一分页返回结构
-     *
-     * @param mixed $paginator Laravel/Eloquent paginator
+     * 返回统一分页响应。
      */
     protected function page(mixed $paginator): Response
     {
@@ -58,28 +53,76 @@ class BaseController
         }
 
         return $this->success([
-            'list'         => $paginator->items(),
-            'total'        => $paginator->total(),
-            'page'         => $paginator->currentPage(),
-            'size'         => $paginator->perPage(),
+            'list' => $paginator->items(),
+            'total' => $paginator->total(),
+            'page' => $paginator->currentPage(),
+            'size' => $paginator->perPage(),
         ]);
     }
 
     /**
-     * 获取当前登录用户的 token 载荷
+     * 通过校验器类验证请求数据。
      *
-     * 从 AuthMiddleware 注入的用户信息中获取
+     * @param class-string $validatorClass
      */
-    protected function currentUser(Request $request): ?array
+    protected function validated(array $data, string $validatorClass, ?string $scene = null): array
     {
-        return $request->user ?? null;
+        $validator = $validatorClass::make($data);
+
+        if ($scene !== null) {
+            $validator = $validator->withScene($scene);
+        }
+
+        return $validator
+            ->withException(ValidationException::class)
+            ->validate();
     }
 
     /**
-     * 获取当前登录用户ID
+     * 获取中间件预处理后的标准化参数。
      */
-    protected function currentUserId(Request $request): int
+    protected function payload(Request $request): array
     {
-        return (int) ($request->userId ?? 0);
+        $payload = (array) $request->all();
+        $normalized = Context::get('mpay.normalized_input', []);
+
+        if (is_array($normalized) && !empty($normalized)) {
+            $payload = array_replace($payload, $normalized);
+        }
+
+        return $payload;
     }
+
+    /**
+     * 读取请求属性。
+     */
+    protected function requestAttribute(Request $request, string $key, mixed $default = null): mixed
+    {
+        return Context::get($key, $default);
+    }
+
+    /**
+     * 获取中间件注入的当前管理员 ID。
+     */
+    protected function currentAdminId(Request $request): int
+    {
+        return (int) $this->requestAttribute($request, 'auth.admin_id', 0);
+    }
+
+    /**
+     * 获取中间件注入的当前商户 ID。
+     */
+    protected function currentMerchantId(Request $request): int
+    {
+        return (int) $this->requestAttribute($request, 'auth.merchant_id', 0);
+    }
+
+    /**
+     * 获取中间件注入的当前商户编号。
+     */
+    protected function currentMerchantNo(Request $request): string
+    {
+        return (string) $this->requestAttribute($request, 'auth.merchant_no', '');
+    }
+
 }

@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace app\common\base;
 
-use app\common\contracts\PayPluginInterface;
-use app\exceptions\PaymentException;
+use app\common\interface\PayPluginInterface;
+use app\exception\PaymentException;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use Psr\Http\Message\ResponseInterface;
@@ -21,7 +21,7 @@ use support\Log;
  * - 子类可在 `init()` 中配置第三方 SDK（例如 yansongda/pay）或读取必填参数。
  *
  * 约定：
- * - 这里的 `$channelConfig` 来源通常是 `ma_pay_channel.config_json`，属于“通道级配置”。
+ * - 这里的 `$channelConfig` 来源通常是 `ma_payment_plugin_conf.config`，并附带通道维度上下文。
  * - 业务级入参（如订单号、金额、回调地址等）不要混进 `$channelConfig`，应从 `pay()` 的 `$order` 参数获取。
  */
 abstract class BasePayment implements PayPluginInterface
@@ -106,6 +106,12 @@ abstract class BasePayment implements PayPluginInterface
     public function getAuthorLink(): string
     {
         return $this->paymentInfo['link'] ?? '';
+    }
+
+    /** 获取版本号 */
+    public function getVersion(): string
+    {
+        return $this->paymentInfo['version'] ?? '';
     }
 
     // ==================== 能力声明 ====================

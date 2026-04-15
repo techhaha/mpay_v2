@@ -13,5 +13,5 @@
  */
 
 return [
-    // support\bootstrap\Session::class,
+    support\bootstrap\Session::class,
 ];

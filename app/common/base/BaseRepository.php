@@ -2,65 +2,194 @@
 
 namespace app\common\base;
 
+use Illuminate\Database\UniqueConstraintViolationException;
 use support\Model;
+use support\Db;
 
 /**
- * 仓储层基础父类
+ * 仓储层基础类。
  *
- * 封装单表常用的 CRUD / 分页操作，具体仓储继承后可扩展业务查询。
+ * 封装通用 CRUD、条件查询、加锁查询和分页查询能力。
  */
 abstract class BaseRepository
 {
     /**
-     * @var Model
+     * 当前仓储绑定的模型实例。
      */
     protected Model $model;
-
+    
+    /**
+     * 构造函数，绑定模型实例。
+     */
     public function __construct(Model $model)
     {
         $this->model = $model;
     }
 
     /**
-     * 根据主键查询
+     * 获取查询构造器。
      */
-    public function find(int $id, array $columns = ['*']): ?Model
+    public function query()
     {
-        return $this->model->newQuery()->find($id, $columns);
+        return $this->model->newQuery();
     }
 
     /**
-     * 新建记录
+     * 按主键查询记录。
+     */
+    public function find(int|string $id, array $columns = ['*']): ?Model
+    {
+        return $this->query()->find($id, $columns);
+    }
+
+    /**
+     * 新增记录。
      */
     public function create(array $data): Model
     {
-        return $this->model->newQuery()->create($data);
+        return $this->query()->create($data);
     }
 
     /**
-     * 按主键更新
+     * 按主键更新记录。
      */
-    public function updateById(int $id, array $data): bool
+    public function updateById(int|string $id, array $data): bool
     {
-        return (bool) $this->model->newQuery()->whereKey($id)->update($data);
+        return (bool) $this->query()->whereKey($id)->update($data);
     }
 
     /**
-     * 按主键删除
+     * 按唯一键更新记录。
      */
-    public function deleteById(int $id): bool
+    public function updateByKey(int|string $key, array $data): bool
     {
-        return (bool) $this->model->newQuery()->whereKey($id)->delete();
+        return (bool) $this->query()->whereKey($key)->update($data);
     }
 
     /**
-     * 简单分页查询示例
+     * 按条件批量更新记录。
+     */
+    public function updateWhere(array $where, array $data): int
+    {
+        $query = $this->query();
+
+        if (!empty($where)) {
+            $query->where($where);
+        }
+
+        return (int) $query->update($data);
+    }
+
+    /**
+     * 按主键删除记录。
+     */
+    public function deleteById(int|string $id): bool
+    {
+        return (bool) $this->query()->whereKey($id)->delete();
+    }
+
+    /**
+     * 按条件批量删除记录。
+     */
+    public function deleteWhere(array $where): int
+    {
+        $query = $this->query();
+
+        if (!empty($where)) {
+            $query->where($where);
+        }
+
+        return (int) $query->delete();
+    }
+
+    /**
+     * 按条件获取首条记录。
+     */
+    public function firstBy(array $where = [], array $columns = ['*']): ?Model
+    {
+        $query = $this->query();
+
+        if (!empty($where)) {
+            $query->where($where);
+        }
+
+        return $query->first($columns);
+    }
+
+    /**
+     * 先查后更，不存在则创建。
+     */
+    public function updateOrCreate(array $where, array $data = []): Model
+    {
+        if ($where === []) {
+            return $this->create($data);
+        }
+
+        return Db::transaction(function () use ($where, $data): Model {
+            $query = $this->query()->lockForUpdate();
+            $query->where($where);
+
+            /** @var Model|null $model */
+            $model = $query->first();
+            if ($model) {
+                $model->fill($data);
+                $model->save();
+
+                return $model->refresh();
+            }
+
+            try {
+                return $this->create(array_merge($where, $data));
+            } catch (UniqueConstraintViolationException $e) {
+                $model = $this->firstBy($where);
+                if (!$model) {
+                    throw $e;
+                }
+
+                $model->fill($data);
+                $model->save();
+
+                return $model->refresh();
+            }
+        });
+    }
+
+    /**
+     * 按条件统计数量。
+     */
+    public function countBy(array $where = []): int
+    {
+        $query = $this->query();
+
+        if (!empty($where)) {
+            $query->where($where);
+        }
+
+        return (int) $query->count();
+    }
+
+    /**
+     * 判断条件下是否存在记录。
+     */
+    public function existsBy(array $where = []): bool
+    {
+        $query = $this->query();
+
+        if (!empty($where)) {
+            $query->where($where);
+        }
+
+        return $query->exists();
+    }
+
+    /**
+     * 分页查询。
      *
-     * @param array $where  ['字段' => 值]，值为 null / '' 时会被忽略
+     * @param array $where 条件数组，空值会被忽略
      */
     public function paginate(array $where = [], int $page = 1, int $pageSize = 10, array $columns = ['*'])
     {
-        $query = $this->model->newQuery();
+        $query = $this->query();
 
         if (!empty($where)) {
             $query->where($where);

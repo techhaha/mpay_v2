@@ -1,0 +1,212 @@
+<?php
+
+namespace app\service\payment\runtime;
+
+use app\common\base\BaseService;
+use app\common\interface\PaymentInterface;
+use app\common\interface\PayPluginInterface;
+use app\exception\PaymentException;
+use app\model\payment\PayOrder;
+use app\model\payment\PaymentChannel;
+use app\model\payment\PaymentPlugin;
+use app\repository\payment\config\PaymentChannelRepository;
+use app\repository\payment\config\PaymentPluginConfRepository;
+use app\repository\payment\config\PaymentPluginRepository;
+use app\repository\payment\config\PaymentTypeRepository;
+
+/**
+ * 支付插件工厂服务。
+ *
+ * 负责解析插件定义、装配配置并实例化插件。
+ */
+class PaymentPluginFactoryService extends BaseService
+{
+    public function __construct(
+        protected PaymentPluginRepository $paymentPluginRepository,
+        protected PaymentPluginConfRepository $paymentPluginConfRepository,
+        protected PaymentChannelRepository $paymentChannelRepository,
+        protected PaymentTypeRepository $paymentTypeRepository
+    ) {}
+
+    public function createByChannel(PaymentChannel|int $channel, ?int $payTypeId = null, bool $allowDisabled = false): PaymentInterface & PayPluginInterface
+    {
+        $channelModel = $channel instanceof PaymentChannel
+            ? $channel
+            : $this->paymentChannelRepository->find((int) $channel);
+
+        if (!$channelModel) {
+            throw new PaymentException('支付通道不存在', 40402, ['channel_id' => (int) $channel]);
+        }
+
+        $plugin = $this->resolvePlugin((string) $channelModel->plugin_code, $allowDisabled);
+        $payTypeCode = $this->resolvePayTypeCode((int) ($payTypeId ?: $channelModel->pay_type_id));
+        if (!$allowDisabled && !$this->pluginSupportsPayType($plugin, $payTypeCode)) {
+            throw new PaymentException('支付插件不支持当前支付方式', 40210, [
+                'plugin_code' => (string) $plugin->code,
+                'pay_type_code' => $payTypeCode,
+                'channel_id' => (int) $channelModel->id,
+            ]);
+        }
+
+        $instance = $this->instantiatePlugin((string) $plugin->class_name);
+        $instance->init($this->buildChannelConfig($channelModel, $plugin));
+
+        return $instance;
+    }
+
+    public function createByPayOrder(PayOrder $payOrder, bool $allowDisabled = true): PaymentInterface
+    {
+        return $this->createByChannel((int) $payOrder->channel_id, (int) $payOrder->pay_type_id, $allowDisabled);
+    }
+
+    public function ensureChannelSupportsPayType(PaymentChannel $channel, int $payTypeId): void
+    {
+        $plugin = $this->resolvePlugin((string) $channel->plugin_code, false);
+        $payTypeCode = $this->resolvePayTypeCode($payTypeId);
+
+        if (!$this->pluginSupportsPayType($plugin, $payTypeCode)) {
+            throw new PaymentException('支付插件不支持当前支付方式', 40210, [
+                'plugin_code' => (string) $plugin->code,
+                'pay_type_code' => $payTypeCode,
+                'channel_id' => (int) $channel->id,
+            ]);
+        }
+    }
+
+    public function pluginPayTypes(string $pluginCode, bool $allowDisabled = false): array
+    {
+        $plugin = $this->resolvePlugin($pluginCode, $allowDisabled);
+
+        return $this->normalizeCodes($plugin->pay_types ?? []);
+    }
+
+    private function buildChannelConfig(PaymentChannel $channel, PaymentPlugin $plugin): array
+    {
+        $config = [];
+        $configId = (int) $channel->api_config_id;
+
+        if ($configId > 0) {
+            $pluginConf = $this->paymentPluginConfRepository->find($configId);
+            if (!$pluginConf) {
+                throw new PaymentException('支付插件配置不存在', 40403, [
+                    'api_config_id' => $configId,
+                    'channel_id' => (int) $channel->id,
+                ]);
+            }
+
+            if ((string) $pluginConf->plugin_code !== (string) $plugin->code) {
+                throw new PaymentException('支付插件与配置不匹配', 40211, [
+                    'channel_id' => (int) $channel->id,
+                    'plugin_code' => (string) $plugin->code,
+                    'config_plugin_code' => (string) $pluginConf->plugin_code,
+                ]);
+            }
+
+            $config = (array) ($pluginConf->config ?? []);
+            $config['settlement_cycle_type'] = (int) ($pluginConf->settlement_cycle_type ?? 1);
+            $config['settlement_cutoff_time'] = (string) ($pluginConf->settlement_cutoff_time ?? '23:59:59');
+        }
+
+        $config['plugin_code'] = (string) $plugin->code;
+        $config['plugin_name'] = (string) $plugin->name;
+        $config['channel_id'] = (int) $channel->id;
+        $config['merchant_id'] = (int) $channel->merchant_id;
+        $config['channel_mode'] = (int) $channel->channel_mode;
+        $config['pay_type_id'] = (int) $channel->pay_type_id;
+        $config['api_config_id'] = $configId;
+        $config['enabled_pay_types'] = $this->normalizeCodes($plugin->pay_types ?? []);
+        $config['enabled_transfer_types'] = $this->normalizeCodes($plugin->transfer_types ?? []);
+
+        return $config;
+    }
+
+    private function instantiatePlugin(string $className): PaymentInterface & PayPluginInterface
+    {
+        $className = $this->resolvePluginClassName($className);
+        if ($className === '') {
+            throw new PaymentException('支付插件未配置实现类', 40212);
+        }
+
+        if (!class_exists($className)) {
+            throw new PaymentException('支付插件实现类不存在', 40404, ['class_name' => $className]);
+        }
+
+        $instance = container_make($className, []);
+        if (!$instance instanceof PaymentInterface || !$instance instanceof PayPluginInterface) {
+            throw new PaymentException('支付插件必须同时实现 PaymentInterface 与 PayPluginInterface', 40213, ['class_name' => $className]);
+        }
+
+        return $instance;
+    }
+
+    private function resolvePluginClassName(string $className): string
+    {
+        $className = trim($className);
+        if ($className === '') {
+            return '';
+        }
+
+        if (str_contains($className, '\\')) {
+            return $className;
+        }
+
+        return 'app\\common\\payment\\' . $className;
+    }
+
+    private function resolvePlugin(string $pluginCode, bool $allowDisabled): PaymentPlugin
+    {
+        /** @var PaymentPlugin|null $plugin */
+        $plugin = $this->paymentPluginRepository->findByCode($pluginCode);
+        if (!$plugin) {
+            throw new PaymentException('支付插件不存在', 40401, ['plugin_code' => $pluginCode]);
+        }
+
+        if (!$allowDisabled && (int) $plugin->status !== 1) {
+            throw new PaymentException('支付插件已禁用', 40214, ['plugin_code' => $pluginCode]);
+        }
+
+        return $plugin;
+    }
+
+    private function resolvePayTypeCode(int $payTypeId): string
+    {
+        $paymentType = $this->paymentTypeRepository->find($payTypeId);
+        if (!$paymentType) {
+            throw new PaymentException('支付方式不存在', 40405, ['pay_type_id' => $payTypeId]);
+        }
+
+        return trim((string) $paymentType->code);
+    }
+
+    private function pluginSupportsPayType(PaymentPlugin $plugin, string $payTypeCode): bool
+    {
+        $payTypeCode = trim($payTypeCode);
+        if ($payTypeCode === '') {
+            return false;
+        }
+
+        return in_array($payTypeCode, $this->normalizeCodes($plugin->pay_types ?? []), true);
+    }
+
+    private function normalizeCodes(mixed $codes): array
+    {
+        if (is_string($codes)) {
+            $decoded = json_decode($codes, true);
+            $codes = is_array($decoded) ? $decoded : [$codes];
+        }
+
+        if (!is_array($codes)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($codes as $code) {
+            $value = trim((string) $code);
+            if ($value !== '') {
+                $normalized[] = $value;
+            }
+        }
+
+        return array_values(array_unique($normalized));
+    }
+}

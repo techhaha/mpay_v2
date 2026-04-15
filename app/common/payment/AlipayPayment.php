@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
-use app\common\contracts\PaymentInterface;
-use app\exceptions\PaymentException;
+use app\common\interface\PaymentInterface;
+use app\common\util\FormatHelper;
+use app\exception\PaymentException;
 use Psr\Http\Message\ResponseInterface;
 use support\Request;
 use support\Response;
@@ -16,43 +17,83 @@ use Yansongda\Supports\Collection;
 /**
  * 支付宝支付插件（基于 yansongda/pay ~3.7）
  *
- * 支持：web（电脑网站）、h5（手机网站）、scan（扫码）、app（APP 支付）
+ * 支持：web（电脑网站）、h5（手机网站）、app（APP 支付）、mini（小程序）、pos（刷卡）、scan（扫码）、transfer（转账）
  *
  * 通道配置：app_id, app_secret_cert, app_public_cert_path, alipay_public_cert_path,
- * alipay_root_cert_path, notify_url, return_url, mode(0正式/1沙箱)
+ * alipay_root_cert_path, mode(0正式/1沙箱)
  */
 class AlipayPayment extends BasePayment implements PaymentInterface
 {
+    private const PRODUCT_WEB      = 'alipay_web';
+    private const PRODUCT_H5       = 'alipay_h5';
+    private const PRODUCT_APP      = 'alipay_app';
+    private const PRODUCT_MINI     = 'alipay_mini';
+    private const PRODUCT_POS      = 'alipay_pos';
+    private const PRODUCT_SCAN     = 'alipay_scan';
+    private const PRODUCT_TRANSFER = 'alipay_transfer';
+
+    private const DEFAULT_ENABLED_PRODUCTS = [
+        self::PRODUCT_H5,
+    ];
+
+    private const PRODUCT_ACTION_MAP = [
+        self::PRODUCT_WEB => 'web',
+        self::PRODUCT_H5 => 'h5',
+        self::PRODUCT_APP => 'app',
+        self::PRODUCT_MINI => 'mini',
+        self::PRODUCT_POS => 'pos',
+        self::PRODUCT_SCAN => 'scan',
+        self::PRODUCT_TRANSFER => 'transfer',
+    ];
+
+    private const ACTION_PRODUCT_MAP = [
+        'web' => self::PRODUCT_WEB,
+        'h5' => self::PRODUCT_H5,
+        'app' => self::PRODUCT_APP,
+        'mini' => self::PRODUCT_MINI,
+        'pos' => self::PRODUCT_POS,
+        'scan' => self::PRODUCT_SCAN,
+        'transfer' => self::PRODUCT_TRANSFER,
+    ];
+
     protected array $paymentInfo = [
         'code'           => 'alipay',
         'name'           => '支付宝直连',
-        'author'         => '',
-        'link'           => '',
-        'pay_types'      => ['alipay'],
-        'transfer_types' => [],
+        'author'         => '技术老胡',
+        'link'           => 'https://www.baidu.com',
+        'version'        => '1.0.0',
+        'pay_types'      => ['alipay', 'alipay_app'],
+        'transfer_types' => ['alipay', 'alipay_app'],
         'config_schema'  => [
-            'fields' => [
-                ['field' => 'app_id', 'label' => '应用ID', 'type' => 'text', 'required' => true],
-                ['field' => 'app_secret_cert', 'label' => '应用私钥', 'type' => 'textarea', 'required' => true],
-                ['field' => 'app_public_cert_path', 'label' => '应用公钥证书路径', 'type' => 'text', 'required' => true],
-                ['field' => 'alipay_public_cert_path', 'label' => '支付宝公钥证书路径', 'type' => 'text', 'required' => true],
-                ['field' => 'alipay_root_cert_path', 'label' => '支付宝根证书路径', 'type' => 'text', 'required' => true],
-                ['field' => 'notify_url', 'label' => '异步通知地址', 'type' => 'text', 'required' => true],
-                ['field' => 'return_url', 'label' => '同步跳转地址', 'type' => 'text', 'required' => false],
-                ['field' => 'mode', 'label' => '环境', 'type' => 'select', 'options' => [['value' => '0', 'label' => '正式'], ['value' => '1', 'label' => '沙箱']]],
+            ["type" => "input", "field" => "app_id", "title" => "应用ID", "value" => "", "props" => ["placeholder" => "请输入应用ID"], "validate" => [["required" => true, "message" => "应用ID不能为空"]]],
+            ["type" => "textarea", "field" => "app_secret_cert", "title" => "应用私钥", "value" => "", "props" => ["placeholder" => "请输入应用私钥", "rows" => 4], "validate" => [["required" => true, "message" => "应用私钥不能为空"]]],
+            ["type" => "input", "field" => "app_public_cert_path", "title" => "应用公钥证书路径", "value" => "", "props" => ["placeholder" => "请输入应用公钥证书路径"], "validate" => [["required" => true, "message" => "应用公钥证书路径不能为空"]]],
+            ["type" => "input", "field" => "alipay_public_cert_path", "title" => "支付宝公钥证书路径", "value" => "", "props" => ["placeholder" => "请输入支付宝公钥证书路径"], "validate" => [["required" => true, "message" => "支付宝公钥证书路径不能为空"]]],
+            ["type" => "input", "field" => "alipay_root_cert_path", "title" => "支付宝根证书路径", "value" => "", "props" => ["placeholder" => "请输入支付宝根证书路径"], "validate" => [["required" => true, "message" => "支付宝根证书路径不能为空"]]],
+            [
+                "type" => "checkbox",
+                "field" => "enabled_products",
+                "title" => "已开通产品",
+                "value" => self::DEFAULT_ENABLED_PRODUCTS,
+                "options" => [
+                    ["value" => self::PRODUCT_WEB, "label" => "web - 网页支付"],
+                    ["value" => self::PRODUCT_H5, "label" => "h5 - H5 支付"],
+                    ["value" => self::PRODUCT_APP, "label" => "app - APP 支付"],
+                    ["value" => self::PRODUCT_MINI, "label" => "mini - 小程序支付"],
+                    ["value" => self::PRODUCT_POS, "label" => "pos - 刷卡支付"],
+                    ["value" => self::PRODUCT_SCAN, "label" => "scan - 扫码支付"],
+                    ["value" => self::PRODUCT_TRANSFER, "label" => "transfer - 账户转账"],
+                ],
+                "validate" => [["required" => true, "message" => "请至少选择一个已开通产品"]],
             ],
+            ["type" => "select", "field" => "mode", "title" => "环境", "value" => "0", "props" => ["placeholder" => "请选择环境"], "options" => [["value" => "0", "label" => "正式"], ["value" => "1", "label" => "沙箱"]]],
         ],
     ];
-
-    private const PRODUCT_WEB  = 'alipay_web';
-    private const PRODUCT_H5   = 'alipay_h5';
-    private const PRODUCT_SCAN = 'alipay_scan';
-    private const PRODUCT_APP  = 'alipay_app';
 
     public function init(array $channelConfig): void
     {
         parent::init($channelConfig);
-        Pay::config([
+        $config = [
             'alipay' => [
                 'default' => [
                     'app_id'                  => $this->getConfig('app_id', ''),
@@ -65,47 +106,229 @@ class AlipayPayment extends BasePayment implements PaymentInterface
                     'mode'                    => (int)($this->getConfig('mode', Pay::MODE_NORMAL)),
                 ],
             ],
-        ]);
+        ];
+        Pay::config(array_merge($config, ['_force' => true]));
     }
 
-    private function chooseProduct(array $order): string
+    private function chooseProduct(array $order, bool $validateEnabled = true): string
     {
-        $enabled = $this->channelConfig['enabled_products'] ?? ['alipay_web', 'alipay_h5', 'alipay_scan'];
-        $env     = $order['_env'] ?? 'pc';
-        $map     = ['pc' => self::PRODUCT_WEB, 'h5' => self::PRODUCT_H5, 'alipay' => self::PRODUCT_APP];
-        $prefer  = $map[$env] ?? self::PRODUCT_WEB;
+        $enabled = $this->normalizeEnabledProducts($this->channelConfig['enabled_products'] ?? self::DEFAULT_ENABLED_PRODUCTS);
+        $explicit = $this->resolveExplicitProduct($order);
+        if ($explicit !== null) {
+            if ($validateEnabled && !in_array($explicit, $enabled, true)) {
+                throw new PaymentException('支付宝产品未开通：' . $this->productAction($explicit), 402);
+            }
+
+            return $explicit;
+        }
+
+        $env = strtolower((string) ($order['_env'] ?? $order['device'] ?? 'pc'));
+        $map = [
+            'pc' => self::PRODUCT_WEB,
+            'web' => self::PRODUCT_WEB,
+            'desktop' => self::PRODUCT_WEB,
+            'mobile' => self::PRODUCT_H5,
+            'h5' => self::PRODUCT_H5,
+            'wechat' => self::PRODUCT_H5,
+            'qq' => self::PRODUCT_H5,
+            'alipay' => self::PRODUCT_APP,
+            'app' => self::PRODUCT_APP,
+            'mini' => self::PRODUCT_MINI,
+            'pos' => self::PRODUCT_POS,
+            'scan' => self::PRODUCT_SCAN,
+            'transfer' => self::PRODUCT_TRANSFER,
+        ];
+        $prefer = $map[$env] ?? self::PRODUCT_WEB;
+
+        $payTypeCode = strtolower((string) ($order['pay_type_code'] ?? $order['type_code'] ?? ''));
+        if ($payTypeCode === 'alipay_app') {
+            $prefer = self::PRODUCT_APP;
+        }
+
+        if (!$validateEnabled) {
+            return $prefer;
+        }
+
         return in_array($prefer, $enabled, true) ? $prefer : ($enabled[0] ?? self::PRODUCT_WEB);
+    }
+
+    private function normalizeEnabledProducts(mixed $products): array
+    {
+        if (is_string($products)) {
+            $decoded = json_decode($products, true);
+            $products = is_array($decoded) ? $decoded : [$products];
+        }
+
+        if (!is_array($products)) {
+            return self::DEFAULT_ENABLED_PRODUCTS;
+        }
+
+        $normalized = [];
+        foreach ($products as $product) {
+            $value = strtolower(trim((string) $product));
+            if ($value !== '') {
+                $normalized[] = $value;
+            }
+        }
+
+        $normalized = array_values(array_unique($normalized));
+
+        return $normalized !== [] ? $normalized : self::DEFAULT_ENABLED_PRODUCTS;
+    }
+
+    private function resolveExplicitProduct(array $order): ?string
+    {
+        $context = $this->collectOrderContext($order);
+        $candidates = [
+            $context['pay_product'] ?? null,
+            $context['product'] ?? null,
+            $context['alipay_product'] ?? null,
+            $context['pay_action'] ?? null,
+            $context['action'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $product = $this->normalizeProductCode($candidate);
+            if ($product !== null) {
+                return $product;
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeProductCode(mixed $value): ?string
+    {
+        $value = strtolower(trim((string) $value));
+        if ($value === '') {
+            return null;
+        }
+
+        if (isset(self::ACTION_PRODUCT_MAP[$value])) {
+            return self::ACTION_PRODUCT_MAP[$value];
+        }
+
+        if (isset(self::PRODUCT_ACTION_MAP[$value])) {
+            return $value;
+        }
+
+        return null;
+    }
+
+    private function productAction(string $product): string
+    {
+        return self::PRODUCT_ACTION_MAP[$product] ?? $product;
+    }
+
+    private function collectOrderContext(array $order): array
+    {
+        $context = $order;
+        $extra = isset($order['extra']) && is_array($order['extra']) ? $order['extra'] : [];
+        if ($extra !== []) {
+            $context = array_merge($context, $extra);
+        }
+
+        $param = $this->normalizeParamBag($context['param'] ?? null);
+        if ($param !== []) {
+            $context = array_merge($context, $param);
+        }
+
+        return $context;
+    }
+
+    private function normalizeParamBag(mixed $param): array
+    {
+        if (is_array($param)) {
+            return $param;
+        }
+
+        if (is_string($param) && $param !== '') {
+            $decoded = json_decode($param, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+
+            parse_str($param, $parsed);
+            if (is_array($parsed) && $parsed !== []) {
+                return $parsed;
+            }
+        }
+
+        return [];
+    }
+
+    private function buildBasePayParams(array $params): array
+    {
+        $base = [
+            'out_trade_no' => (string) ($params['out_trade_no'] ?? ''),
+            'total_amount' => FormatHelper::amount((int) ($params['amount'] ?? 0)),
+            'subject' => (string) ($params['subject'] ?? ''),
+        ];
+
+        $body = (string) ($params['body'] ?? '');
+        if ($body !== '') {
+            $base['body'] = $body;
+        }
+
+        $returnUrl = (string) ($params['_return_url'] ?? '');
+        if ($returnUrl !== '') {
+            $base['_return_url'] = $returnUrl;
+        }
+
+        $notifyUrl = (string) ($params['_notify_url'] ?? '');
+        if ($notifyUrl !== '') {
+            $base['_notify_url'] = $notifyUrl;
+        }
+
+        return $base;
+    }
+
+    private function extractCollectionValue(Collection $result, array $keys, mixed $default = ''): mixed
+    {
+        foreach ($keys as $key) {
+            $value = $result->get($key);
+            if ($value !== null && $value !== '') {
+                return $value;
+            }
+        }
+
+        return $default;
     }
 
     public function pay(array $order): array
     {
-        $orderId   = $order['order_id'] ?? $order['mch_no'] ?? '';
-        $amount    = (float)($order['amount'] ?? 0);
+        $orderId   = (string) ($order['order_id'] ?? $order['pay_no'] ?? '');
+        $amount    = (int) ($order['amount'] ?? 0);
         $subject   = (string)($order['subject'] ?? '');
+        $body      = (string)($order['body'] ?? '');
         $extra     = $order['extra'] ?? [];
-        $returnUrl = $extra['return_url'] ?? $this->getConfig('return_url', '');
-        $notifyUrl = $this->getConfig('notify_url', '');
+        $returnUrl = (string) ($order['return_url'] ?? $extra['return_url'] ?? $this->getConfig('return_url', ''));
+        $notifyUrl = (string) ($order['callback_url'] ?? $this->getConfig('notify_url', ''));
 
-        $params = [
+        if ($orderId === '' || $amount <= 0 || $subject === '') {
+            throw new PaymentException('支付宝下单参数不完整', 402);
+        }
+
+        $params = $this->buildBasePayParams([
             'out_trade_no' => $orderId,
-            'total_amount' => sprintf('%.2f', $amount),
-            'subject'      => $subject,
-        ];
-        if ($returnUrl !== '') {
-            $params['_return_url'] = $returnUrl;
-        }
-        if ($notifyUrl !== '') {
-            $params['_notify_url'] = $notifyUrl;
-        }
+            'amount' => $amount,
+            'subject' => $subject,
+            'body' => $body,
+            '_return_url' => $returnUrl,
+            '_notify_url' => $notifyUrl,
+        ]);
 
         $product = $this->chooseProduct($order);
 
         try {
             return match ($product) {
-                self::PRODUCT_WEB  => $this->doWeb($params),
-                self::PRODUCT_H5   => $this->doH5($params),
-                self::PRODUCT_SCAN => $this->doScan($params),
-                self::PRODUCT_APP  => $this->doApp($params),
+                self::PRODUCT_WEB      => $this->doWeb($params),
+                self::PRODUCT_H5       => $this->doH5($params),
+                self::PRODUCT_SCAN     => $this->doScan($params),
+                self::PRODUCT_APP      => $this->doApp($params),
+                self::PRODUCT_MINI     => $this->doMini($params, $order),
+                self::PRODUCT_POS      => $this->doPos($params, $order),
+                self::PRODUCT_TRANSFER => $this->doTransfer($params, $order),
                 default            => throw new PaymentException('不支持的支付宝产品：' . $product, 402),
             };
         } catch (PaymentException $e) {
@@ -120,7 +343,16 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         $response = Pay::alipay()->web($params);
         $body     = $response instanceof ResponseInterface ? (string)$response->getBody() : '';
         return [
-            'pay_params'    => ['type' => 'form', 'method' => 'POST', 'action' => '', 'html' => $body],
+            'pay_product' => self::PRODUCT_WEB,
+            'pay_action' => $this->productAction(self::PRODUCT_WEB),
+            'pay_params'    => [
+                'type' => 'form',
+                'method' => 'POST',
+                'action' => '',
+                'html' => $body,
+                'pay_product' => self::PRODUCT_WEB,
+                'pay_action' => $this->productAction(self::PRODUCT_WEB),
+            ],
             'chan_order_no' => $params['out_trade_no'],
             'chan_trade_no' => '',
         ];
@@ -135,7 +367,16 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         $response = Pay::alipay()->h5($params);
         $body     = $response instanceof ResponseInterface ? (string)$response->getBody() : '';
         return [
-            'pay_params'    => ['type' => 'form', 'method' => 'POST', 'action' => '', 'html' => $body],
+            'pay_product' => self::PRODUCT_H5,
+            'pay_action' => $this->productAction(self::PRODUCT_H5),
+            'pay_params'    => [
+                'type' => 'form',
+                'method' => 'POST',
+                'action' => '',
+                'html' => $body,
+                'pay_product' => self::PRODUCT_H5,
+                'pay_action' => $this->productAction(self::PRODUCT_H5),
+            ],
             'chan_order_no' => $params['out_trade_no'],
             'chan_trade_no' => '',
         ];
@@ -147,7 +388,15 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         $result = Pay::alipay()->scan($params);
         $qrCode = $result->get('qr_code', '');
         return [
-            'pay_params'    => ['type' => 'qrcode', 'qrcode_url' => $qrCode, 'qrcode_data' => $qrCode],
+            'pay_product' => self::PRODUCT_SCAN,
+            'pay_action' => $this->productAction(self::PRODUCT_SCAN),
+            'pay_params'    => [
+                'type' => 'qrcode',
+                'qrcode_url' => $qrCode,
+                'qrcode_data' => $qrCode,
+                'pay_product' => self::PRODUCT_SCAN,
+                'pay_action' => $this->productAction(self::PRODUCT_SCAN),
+            ],
             'chan_order_no' => $params['out_trade_no'],
             'chan_trade_no' => $result->get('trade_no', ''),
         ];
@@ -159,28 +408,161 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         $result    = Pay::alipay()->app($params);
         $orderStr  = $result->get('order_string', '');
         return [
-            'pay_params'    => ['type' => 'jsapi', 'order_str' => $orderStr, 'urlscheme' => $orderStr],
+            'pay_product' => self::PRODUCT_APP,
+            'pay_action' => $this->productAction(self::PRODUCT_APP),
+            'pay_params'    => [
+                'type' => 'jsapi',
+                'order_str' => $orderStr,
+                'urlscheme' => $orderStr,
+                'pay_product' => self::PRODUCT_APP,
+                'pay_action' => $this->productAction(self::PRODUCT_APP),
+            ],
             'chan_order_no' => $params['out_trade_no'],
             'chan_trade_no' => $result->get('trade_no', ''),
         ];
     }
 
+    private function doMini(array $params, array $order): array
+    {
+        $context = $this->collectOrderContext($order);
+        $buyerId = trim((string) ($context['buyer_id'] ?? ''));
+        if ($buyerId === '') {
+            throw new PaymentException('支付宝小程序支付缺少 buyer_id', 402);
+        }
+
+        $miniParams = array_merge($params, [
+            'buyer_id' => $buyerId,
+        ]);
+
+        /** @var Collection $result */
+        $result = Pay::alipay()->mini($miniParams);
+        $tradeNo = (string) $this->extractCollectionValue($result, ['trade_no', 'order_id', 'out_trade_no'], '');
+
+        return [
+            'pay_product' => self::PRODUCT_MINI,
+            'pay_action' => $this->productAction(self::PRODUCT_MINI),
+            'pay_params' => [
+                'type' => 'mini',
+                'trade_no' => $tradeNo,
+                'buyer_id' => $buyerId,
+                'pay_product' => self::PRODUCT_MINI,
+                'pay_action' => $this->productAction(self::PRODUCT_MINI),
+                'raw' => $result->all(),
+            ],
+            'chan_order_no' => $params['out_trade_no'],
+            'chan_trade_no' => $tradeNo,
+        ];
+    }
+
+    private function doPos(array $params, array $order): array
+    {
+        $context = $this->collectOrderContext($order);
+        $authCode = trim((string) ($context['auth_code'] ?? ''));
+        if ($authCode === '') {
+            throw new PaymentException('支付宝刷卡支付缺少 auth_code', 402);
+        }
+
+        $posParams = array_merge($params, [
+            'auth_code' => $authCode,
+        ]);
+
+        /** @var Collection $result */
+        $result = Pay::alipay()->pos($posParams);
+        $tradeNo = (string) $this->extractCollectionValue($result, ['trade_no', 'order_id', 'out_trade_no'], '');
+
+        return [
+            'pay_product' => self::PRODUCT_POS,
+            'pay_action' => $this->productAction(self::PRODUCT_POS),
+            'pay_params' => [
+                'type' => 'pos',
+                'trade_no' => $tradeNo,
+                'auth_code' => $authCode,
+                'pay_product' => self::PRODUCT_POS,
+                'pay_action' => $this->productAction(self::PRODUCT_POS),
+                'raw' => $result->all(),
+            ],
+            'chan_order_no' => $params['out_trade_no'],
+            'chan_trade_no' => $tradeNo,
+        ];
+    }
+
+    private function doTransfer(array $params, array $order): array
+    {
+        $context = $this->collectOrderContext($order);
+        $payeeInfo = $this->normalizeParamBag($context['payee_info'] ?? null);
+        if ($payeeInfo === []) {
+            throw new PaymentException('支付宝转账缺少 payee_info', 402);
+        }
+
+        $transferParams = [
+            'out_biz_no' => $params['out_trade_no'],
+            'trans_amount' => $params['total_amount'],
+            'payee_info' => $payeeInfo,
+        ];
+
+        $notifyUrl = (string) ($params['_notify_url'] ?? '');
+        if ($notifyUrl !== '') {
+            $transferParams['_notify_url'] = $notifyUrl;
+        }
+
+        $orderTitle = trim((string) ($context['order_title'] ?? $context['subject'] ?? ''));
+        if ($orderTitle !== '') {
+            $transferParams['order_title'] = $orderTitle;
+        }
+
+        $remark = trim((string) ($context['remark'] ?? $context['body'] ?? ''));
+        if ($remark !== '') {
+            $transferParams['remark'] = $remark;
+        }
+
+        /** @var Collection $result */
+        $result = Pay::alipay()->transfer($transferParams);
+        $tradeNo = (string) $this->extractCollectionValue($result, ['trade_no', 'order_id', 'out_biz_no'], '');
+
+        return [
+            'pay_product' => self::PRODUCT_TRANSFER,
+            'pay_action' => $this->productAction(self::PRODUCT_TRANSFER),
+            'pay_params' => [
+                'type' => 'transfer',
+                'trade_no' => $tradeNo,
+                'out_biz_no' => $transferParams['out_biz_no'],
+                'trans_amount' => $transferParams['trans_amount'],
+                'payee_info' => $payeeInfo,
+                'pay_product' => self::PRODUCT_TRANSFER,
+                'pay_action' => $this->productAction(self::PRODUCT_TRANSFER),
+                'raw' => $result->all(),
+            ],
+            'chan_order_no' => $params['out_trade_no'],
+            'chan_trade_no' => $tradeNo,
+        ];
+    }
+
     public function query(array $order): array
     {
-        $outTradeNo = $order['chan_order_no'] ?? $order['order_id'] ?? '';
+        $product = $this->chooseProduct($order, false);
+        $action = $this->productAction($product);
+        $outTradeNo = (string) ($order['chan_order_no'] ?? $order['order_id'] ?? $order['out_trade_no'] ?? '');
+        $queryParams = $action === 'transfer'
+            ? ['out_biz_no' => $outTradeNo, '_action' => $action]
+            : ['out_trade_no' => $outTradeNo, '_action' => $action];
 
         try {
             /** @var Collection $result */
-            $result       = Pay::alipay()->query(['out_trade_no' => $outTradeNo]);
-            $tradeStatus  = $result->get('trade_status', '');
-            $tradeNo      = $result->get('trade_no', '');
-            $totalAmount  = (float)$result->get('total_amount', 0);
-            $status       = in_array($tradeStatus, ['TRADE_SUCCESS', 'TRADE_FINISHED'], true) ? 'success' : $tradeStatus;
+            $result = Pay::alipay()->query($queryParams);
+            $tradeStatus = (string) $result->get('trade_status', $result->get('status', ''));
+            $tradeNo = (string) $this->extractCollectionValue($result, ['trade_no', 'order_id', 'out_biz_no'], '');
+            $totalAmount = (string) $this->extractCollectionValue($result, ['total_amount', 'trans_amount', 'amount'], '0');
+            $status = match ($action) {
+                'transfer' => in_array($tradeStatus, ['SUCCESS', 'PAY_SUCCESS', 'SUCCESSFUL'], true) ? 'success' : $tradeStatus,
+                default => in_array($tradeStatus, ['TRADE_SUCCESS', 'TRADE_FINISHED'], true) ? 'success' : $tradeStatus,
+            };
 
             return [
+                'pay_product' => $product,
+                'pay_action' => $action,
                 'status'        => $status,
                 'chan_trade_no' => $tradeNo,
-                'pay_amount'    => $totalAmount,
+                'pay_amount'    => (int) round(((float) $totalAmount) * 100),
             ];
         } catch (\Throwable $e) {
             throw new PaymentException('支付宝查询失败：' . $e->getMessage(), 402);
@@ -189,11 +571,21 @@ class AlipayPayment extends BasePayment implements PaymentInterface
 
     public function close(array $order): array
     {
-        $outTradeNo = $order['chan_order_no'] ?? $order['order_id'] ?? '';
+        $product = $this->chooseProduct($order, false);
+        $action = $this->productAction($product);
+        if ($action === 'transfer') {
+            throw new PaymentException('支付宝转账不支持关单', 402);
+        }
+
+        $outTradeNo = (string) ($order['chan_order_no'] ?? $order['order_id'] ?? $order['out_trade_no'] ?? '');
+        $closeParams = [
+            'out_trade_no' => $outTradeNo,
+            '_action' => $action,
+        ];
 
         try {
-            Pay::alipay()->close(['out_trade_no' => $outTradeNo]);
-            return ['success' => true, 'msg' => '关闭成功'];
+            Pay::alipay()->close($closeParams);
+            return ['success' => true, 'msg' => '关闭成功', 'pay_product' => $product, 'pay_action' => $action];
         } catch (\Throwable $e) {
             throw new PaymentException('支付宝关单失败：' . $e->getMessage(), 402);
         }
@@ -201,9 +593,11 @@ class AlipayPayment extends BasePayment implements PaymentInterface
 
     public function refund(array $order): array
     {
-        $outTradeNo   = $order['chan_order_no'] ?? $order['order_id'] ?? '';
-        $refundAmount = (float)($order['refund_amount'] ?? 0);
-        $refundNo     = $order['refund_no'] ?? $order['order_id'] . '_' . time();
+        $product = $this->chooseProduct($order, false);
+        $action = $this->productAction($product);
+        $outTradeNo   = (string) ($order['chan_order_no'] ?? $order['order_id'] ?? $order['out_trade_no'] ?? '');
+        $refundAmount = (int) ($order['refund_amount'] ?? 0);
+        $refundNo     = (string) ($order['refund_no'] ?? (($order['order_id'] ?? 'refund') . '_' . time()));
         $refundReason = (string)($order['refund_reason'] ?? '');
 
         if ($outTradeNo === '' || $refundAmount <= 0) {
@@ -211,9 +605,10 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         }
 
         $params = [
-            'out_trade_no'    => $outTradeNo,
-            'refund_amount'   => sprintf('%.2f', $refundAmount),
-            'out_request_no'  => $refundNo,
+            $action === 'transfer' ? 'out_biz_no' : 'out_trade_no' => $outTradeNo,
+            'refund_amount' => FormatHelper::amount($refundAmount),
+            'out_request_no' => $refundNo,
+            '_action' => $action,
         ];
         if ($refundReason !== '') {
             $params['refund_reason'] = $refundReason;
@@ -227,9 +622,11 @@ class AlipayPayment extends BasePayment implements PaymentInterface
 
             if ($code === '10000' || $code === 10000) {
                 return [
-                    'success'       => true,
-                    'chan_refund_no'=> $result->get('trade_no', $refundNo),
-                    'msg'           => '退款成功',
+                    'success' => true,
+                    'pay_product' => $product,
+                    'pay_action' => $action,
+                    'chan_refund_no' => (string) $this->extractCollectionValue($result, ['trade_no', 'refund_no', 'out_request_no'], $refundNo),
+                    'msg' => '退款成功',
                 ];
             }
             throw new PaymentException($subMsg ?: '退款失败', 402);
@@ -250,17 +647,21 @@ class AlipayPayment extends BasePayment implements PaymentInterface
             $tradeStatus = $result->get('trade_status', '');
             $outTradeNo  = $result->get('out_trade_no', '');
             $tradeNo     = $result->get('trade_no', '');
-            $totalAmount = (float)$result->get('total_amount', 0);
+            $totalAmount = (string) $result->get('total_amount', '0');
+            $paidAt      = (string) $result->get('gmt_payment', '');
 
             if (!in_array($tradeStatus, ['TRADE_SUCCESS', 'TRADE_FINISHED'], true)) {
                 throw new PaymentException('回调状态异常：' . $tradeStatus, 402);
             }
 
             return [
-                'status'       => 'success',
-                'pay_order_id' => $outTradeNo,
-                'chan_trade_no'=> $tradeNo,
-                'amount'       => $totalAmount,
+                'success'       => true,
+                'status'        => 'success',
+                'pay_order_id'  => $outTradeNo,
+                'chan_order_no' => $outTradeNo,
+                'chan_trade_no' => $tradeNo,
+                'amount'        => (int) round(((float) $totalAmount) * 100),
+                'paid_at'       => $paidAt !== '' ? (FormatHelper::timestamp((int) strtotime($paidAt)) ?: null) : null,
             ];
         } catch (PaymentException $e) {
             throw $e;
@@ -268,6 +669,7 @@ class AlipayPayment extends BasePayment implements PaymentInterface
             throw new PaymentException('支付宝回调验签失败：' . $e->getMessage(), 402);
         }
     }
+
     public function notifySuccess(): string|Response
     {
         return 'success';
