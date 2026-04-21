@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class SettlementItem extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_settlement_item';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'settle_no',
         'merchant_id',
@@ -27,6 +37,11 @@ class SettlementItem extends BaseModel
         'item_status',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_id' => 'integer',
         'merchant_group_id' => 'integer',
@@ -41,5 +56,7 @@ class SettlementItem extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

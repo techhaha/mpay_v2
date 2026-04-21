@@ -8,14 +8,29 @@ use support\Response;
 
 /**
  * 本地文件存储驱动。
+ *
+ * 负责本地文件存储和响应构造。
  */
 class LocalStorageDriver extends AbstractStorageDriver
 {
+    /**
+     * 获取本地存储引擎标识。
+     *
+     * @return int 存储引擎常量
+     */
     public function engine(): int
     {
         return FileConstant::STORAGE_LOCAL;
     }
 
+    /**
+     * 将临时文件写入本地存储目录。
+     *
+     * @param string $sourcePath 待上传文件路径
+     * @param array $context 上传上下文，包含 object_key、visibility、public_url 等信息
+     * @return array 上传后的资产数据
+     * @throws BusinessStateException
+     */
     public function storeFromPath(string $sourcePath, array $context): array
     {
         if (!is_file($sourcePath)) {
@@ -51,6 +66,13 @@ class LocalStorageDriver extends AbstractStorageDriver
         ];
     }
 
+    /**
+     * 删除本地文件。
+     *
+     * @param array $asset 文件资产数据
+     * @return bool 是否删除成功
+     * @throws BusinessStateException
+     */
     public function delete(array $asset): bool
     {
         $path = $this->resolveLocalAbsolutePath($asset);
@@ -58,26 +80,43 @@ class LocalStorageDriver extends AbstractStorageDriver
             return true;
         }
 
-        return @unlink($path);
+        if (@unlink($path)) {
+            return true;
+        }
+
+        throw new BusinessStateException('本地文件删除失败');
     }
 
+    /**
+     * 构造本地文件预览响应。
+     *
+     * @param array $asset 文件资产数据
+     * @return Response 响应对象
+     */
     public function previewResponse(array $asset): Response
     {
         return $this->localPreviewResponse($asset);
     }
 
+    /**
+     * 构造本地文件下载响应。
+     *
+     * @param array $asset 文件资产数据
+     * @return Response 响应对象
+     */
     public function downloadResponse(array $asset): Response
     {
         return $this->localDownloadResponse($asset);
     }
 
+    /**
+     * 获取本地公开访问地址。
+     *
+     * @param array $asset 文件资产数据
+     * @return string 公共 URL
+     */
     public function publicUrl(array $asset): string
     {
-        $url = trim((string) ($asset['url'] ?? $asset['public_url'] ?? ''));
-        if ($url !== '') {
-            return $url;
-        }
-
         $visibility = (int) ($asset['visibility'] ?? FileConstant::VISIBILITY_PRIVATE);
         if ($visibility !== FileConstant::VISIBILITY_PUBLIC) {
             return '';
@@ -91,13 +130,14 @@ class LocalStorageDriver extends AbstractStorageDriver
         return $this->storageConfigService->buildLocalPublicUrl($objectKey);
     }
 
+    /**
+     * 获取本地临时访问地址。
+     *
+     * @param array $asset 文件资产数据
+     * @return string 临时 URL
+     */
     public function temporaryUrl(array $asset): string
     {
-        $url = trim((string) ($asset['url'] ?? $asset['public_url'] ?? ''));
-        if ($url !== '') {
-            return $url;
-        }
-
         $visibility = (int) ($asset['visibility'] ?? FileConstant::VISIBILITY_PRIVATE);
         if ($visibility === FileConstant::VISIBILITY_PUBLIC) {
             return $this->publicUrl($asset);
@@ -108,6 +148,12 @@ class LocalStorageDriver extends AbstractStorageDriver
         return $id > 0 ? '/adminapi/file-asset/' . $id . '/preview' : '';
     }
 
+    /**
+     * 确保目标目录存在。
+     *
+     * @param string $directory 目录路径
+     * @throws BusinessStateException
+     */
     private function ensureDirectory(string $directory): void
     {
         if (is_dir($directory)) {

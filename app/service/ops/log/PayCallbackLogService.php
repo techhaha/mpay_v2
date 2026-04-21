@@ -9,11 +9,18 @@ use app\repository\ops\log\PayCallbackLogRepository;
 
 /**
  * 支付回调日志查询服务。
+ *
+ * 负责查询支付回调记录、补充展示字段和还原回调处理状态。
+ *
+ * @property PayCallbackLogRepository $payCallbackLogRepository 支付回调日志仓库
  */
 class PayCallbackLogService extends BaseService
 {
     /**
-     * 构造函数，注入支付回调日志仓库。
+     * 构造方法。
+     *
+     * @param PayCallbackLogRepository $payCallbackLogRepository 支付回调日志仓库
+     * @return void
      */
     public function __construct(
         protected PayCallbackLogRepository $payCallbackLogRepository
@@ -22,6 +29,11 @@ class PayCallbackLogService extends BaseService
 
     /**
      * 分页查询支付回调日志。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -79,7 +91,10 @@ class PayCallbackLogService extends BaseService
     }
 
     /**
-     * 按 ID 查询详情。
+     * 按 ID 查询支付回调日志详情。
+     *
+     * @param int $id 支付回调日志ID
+     * @return PayCallbackLog|null 日志模型
      */
     public function findById(int $id): ?PayCallbackLog
     {
@@ -92,6 +107,9 @@ class PayCallbackLogService extends BaseService
 
     /**
      * 格式化单条记录。
+     *
+     * @param object $row 查询结果对象
+     * @return object 格式化后的对象
      */
     private function decorateRow(object $row): object
     {
@@ -107,6 +125,8 @@ class PayCallbackLogService extends BaseService
 
     /**
      * 构建基础查询。
+     *
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
      */
     private function baseQuery()
     {
@@ -139,3 +159,6 @@ class PayCallbackLogService extends BaseService
     }
 
 }
+
+
+

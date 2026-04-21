@@ -10,14 +10,19 @@ use support\Request;
 use support\Response;
 
 /**
- * 通知与回调记录控制器。
+ * 通知记录控制器。
  *
- * 负责渠道通知日志和商户通知任务的接入。
+ * 负责渠道通知日志和商户通知任务的接入，不承担真实业务回调处理。
+ *
+ * @property NotifyService $notifyService 通知服务
  */
 class NotifyController extends BaseController
 {
     /**
-     * 构造函数，注入通知服务。
+     * 构造方法。
+     *
+     * @param NotifyService $notifyService 通知服务
+     * @return void
      */
     public function __construct(
         protected NotifyService $notifyService
@@ -25,9 +30,12 @@ class NotifyController extends BaseController
     }
 
     /**
-     * POST /api/notify/channel
-     *
      * 记录渠道通知日志。
+     *
+     * 用于保存外部渠道发来的通知原文，便于后续排查和审计。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function channel(Request $request): Response
     {
@@ -37,9 +45,12 @@ class NotifyController extends BaseController
     }
 
     /**
-     * POST /api/notify/merchant
-     *
      * 创建商户通知任务。
+     *
+     * 由支付或结算完成后触发，把通知任务交给异步通知链路处理。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function merchant(Request $request): Response
     {
@@ -48,4 +59,9 @@ class NotifyController extends BaseController
         return $this->success($this->notifyService->enqueueMerchantNotify($data));
     }
 }
+
+
+
+
+
 

@@ -18,9 +18,19 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
+/**
+ * MpayTest 烟雾测试命令。
+ *
+ * 用于验证支付、退款、清结算、余额和追踪链路的核心依赖与关键流程。
+ */
 #[AsCommand('mpay:test', '运行支付、退款、清结算、余额和追踪烟雾测试')]
 class MpayTest extends Command
 {
+    /**
+     * 配置命令参数。
+     *
+     * @return void
+     */
     protected function configure(): void
     {
         $this
@@ -34,6 +44,13 @@ class MpayTest extends Command
             ->addOption('live', null, InputOption::VALUE_NONE, '在提供测试数据时运行真实数据库检查');
     }
 
+    /**
+     * 运行选定链路的烟雾测试。
+     *
+     * @param InputInterface $input 命令输入
+     * @param OutputInterface $output 命令输出
+     * @return int 命令退出码
+     */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $cases = $this->resolveCases($input);
@@ -73,7 +90,10 @@ class MpayTest extends Command
     }
 
     /**
-     * 根据命令行选项解析需要执行的测试项。
+     * 根据命令行选项解析本次需要检查的链路。
+     *
+     * @param InputInterface $input 命令输入
+     * @return array 测试项列表
      */
     private function resolveCases(InputInterface $input): array
     {
@@ -92,7 +112,10 @@ class MpayTest extends Command
     }
 
     /**
-     * 检查支付链路。
+     * 校验支付下单与后续状态流转。
+     *
+     * @param bool $live 是否使用真实数据
+     * @return array 检查结果
      */
     private function checkPayment(bool $live): array
     {
@@ -155,7 +178,10 @@ class MpayTest extends Command
     }
 
     /**
-     * 检查退款链路。
+     * 校验退款创建与后续状态流转。
+     *
+     * @param bool $live 是否使用真实数据
+     * @return array 检查结果
      */
     private function checkRefund(bool $live): array
     {
@@ -214,7 +240,10 @@ class MpayTest extends Command
     }
 
     /**
-     * 检查清结算链路。
+     * 校验清结算单创建与入账结果。
+     *
+     * @param bool $live 是否使用真实数据
+     * @return array 检查结果
      */
     private function checkSettlement(bool $live): array
     {
@@ -316,7 +345,10 @@ class MpayTest extends Command
     }
 
     /**
-     * 检查余额链路。
+     * 校验商户余额快照查询。
+     *
+     * @param bool $live 是否使用真实数据
+     * @return array 检查结果
      */
     private function checkBalance(bool $live): array
     {
@@ -360,7 +392,10 @@ class MpayTest extends Command
     }
 
     /**
-     * 检查统一追踪链路。
+     * 校验追踪查询聚合结果。
+     *
+     * @param bool $live 是否使用真实数据
+     * @return array 检查结果
      */
     private function checkTrace(bool $live): array
     {
@@ -399,6 +434,10 @@ class MpayTest extends Command
 
     /**
      * 从容器中解析指定类实例。
+     *
+     * @param string $class 类名
+     * @return object 对象实例
+     * @throws RuntimeException
      */
     private function resolve(string $class): object
     {
@@ -417,6 +456,11 @@ class MpayTest extends Command
 
     /**
      * 检查实例是否包含指定方法。
+     *
+     * @param object $instance 实例
+     * @param string $method 方法名
+     * @return void
+     * @throws RuntimeException
      */
     private function ensureMethod(object $instance, string $method): void
     {
@@ -427,6 +471,10 @@ class MpayTest extends Command
 
     /**
      * 读取字符串环境变量。
+     *
+     * @param string $key 环境变量名
+     * @param string $default 默认值
+     * @return string 字符串值
      */
     private function envString(string $key, string $default = ''): string
     {
@@ -437,6 +485,10 @@ class MpayTest extends Command
 
     /**
      * 读取整数环境变量。
+     *
+     * @param string $key 环境变量名
+     * @param int $default 默认值
+     * @return int 整数值
      */
     private function envInt(string $key, int $default = 0): int
     {
@@ -447,6 +499,10 @@ class MpayTest extends Command
 
     /**
      * 读取布尔环境变量。
+     *
+     * @param string $key 环境变量名
+     * @param bool $default 默认值
+     * @return bool 布尔值
      */
     private function envBool(string $key, bool $default = false): bool
     {
@@ -462,6 +518,10 @@ class MpayTest extends Command
 
     /**
      * 读取结构化环境变量。
+     *
+     * @param string $key 环境变量名
+     * @param array $default 默认值
+     * @return array 结构化数据
      */
     private function envJson(string $key, array $default = []): array
     {
@@ -476,6 +536,9 @@ class MpayTest extends Command
 
     /**
      * 生成测试编号。
+     *
+     * @param string $prefix 前缀
+     * @return string 测试编号
      */
     private function generateTestNo(string $prefix): string
     {
@@ -484,6 +547,9 @@ class MpayTest extends Command
 
     /**
      * 将异常格式化为可读文本。
+     *
+     * @param Throwable $e 异常
+     * @return string 文本结果
      */
     private function formatThrowable(\Throwable $e): string
     {
@@ -494,7 +560,13 @@ class MpayTest extends Command
     }
 
     /**
-     * 输出单个测试项的执行结果。
+     * 输出单个链路的检查结果。
+     *
+     * @param OutputInterface $output 输出对象
+     * @param string $case 测试项
+     * @param string $status 状态
+     * @param string $message 消息
+     * @return void
      */
     private function writeResult(OutputInterface $output, string $case, string $status, string $message): void
     {
@@ -507,4 +579,10 @@ class MpayTest extends Command
         $output->writeln(sprintf('%s %s - %s', $label, $case, $message));
     }
 }
+
+
+
+
+
+
 

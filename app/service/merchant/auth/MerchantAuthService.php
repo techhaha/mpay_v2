@@ -13,9 +13,23 @@ use app\service\merchant\portal\MerchantPortalSupportService;
 
 /**
  * 商户认证服务。
+ *
+ * @property MerchantRepository $merchantRepository 商户仓库
+ * @property MerchantApiCredentialRepository $merchantApiCredentialRepository 商户 API 凭证仓库
+ * @property MerchantPortalSupportService $merchantPortalSupportService 商户门户支持服务
+ * @property JwtTokenManager $jwtTokenManager jwtToken管理器
  */
 class MerchantAuthService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param MerchantRepository $merchantRepository 商户仓库
+     * @param MerchantApiCredentialRepository $merchantApiCredentialRepository 商户 API 凭证仓库
+     * @param MerchantPortalSupportService $merchantPortalSupportService 商户门户支持服务
+     * @param JwtTokenManager $jwtTokenManager jwtToken管理器
+     * @return void
+     */
     public function __construct(
         protected MerchantRepository $merchantRepository,
         protected MerchantApiCredentialRepository $merchantApiCredentialRepository,
@@ -26,6 +40,10 @@ class MerchantAuthService extends BaseService
 
     /**
      * 获取当前登录商户的资料。
+     *
+     * @param int $merchantId 商户ID
+     * @param string $merchantNo 商户号
+     * @return array{merchant_id: int, merchant_no: string, merchant: array<string, mixed>, user: array<string, mixed>, roles: array<int, string>, permissions: array<int, string>} 商户资料
      */
     public function profile(int $merchantId, string $merchantNo = ''): array
     {
@@ -78,6 +96,11 @@ class MerchantAuthService extends BaseService
 
     /**
      * 校验商户登录 token，并返回商户与登录态信息。
+     *
+     * @param string $token 登录令牌
+     * @param string $ip 请求 IP
+     * @param string $userAgent 用户代理
+     * @return array{merchant: Merchant, credential: \app\model\merchant\MerchantApiCredential|null}|null 登录态
      */
     public function authenticateToken(string $token, string $ip = '', string $userAgent = ''): ?array
     {
@@ -107,6 +130,13 @@ class MerchantAuthService extends BaseService
 
     /**
      * 校验商户登录凭证并签发 JWT。
+     *
+     * @param string $merchantNo 商户号
+     * @param string $password 密码
+     * @param string $ip 请求 IP
+     * @param string $userAgent 用户代理
+     * @return array{token: string, expires_in: int, merchant: Merchant, credential: array{status: int, sign_type: int, last_used_at: mixed}|null} 登录结果
+     * @throws ValidationException
      */
     public function authenticateCredentials(string $merchantNo, string $password, string $ip = '', string $userAgent = ''): array
     {
@@ -136,6 +166,9 @@ class MerchantAuthService extends BaseService
 
     /**
      * 撤销当前商户登录 token。
+     *
+     * @param string $token 登录令牌
+     * @return bool 是否撤销成功
      */
     public function revokeToken(string $token): bool
     {
@@ -144,6 +177,13 @@ class MerchantAuthService extends BaseService
 
     /**
      * 签发新的商户登录 token。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $ttlSeconds 过期秒数
+     * @param string $ip 请求 IP
+     * @param string $userAgent 用户代理
+     * @return array{token: string, expires_in: int, merchant: Merchant, credential: array{status: int, sign_type: int, last_used_at: mixed}|null} 登录结果
+     * @throws ValidationException
      */
     public function issueToken(int $merchantId, int $ttlSeconds = 86400, string $ip = '', string $userAgent = ''): array
     {
@@ -178,4 +218,9 @@ class MerchantAuthService extends BaseService
         ];
     }
 }
+
+
+
+
+
 

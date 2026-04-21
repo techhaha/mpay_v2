@@ -16,11 +16,20 @@ use app\repository\ops\log\PayCallbackLogRepository;
  * 通知服务。
  *
  * 负责渠道通知日志、支付回调日志和商户通知任务的统一管理，核心目标是去重、留痕和可重试。
+ *
+ * @property ChannelNotifyLogRepository $channelNotifyLogRepository 渠道通知日志仓库
+ * @property PayCallbackLogRepository $payCallbackLogRepository 支付回调日志仓库
+ * @property NotifyTaskRepository $notifyTaskRepository 通知任务仓库
  */
 class NotifyService extends BaseService
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param ChannelNotifyLogRepository $channelNotifyLogRepository 渠道通知日志仓库
+     * @param PayCallbackLogRepository $payCallbackLogRepository 支付回调日志仓库
+     * @param NotifyTaskRepository $notifyTaskRepository 通知任务仓库
+     * @return void
      */
     public function __construct(
         protected ChannelNotifyLogRepository $channelNotifyLogRepository,
@@ -33,6 +42,10 @@ class NotifyService extends BaseService
      * 记录渠道通知日志。
      *
      * 同一通道、通知类型和业务单号只保留一条重复记录。
+     *
+     * @param array $input 通知数据
+     * @return ChannelNotifyLog 渠道通知日志
+     * @throws InvalidArgumentException
      */
     public function recordChannelNotify(array $input): ChannelNotifyLog
     {
@@ -44,6 +57,7 @@ class NotifyService extends BaseService
             throw new \InvalidArgumentException('渠道通知入参不完整');
         }
 
+        // 同一业务单如果已经记录过相同类型的通知，就直接复用旧日志，避免重复落库。
         if ($duplicate = $this->channelNotifyLogRepository->findDuplicate($channelId, $notifyType, $bizNo)) {
             return $duplicate;
         }
@@ -69,6 +83,10 @@ class NotifyService extends BaseService
      * 记录支付回调日志。
      *
      * 以支付单号 + 回调类型作为去重依据。
+     *
+     * @param array $input 回调数据
+     * @return PayCallbackLog 支付回调日志
+     * @throws InvalidArgumentException
      */
     public function recordPayCallback(array $input): PayCallbackLog
     {
@@ -80,6 +98,7 @@ class NotifyService extends BaseService
         $callbackType = (int) ($input['callback_type'] ?? NotifyConstant::CALLBACK_TYPE_ASYNC);
         $logs = $this->payCallbackLogRepository->listByPayNo($payNo);
         foreach ($logs as $log) {
+            // 同一支付单的同一类型回调只保留一条，后续重复请求直接返回已有日志。
             if ((int) $log->callback_type === $callbackType) {
                 return $log;
             }
@@ -100,6 +119,9 @@ class NotifyService extends BaseService
      * 创建商户通知任务。
      *
      * 通常用于支付成功、退款成功或清算完成后的商户异步通知。
+     *
+     * @param array $input 通知任务数据
+     * @return NotifyTask 通知任务
      */
     public function enqueueMerchantNotify(array $input): NotifyTask
     {
@@ -123,6 +145,11 @@ class NotifyService extends BaseService
      * 标记商户通知成功。
      *
      * 成功后会刷新最后通知时间和响应内容。
+     *
+     * @param string $notifyNo 通知号
+     * @param array $input 附加数据
+     * @return NotifyTask 通知任务
+     * @throws InvalidArgumentException
      */
     public function markTaskSuccess(string $notifyNo, array $input = []): NotifyTask
     {
@@ -143,6 +170,11 @@ class NotifyService extends BaseService
      * 标记商户通知失败并计算下次重试时间。
      *
      * 失败后会累计重试次数，并根据退避策略生成下一次重试时间。
+     *
+     * @param string $notifyNo 通知号
+     * @param array $input 附加数据
+     * @return NotifyTask 通知任务
+     * @throws InvalidArgumentException
      */
     public function markTaskFailed(string $notifyNo, array $input = []): NotifyTask
     {
@@ -151,6 +183,7 @@ class NotifyService extends BaseService
             throw new \InvalidArgumentException('通知任务不存在');
         }
 
+        // 每次失败都累计一次重试，并根据新的次数重新计算下一次触发时间。
         $retryCount = (int) $task->retry_count + 1;
         $task->status = NotifyConstant::TASK_STATUS_FAILED;
         $task->retry_count = $retryCount;
@@ -164,6 +197,8 @@ class NotifyService extends BaseService
 
     /**
      * 获取待重试任务。
+     *
+     * @return iterable 待重试任务集合
      */
     public function listRetryableTasks(): iterable
     {
@@ -174,6 +209,9 @@ class NotifyService extends BaseService
      * 根据重试次数计算下次重试时间。
      *
      * 使用简单的指数退避思路控制重试频率。
+     *
+     * @param int $retryCount 重试次数
+     * @return string 下次重试时间
      */
     private function nextRetryAt(int $retryCount): string
     {
@@ -188,4 +226,9 @@ class NotifyService extends BaseService
         return FormatHelper::timestamp(time() + $delay);
     }
 }
+
+
+
+
+
 

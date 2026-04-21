@@ -10,14 +10,28 @@ use support\Response;
 
 /**
  * 商户分组路由绑定控制器。
+ *
+ * @property PaymentPollGroupBindService $paymentPollGroupBindService 支付轮询分组绑定服务
  */
 class PaymentPollGroupBindController extends BaseController
 {
+    /**
+ * 构造方法。
+     *
+     * @param PaymentPollGroupBindService $paymentPollGroupBindService 支付轮询分组绑定服务
+     * @return void
+     */
     public function __construct(
         protected PaymentPollGroupBindService $paymentPollGroupBindService
     ) {
     }
 
+    /**
+     * 查询支付轮询分组绑定列表
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function index(Request $request): Response
     {
         $data = $this->validated($request->all(), PaymentPollGroupBindValidator::class, 'index');
@@ -31,6 +45,13 @@ class PaymentPollGroupBindController extends BaseController
         );
     }
 
+    /**
+     * 查询支付轮询分组绑定详情
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付轮询分组绑定ID
+     * @return Response 响应对象
+     */
     public function show(Request $request, string $id): Response
     {
         $data = $this->validated(['id' => (int) $id], PaymentPollGroupBindValidator::class, 'show');
@@ -42,6 +63,12 @@ class PaymentPollGroupBindController extends BaseController
         return $this->success($row);
     }
 
+    /**
+     * 新增支付轮询分组绑定
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function store(Request $request): Response
     {
         $data = $this->validated($request->all(), PaymentPollGroupBindValidator::class, 'store');
@@ -49,6 +76,13 @@ class PaymentPollGroupBindController extends BaseController
         return $this->success($this->paymentPollGroupBindService->create($data));
     }
 
+    /**
+     * 更新支付轮询分组绑定
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付轮询分组绑定ID
+     * @return Response 响应对象
+     */
     public function update(Request $request, string $id): Response
     {
         $data = $this->validated(
@@ -65,6 +99,13 @@ class PaymentPollGroupBindController extends BaseController
         return $this->success($row);
     }
 
+    /**
+     * 删除支付轮询分组绑定
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付轮询分组绑定ID
+     * @return Response 响应对象
+     */
     public function destroy(Request $request, string $id): Response
     {
         $data = $this->validated(['id' => (int) $id], PaymentPollGroupBindValidator::class, 'destroy');
@@ -75,3 +116,8 @@ class PaymentPollGroupBindController extends BaseController
         return $this->success(true);
     }
 }
+
+
+
+
+

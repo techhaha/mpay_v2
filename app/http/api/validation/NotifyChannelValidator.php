@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class NotifyChannelValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'notify_no' => 'sometimes|string|min:1|max:64',
         'channel_id' => 'required|integer|min:1|exists:ma_payment_channel,id',
@@ -27,6 +32,11 @@ class NotifyChannelValidator extends Validator
         'last_error' => 'nullable|string|max:255',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'notify_no' => '通知单号',
         'channel_id' => '通道ID',
@@ -43,7 +53,14 @@ class NotifyChannelValidator extends Validator
         'last_error' => '最后错误',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'store' => ['notify_no', 'channel_id', 'notify_type', 'biz_no', 'pay_no', 'channel_request_no', 'channel_trade_no', 'raw_payload', 'verify_status', 'process_status', 'retry_count', 'next_retry_at', 'last_error'],
     ];
 }
+
+

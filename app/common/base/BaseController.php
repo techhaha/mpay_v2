@@ -16,6 +16,11 @@ class BaseController
 {
     /**
      * 返回成功响应。
+     *
+     * @param mixed $data 响应数据
+     * @param string $message 响应消息
+     * @param int $code 响应码
+     * @return Response 响应对象
      */
     protected function success(mixed $data = null, string $message = '操作成功', int $code = 200): Response
     {
@@ -28,6 +33,11 @@ class BaseController
 
     /**
      * 返回失败响应。
+     *
+     * @param string $message 响应消息
+     * @param int $code 响应码
+     * @param mixed $data 响应数据
+     * @return Response 响应对象
      */
     protected function fail(string $message = '操作失败', int $code = 500, mixed $data = null): Response
     {
@@ -40,6 +50,9 @@ class BaseController
 
     /**
      * 返回统一分页响应。
+     *
+     * @param mixed $paginator 分页器实例
+     * @return Response 响应对象
      */
     protected function page(mixed $paginator): Response
     {
@@ -63,7 +76,10 @@ class BaseController
     /**
      * 通过校验器类验证请求数据。
      *
-     * @param class-string $validatorClass
+     * @param array $data 请求数据
+     * @param string $validatorClass 校验器类
+     * @param string|null $scene 校验场景
+     * @return array 校验后的数据
      */
     protected function validated(array $data, string $validatorClass, ?string $scene = null): array
     {
@@ -80,6 +96,9 @@ class BaseController
 
     /**
      * 获取中间件预处理后的标准化参数。
+     *
+     * @param Request $request 请求对象
+     * @return array 标准化参数
      */
     protected function payload(Request $request): array
     {
@@ -95,6 +114,11 @@ class BaseController
 
     /**
      * 读取请求属性。
+     *
+     * @param Request $request 请求对象
+     * @param string $key 属性名
+     * @param mixed $default 默认值
+     * @return mixed 请求上下文值
      */
     protected function requestAttribute(Request $request, string $key, mixed $default = null): mixed
     {
@@ -103,6 +127,9 @@ class BaseController
 
     /**
      * 获取中间件注入的当前管理员 ID。
+     *
+     * @param Request $request 请求对象
+     * @return int 当前管理员ID
      */
     protected function currentAdminId(Request $request): int
     {
@@ -111,6 +138,9 @@ class BaseController
 
     /**
      * 获取中间件注入的当前商户 ID。
+     *
+     * @param Request $request 请求对象
+     * @return int 当前商户ID
      */
     protected function currentMerchantId(Request $request): int
     {
@@ -119,6 +149,9 @@ class BaseController
 
     /**
      * 获取中间件注入的当前商户编号。
+     *
+     * @param Request $request 请求对象
+     * @return string 当前商户编号
      */
     protected function currentMerchantNo(Request $request): string
     {
@@ -126,3 +159,8 @@ class BaseController
     }
 
 }
+
+
+
+
+

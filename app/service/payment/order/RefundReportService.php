@@ -10,12 +10,15 @@ use app\common\constant\TradeConstant;
 /**
  * 退款单结果组装服务。
  *
- * 负责退款详情页和列表页的展示字段格式化。
+ * 负责退款列表、详情页和资金流水的展示字段格式化。
  */
 class RefundReportService extends BaseService
 {
     /**
      * 格式化退款订单行，统一输出前端展示字段。
+     *
+     * @param array<string, mixed> $row 原始查询行
+     * @return array<string, mixed> 格式化后的退款单行
      */
     public function formatRefundOrderRow(array $row): array
     {
@@ -48,11 +51,17 @@ class RefundReportService extends BaseService
 
     /**
      * 构造退款时间线。
+     *
+     * 依次输出创建、处理中、成功和失败节点，便于前端直接展示进度。
+     *
+     * @param object|null $refundOrder 退款订单或查询行
+     * @return array<int, array<string, mixed>> 退款时间线
      */
-    public function buildRefundTimeline(mixed $refundOrder): array
+    public function buildRefundTimeline(object|null $refundOrder): array
     {
         $extJson = (array) ($refundOrder->ext_json ?? []);
 
+        // 退款时间线同样只展示已经发生的节点，并尽量用扩展信息补全原因字段。
         return array_values(array_filter([
             [
                 'status' => 'created',
@@ -64,6 +73,7 @@ class RefundReportService extends BaseService
                 'label' => '退款处理中',
                 'at' => $this->formatDateTime($refundOrder->processing_at, '—'),
                 'retry_count' => (int) ($refundOrder->retry_count ?? 0),
+                // 处理中原因优先按重试原因、处理中原因、最后错误的顺序回退。
                 'reason' => (string) ($extJson['retry_reason'] ?? $extJson['processing_reason'] ?? $refundOrder->last_error ?? ''),
             ] : null,
             $refundOrder->succeeded_at ? [
@@ -75,6 +85,7 @@ class RefundReportService extends BaseService
                 'status' => 'failed',
                 'label' => '退款失败',
                 'at' => $this->formatDateTime($refundOrder->failed_at, '—'),
+                // 失败原因先看最后错误，再回退到扩展信息和退款单原始原因。
                 'reason' => (string) ($refundOrder->last_error ?: ($extJson['fail_reason'] ?? $refundOrder->reason ?? '')),
             ] : null,
         ]));
@@ -82,6 +93,9 @@ class RefundReportService extends BaseService
 
     /**
      * 格式化退款相关资金流水。
+     *
+     * @param array<string, mixed> $row 原始查询行
+     * @return array<string, mixed> 格式化后的流水行
      */
     public function formatLedgerRow(array $row): array
     {
@@ -98,3 +112,4 @@ class RefundReportService extends BaseService
         return $row;
     }
 }
+

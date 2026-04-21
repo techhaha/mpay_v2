@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class MerchantValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -35,11 +40,16 @@ class MerchantValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '商户ID',
         'keyword' => '关键字',
         'group_id' => '商户分组',
-        'status' => '状态',
+        'status' => '商户状态',
         'merchant_type' => '商户类型',
         'merchant_no' => '商户号',
         'merchant_name' => '商户名称',
@@ -59,6 +69,11 @@ class MerchantValidator extends Validator
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'group_id', 'status', 'merchant_type', 'risk_level', 'page', 'page_size'],
         'show' => ['id'],
@@ -101,6 +116,11 @@ class MerchantValidator extends Validator
         'destroy' => ['id'],
     ];
 
+    /**
+     * 配置新增商户场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneStore(): static
     {
         return $this->appendRules([
@@ -114,6 +134,11 @@ class MerchantValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置更新商户场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneUpdate(): static
     {
         return $this->appendRules([
@@ -128,6 +153,11 @@ class MerchantValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置更新商户状态场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneUpdateStatus(): static
     {
         return $this->appendRules([
@@ -136,6 +166,11 @@ class MerchantValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置重置密码场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneResetPassword(): static
     {
         return $this->appendRules([
@@ -145,6 +180,11 @@ class MerchantValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置删除商户场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneDestroy(): static
     {
         return $this->appendRules([
@@ -152,3 +192,4 @@ class MerchantValidator extends Validator
         ]);
     }
 }
+

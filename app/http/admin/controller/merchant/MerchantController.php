@@ -12,11 +12,16 @@ use support\Response;
  * 商户管理控制器。
  *
  * 当前先提供商户列表查询，后续可继续扩展商户详情、新增、编辑等能力。
+ *
+ * @property MerchantService $merchantService 商户服务
  */
 class MerchantController extends BaseController
 {
     /**
-     * 构造函数，注入商户服务。
+     * 构造方法。
+     *
+     * @param MerchantService $merchantService 商户服务
+     * @return void
      */
     public function __construct(
         protected MerchantService $merchantService
@@ -27,6 +32,9 @@ class MerchantController extends BaseController
      * 查询商户列表。
      *
      * 返回值里额外携带启用中的商户分组选项，方便前端一次性渲染筛选条件。
+     * 
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -39,6 +47,10 @@ class MerchantController extends BaseController
 
     /**
      * 查询商户详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -54,6 +66,9 @@ class MerchantController extends BaseController
 
     /**
      * 新增商户。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function store(Request $request): Response
     {
@@ -63,6 +78,10 @@ class MerchantController extends BaseController
 
     /**
      * 更新商户。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户ID
+     * @return Response 响应对象
      */
     public function update(Request $request, string $id): Response
     {
@@ -80,6 +99,10 @@ class MerchantController extends BaseController
 
     /**
      * 删除商户。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户ID
+     * @return Response 响应对象
      */
     public function destroy(Request $request, string $id): Response
     {
@@ -90,6 +113,10 @@ class MerchantController extends BaseController
 
     /**
      * 重置商户登录密码。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户ID
+     * @return Response 响应对象
      */
     public function resetPassword(Request $request, string $id): Response
     {
@@ -100,7 +127,11 @@ class MerchantController extends BaseController
     }
 
     /**
-     * 生成或重置商户接口凭证。
+     * 生成或重置商户 API 凭证。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户ID
+     * @return Response 响应对象
      */
     public function issueCredential(Request $request, string $id): Response
     {
@@ -111,6 +142,10 @@ class MerchantController extends BaseController
 
     /**
      * 查询商户总览。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户ID
+     * @return Response 响应对象
      */
     public function overview(Request $request, string $id): Response
     {
@@ -121,6 +156,9 @@ class MerchantController extends BaseController
 
     /**
      * 查询商户下拉选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function options(Request $request): Response
     {
@@ -129,6 +167,9 @@ class MerchantController extends BaseController
 
     /**
      * 远程查询商户选择项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function selectOptions(Request $request): Response
     {
@@ -138,4 +179,10 @@ class MerchantController extends BaseController
         return $this->success($this->merchantService->searchOptions($request->all(), $page, $pageSize));
     }
 }
+
+
+
+
+
+
 

@@ -16,10 +16,29 @@ use app\repository\payment\trade\PayOrderRepository;
 /**
  * 商户总览查询服务。
  *
- * 负责商户资料、接口凭证、资金、路由、通道和最近交易的总览拼装。
+ * 负责拼装商户资料、接口凭证、资金、路由、通道以及最近交易和清结算的总览数据。
+ *
+ * @property MerchantQueryService $merchantQueryService 商户查询服务
+ * @property MerchantAccountRepository $merchantAccountRepository 商户账户仓库
+ * @property MerchantApiCredentialRepository $merchantApiCredentialRepository 商户 API 凭证仓库
+ * @property PaymentChannelRepository $paymentChannelRepository 支付渠道仓库
+ * @property PaymentPollGroupBindRepository $paymentPollGroupBindRepository 支付轮询分组绑定仓库
+ * @property PayOrderRepository $payOrderRepository 支付订单仓库
+ * @property SettlementOrderRepository $settlementOrderRepository 清结算订单仓库
  */
 class MerchantOverviewQueryService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param MerchantQueryService $merchantQueryService 商户查询服务
+     * @param MerchantAccountRepository $merchantAccountRepository 商户账户仓库
+     * @param MerchantApiCredentialRepository $merchantApiCredentialRepository 商户 API 凭证仓库
+     * @param PaymentChannelRepository $paymentChannelRepository 支付渠道仓库
+     * @param PaymentPollGroupBindRepository $paymentPollGroupBindRepository 支付轮询分组绑定仓库
+     * @param PayOrderRepository $payOrderRepository 支付订单仓库
+     * @param SettlementOrderRepository $settlementOrderRepository 清结算订单仓库
+     */
     public function __construct(
         protected MerchantQueryService $merchantQueryService,
         protected MerchantAccountRepository $merchantAccountRepository,
@@ -33,6 +52,10 @@ class MerchantOverviewQueryService extends BaseService
 
     /**
      * 查询商户总览。
+     *
+     * @param int $merchantId 商户ID
+     * @return array 总览数据
+     * @throws ResourceNotFoundException
      */
     public function overview(int $merchantId): array
     {
@@ -128,3 +151,6 @@ class MerchantOverviewQueryService extends BaseService
         ];
     }
 }
+
+
+

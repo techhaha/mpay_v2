@@ -10,15 +10,35 @@ use app\service\file\storage\StorageManager;
 
 /**
  * 文件查询服务。
+ *
+ * 负责文件记录的分页、详情、选项和展示数据格式化。
+ *
+ * @property FileRecordRepository $fileRecordRepository 文件记录仓库
+ * @property StorageManager $storageManager 存储管理器
  */
 class FileRecordQueryService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param FileRecordRepository $fileRecordRepository 文件记录仓库
+     * @param StorageManager $storageManager 存储管理器
+     * @return void
+     */
     public function __construct(
         protected FileRecordRepository $fileRecordRepository,
         protected StorageManager $storageManager
     ) {
     }
 
+    /**
+     * 分页查询文件记录。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
+     */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
         $query = $this->fileRecordRepository->query()->from('ma_file_asset as f');
@@ -50,6 +70,13 @@ class FileRecordQueryService extends BaseService
         return $paginator;
     }
 
+    /**
+     * 查询文件记录详情。
+     *
+     * @param int $id 文件记录查询ID
+     * @return array 文件详情
+     * @throws ResourceNotFoundException
+     */
     public function detail(int $id): array
     {
         $asset = $this->fileRecordRepository->findById($id);
@@ -60,7 +87,13 @@ class FileRecordQueryService extends BaseService
         return $this->formatModel($asset);
     }
 
-    public function formatModel(mixed $asset): array
+    /**
+     * 将文件记录格式化为前端展示结构。
+     *
+     * @param array|object|null $asset 文件记录
+     * @return array<string, mixed> 展示数据
+     */
+    public function formatModel(array|object|null $asset): array
     {
         $id = (int) $this->field($asset, 'id', 0);
         $scene = (int) $this->field($asset, 'scene', FileConstant::SCENE_OTHER);
@@ -68,10 +101,19 @@ class FileRecordQueryService extends BaseService
         $storageEngine = (int) $this->field($asset, 'storage_engine', FileConstant::STORAGE_LOCAL);
         $sourceType = (int) $this->field($asset, 'source_type', FileConstant::SOURCE_UPLOAD);
         $size = (int) $this->field($asset, 'size', 0);
-        $publicUrl = (string) $this->field($asset, 'url', '');
-        $previewUrl = $publicUrl !== '' ? $publicUrl : $this->storageManager->temporaryUrl($this->normalizeAsset($asset));
-        if ($previewUrl === '' && $id > 0) {
-            $previewUrl = '/adminapi/file-asset/' . $id . '/preview';
+        $mimeType = strtolower((string) $this->field($asset, 'mime_type', ''));
+        $fileExt = strtolower((string) $this->field($asset, 'file_ext', ''));
+        $normalizedAsset = $this->normalizeAsset($asset);
+        $publicUrl = $visibility === FileConstant::VISIBILITY_PUBLIC
+            ? $this->storageManager->publicUrl($normalizedAsset)
+            : '';
+        $previewable = $this->isPreviewable($scene, $mimeType, $fileExt);
+        $previewUrl = '';
+        if ($previewable) {
+            $previewUrl = $publicUrl !== '' ? $publicUrl : $this->storageManager->temporaryUrl($normalizedAsset);
+            if ($previewUrl === '' && $id > 0) {
+                $previewUrl = '/adminapi/file-asset/' . $id . '/preview';
+            }
         }
 
         return [
@@ -93,10 +135,11 @@ class FileRecordQueryService extends BaseService
             'md5' => (string) $this->field($asset, 'md5', ''),
             'object_key' => (string) $this->field($asset, 'object_key', ''),
             'source_url' => (string) $this->field($asset, 'source_url', ''),
-            'url' => $previewUrl,
+            'url' => $publicUrl,
             'public_url' => $publicUrl,
             'preview_url' => $previewUrl,
             'download_url' => $id > 0 ? '/adminapi/file-asset/' . $id . '/download' : '',
+            'previewable' => $previewable,
             'created_by' => (int) $this->field($asset, 'created_by', 0),
             'created_by_name' => (string) $this->field($asset, 'created_by_name', ''),
             'remark' => (string) $this->field($asset, 'remark', ''),
@@ -106,6 +149,11 @@ class FileRecordQueryService extends BaseService
         ];
     }
 
+    /**
+     * 获取文件记录选项。
+     *
+     * @return array<string, array<int, array{label: string, value: int}>> 选项数据
+     */
     public function options(): array
     {
         return [
@@ -117,6 +165,12 @@ class FileRecordQueryService extends BaseService
         ];
     }
 
+    /**
+     * 格式化文件大小。
+     *
+     * @param int $size 文件大小（字节）
+     * @return string 格式化后的大小
+     */
     private function formatSize(int $size): string
     {
         if ($size <= 0) {
@@ -134,6 +188,12 @@ class FileRecordQueryService extends BaseService
         return $index === 0 ? (string) (int) $value . ' ' . $units[$index] : number_format($value, 2) . ' ' . $units[$index];
     }
 
+    /**
+     * 将映射表转换为前端选项。
+     *
+     * @param array $map 映射表
+     * @return array 选项列表
+     */
     private function toOptions(array $map): array
     {
         $options = [];
@@ -147,7 +207,15 @@ class FileRecordQueryService extends BaseService
         return $options;
     }
 
-    private function field(mixed $asset, string $key, mixed $default = null): mixed
+    /**
+     * 从数组或对象中读取字段值。
+     *
+     * @param array|object|null $asset 文件记录数据
+     * @param string $key 字段名
+     * @param mixed $default 默认值
+     * @return mixed 文件字段值
+     */
+    private function field(array|object|null $asset, string $key, mixed $default = null): mixed
     {
         if (is_array($asset)) {
             return $asset[$key] ?? $default;
@@ -160,7 +228,13 @@ class FileRecordQueryService extends BaseService
         return $default;
     }
 
-    private function normalizeAsset(mixed $asset): array
+    /**
+     * 归一化文件记录。
+     *
+     * @param array|object|null $asset 原始记录
+     * @return array<string, mixed> 标准化记录
+     */
+    private function normalizeAsset(array|object|null $asset): array
     {
         return $this->field($asset, 'id', null) === null ? [] : [
             'id' => (int) $this->field($asset, 'id', 0),
@@ -172,5 +246,26 @@ class FileRecordQueryService extends BaseService
             'url' => (string) $this->field($asset, 'url', ''),
             'mime_type' => (string) $this->field($asset, 'mime_type', ''),
         ];
+    }
+
+    /**
+     * 判断文件是否支持预览。
+     *
+     * @param int $scene 场景
+     * @param string $mimeType MIME 类型
+     * @param string $fileExt 文件扩展名
+     * @return bool 是否支持预览
+     */
+    private function isPreviewable(int $scene, string $mimeType, string $fileExt): bool
+    {
+        if ($scene === FileConstant::SCENE_IMAGE || str_starts_with($mimeType, 'image/')) {
+            return true;
+        }
+
+        if ($scene === FileConstant::SCENE_TEXT || str_starts_with($mimeType, 'text/')) {
+            return true;
+        }
+
+        return in_array($fileExt, ['pem', 'crt', 'cer', 'key'], true);
     }
 }

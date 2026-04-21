@@ -10,14 +10,28 @@ use support\Response;
 
 /**
  * 商户认证控制器。
+ *
+ * @property MerchantAuthService $merchantAuthService 商户认证服务
  */
 class AuthController extends BaseController
 {
+    /**
+ * 构造方法。
+     *
+     * @param MerchantAuthService $merchantAuthService 商户认证服务
+     * @return void
+     */
     public function __construct(
         protected MerchantAuthService $merchantAuthService
     ) {
     }
 
+    /**
+     * 商户登录。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function login(Request $request): Response
     {
         $data = $this->validated($request->all(), AuthValidator::class, 'login');
@@ -30,6 +44,12 @@ class AuthController extends BaseController
         ));
     }
 
+    /**
+     * 商户退出登录。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function logout(Request $request): Response
     {
         $token = trim((string) ($request->header('authorization', '') ?: $request->header('x-merchant-token', '')));
@@ -45,7 +65,10 @@ class AuthController extends BaseController
     }
 
     /**
-     * 获取当前登录商户的信息
+     * 获取当前登录商户信息。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function profile(Request $request): Response
     {
@@ -58,4 +81,9 @@ class AuthController extends BaseController
         return $this->success($this->merchantAuthService->profile($merchantId, $merchantNo));
     }
 }
+
+
+
+
+
 

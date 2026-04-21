@@ -10,12 +10,23 @@ use app\service\merchant\MerchantService;
 use app\service\payment\config\PaymentTypeService;
 
 /**
- * 商户门户公共支持服务。
+ * 商户门户支持服务。
  *
- * 统一承接商户门户里复用的商户摘要、支付方式和通用格式化能力。
+ * 统一承接商户门户里复用的商户摘要、支付方式和展示整理能力。
+ *
+ * @property MerchantService $merchantService 商户服务
+ * @property MerchantRepository $merchantRepository 商户仓库
+ * @property PaymentTypeService $paymentTypeService 支付类型服务
  */
 class MerchantPortalSupportService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param MerchantService $merchantService 商户服务
+     * @param MerchantRepository $merchantRepository 商户仓库
+     * @param PaymentTypeService $paymentTypeService 支付类型服务
+     */
     public function __construct(
         protected MerchantService $merchantService,
         protected MerchantRepository $merchantRepository,
@@ -25,6 +36,10 @@ class MerchantPortalSupportService extends BaseService
 
     /**
      * 当前商户基础资料摘要。
+     *
+     * @param int $merchantId 商户ID
+     * @return array 商户摘要
+     * @throws ResourceNotFoundException
      */
     public function merchantSummary(int $merchantId): array
     {
@@ -106,7 +121,9 @@ class MerchantPortalSupportService extends BaseService
     }
 
     /**
-     * 启用的支付方式选项。
+     * 获取启用的支付方式选项。
+     *
+     * @return array 支付方式选项
      */
     public function enabledPayTypeOptions(): array
     {
@@ -115,6 +132,9 @@ class MerchantPortalSupportService extends BaseService
 
     /**
      * 根据支付方式 ID 获取名称。
+     *
+     * @param int $payTypeId 支付类型ID
+     * @return string 支付方式名称
      */
     public function paymentTypeName(int $payTypeId): string
     {
@@ -128,71 +148,10 @@ class MerchantPortalSupportService extends BaseService
     }
 
     /**
-     * 格式化金额，单位为元。
-     */
-    public function formatAmount(int $amount): string
-    {
-        return parent::formatAmount($amount);
-    }
-
-    /**
-     * 格式化金额，0 时显示不限。
-     */
-    public function formatAmountOrUnlimited(int $amount): string
-    {
-        return parent::formatAmountOrUnlimited($amount);
-    }
-
-    /**
-     * 格式化次数，0 时显示不限。
-     */
-    public function formatCountOrUnlimited(int $count): string
-    {
-        return parent::formatCountOrUnlimited($count);
-    }
-
-    /**
-     * 格式化费率，单位为百分点。
-     */
-    public function formatRate(int $basisPoints): string
-    {
-        return parent::formatRate($basisPoints);
-    }
-
-    /**
-     * 格式化延迟。
-     */
-    public function formatLatency(int $latencyMs): string
-    {
-        return parent::formatLatency($latencyMs);
-    }
-
-    /**
-     * 格式化日期时间。
-     */
-    public function formatDateTime(mixed $value, string $emptyText = ''): string
-    {
-        return parent::formatDateTime($value, $emptyText);
-    }
-
-    /**
-     * 归一化模型对象，兼容模型和数组。
-     */
-    public function normalizeModel(mixed $value): ?array
-    {
-        return parent::normalizeModel($value);
-    }
-
-    /**
-     * 隐藏接口凭证明文。
-     */
-    public function maskCredentialValue(string $credentialValue, bool $maskShortValue = true): string
-    {
-        return parent::maskCredentialValue($credentialValue, $maskShortValue);
-    }
-
-    /**
      * 签名类型文案。
+     *
+     * @param int $signType 签名类型
+     * @return string 签名类型文本
      */
     public function signTypeText(int $signType): string
     {

@@ -7,11 +7,15 @@ use app\model\payment\NotifyTask;
 
 /**
  * 商户通知任务仓库。
+ *
+ * 封装通知单号查询和可重试任务列表。
  */
 class NotifyTaskRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,10 @@ class NotifyTaskRepository extends BaseRepository
 
     /**
      * 根据通知单号查询通知任务。
+     *
+     * @param string $notifyNo 通知号
+     * @param array $columns 字段列表
+     * @return NotifyTask|null 通知任务记录
      */
     public function findByNotifyNo(string $notifyNo, array $columns = ['*'])
     {
@@ -30,6 +38,10 @@ class NotifyTaskRepository extends BaseRepository
 
     /**
      * 查询可重试的通知任务列表。
+     *
+     * @param int $status 状态
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, NotifyTask> 可重试任务列表
      */
     public function listRetryable(int $status, array $columns = ['*'])
     {
@@ -39,5 +51,9 @@ class NotifyTaskRepository extends BaseRepository
             ->get($columns);
     }
 }
+
+
+
+
 
 

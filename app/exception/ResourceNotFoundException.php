@@ -12,7 +12,12 @@ use Webman\Exception\BusinessException;
 class ResourceNotFoundException extends BusinessException
 {
     /**
-     * 构造函数，组装异常信息。
+     * 构造方法。
+     *
+     * @param string $message message
+     * @param array $data 数据
+     * @param int $bizCode 业务Code
+     * @return void
      */
     public function __construct(string $message = '资源不存在', array $data = [], int $bizCode = 40400)
     {
@@ -23,3 +28,8 @@ class ResourceNotFoundException extends BusinessException
         }
     }
 }
+
+
+
+
+

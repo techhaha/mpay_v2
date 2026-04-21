@@ -3,14 +3,30 @@
 namespace app\common\constant;
 
 /**
- * 路由与通道编排相关枚举。
+ * 路由与通道编排枚举。
+ *
+ * 用于描述通道类型、通道模式以及轮询组的路由策略。
  */
 final class RouteConstant
 {
+    /**
+     * 平台代收通道类型。
+     */
     public const CHANNEL_TYPE_PLATFORM_COLLECT = 0;
+
+    /**
+     * 商户自有通道类型。
+     */
     public const CHANNEL_TYPE_MERCHANT_SELF = 1;
 
+    /**
+     * 代收通道模式。
+     */
     public const CHANNEL_MODE_COLLECT = 0;
+
+    /**
+     * 自收通道模式。
+     */
     public const CHANNEL_MODE_SELF = 1;
 
     /**
@@ -28,6 +44,11 @@ final class RouteConstant
      */
     public const ROUTE_MODE_FIRST_AVAILABLE = 2;
 
+    /**
+     * 获取通道类型名称映射。
+     *
+     * @return array<int, string> 通道类型名称表
+     */
     public static function channelTypeMap(): array
     {
         return [
@@ -36,6 +57,11 @@ final class RouteConstant
         ];
     }
 
+    /**
+     * 获取通道模式名称映射。
+     *
+     * @return array<int, string> 通道模式名称表
+     */
     public static function channelModeMap(): array
     {
         return [
@@ -44,6 +70,11 @@ final class RouteConstant
         ];
     }
 
+    /**
+     * 获取路由模式名称映射。
+     *
+     * @return array<int, string> 路由模式名称表
+     */
     public static function routeModeMap(): array
     {
         return [
@@ -53,3 +84,7 @@ final class RouteConstant
         ];
     }
 }
+
+
+
+

@@ -24,11 +24,11 @@ class JwtTokenManager
     /**
      * 签发 JWT，并把会话态写入 Redis。
      *
-     * @param string $guard 认证域名称，例如 admin 或 merchant
-     * @param array $claims JWT 自定义声明，通常包含主体 ID 等核心身份信息
-     * @param array $sessionData Redis 会话数据，通常包含用户展示信息和登录上下文
-     * @param int|null $ttlSeconds 有效期，单位秒；为空时使用 guard 默认 TTL
-     * @return array{token:string,expires_in:int,jti:string,claims:array,session:array}
+     * @param string $guard 登录域
+     * @param array<string, mixed> $claims JWT 声明
+     * @param array<string, mixed> $sessionData 会话数据
+     * @param int|null $ttlSeconds 过期秒数
+     * @return array{token:string,expires_in:int,jti:string,claims:array<string, mixed>,session:array<string, mixed>} 签发结果
      */
     public function issue(string $guard, array $claims, array $sessionData, ?int $ttlSeconds = null): array
     {
@@ -75,7 +75,11 @@ class JwtTokenManager
      * - 再通过 jti 反查 Redis 会话，确保 token 仍然有效。
      * - 每次命中会刷新最近访问时间。
      *
-     * @return array{claims:array,session:array}|null
+     * @param string $guard 登录域
+     * @param string $token JWT 字符串
+     * @param string $ip 最近访问 IP
+     * @param string $userAgent 用户Agent
+     * @return array{claims:array<string, mixed>,session:array<string, mixed>}|null 验证结果
      */
     public function verify(string $guard, string $token, string $ip = '', string $userAgent = ''): ?array
     {
@@ -118,6 +122,10 @@ class JwtTokenManager
      * 通过 token 撤销登录态。
      *
      * 适用于主动退出登录场景。
+     *
+     * @param string $guard 登录域
+     * @param string $token JWT 字符串
+     * @return bool 是否已撤销
      */
     public function revoke(string $guard, string $token): bool
     {
@@ -138,6 +146,10 @@ class JwtTokenManager
      * 通过 jti 直接撤销登录态。
      *
      * 适用于已经掌握会话标识但没有原始 token 的补偿清理场景。
+     *
+     * @param string $guard 登录域
+     * @param string $jti 会话标识
+     * @return bool 是否已撤销
      */
     public function revokeByJti(string $guard, string $jti): bool
     {
@@ -152,6 +164,10 @@ class JwtTokenManager
      * 根据 jti 获取会话数据。
      *
      * 返回值来自 Redis，若已过期或不存在则返回 null。
+     *
+     * @param string $guard 登录域
+     * @param string $jti 会话标识
+     * @return array<string, mixed>|null 会话数据
      */
     public function session(string $guard, string $jti): ?array
     {
@@ -168,6 +184,10 @@ class JwtTokenManager
      * 解码并校验 JWT。
      *
      * 只做签名、过期和 guard 校验，不处理 Redis 会话。
+     *
+     * @param string $guard 登录域
+     * @param string $token JWT 字符串
+     * @return array<string, mixed>|null JWT 载荷
      */
     protected function decode(string $guard, string $token): ?array
     {
@@ -195,6 +215,12 @@ class JwtTokenManager
 
     /**
      * 将会话数据写入 Redis，并设置 TTL。
+     *
+     * @param string $guard 登录域
+     * @param string $jti 会话标识
+     * @param array<string, mixed> $session 会话数据
+     * @param int $ttlSeconds 过期秒数
+     * @return void
      */
     protected function storeSession(string $guard, string $jti, array $session, int $ttlSeconds): void
     {
@@ -209,6 +235,10 @@ class JwtTokenManager
      * 构造 Redis 会话键。
      *
      * 最终格式由 guard 对应的 redis_prefix 加上 jti 组成。
+     *
+     * @param string $guard 登录域
+     * @param string $jti 会话标识
+     * @return string Redis 会话键
      */
     protected function sessionKey(string $guard, string $jti): string
     {
@@ -218,7 +248,9 @@ class JwtTokenManager
     /**
      * 获取指定认证域的配置。
      *
-     * @throws \InvalidArgumentException 当 guard 未配置时抛出
+     * @param string $guard 登录域
+     * @return array<string, mixed> 认证配置
+     * @throws \InvalidArgumentException
      */
     protected function guardConfig(string $guard): array
     {
@@ -232,6 +264,11 @@ class JwtTokenManager
 
     /**
      * 校验 HS256 密钥长度，避免 firebase/php-jwt 抛出底层异常。
+     *
+     * @param string $guard 登录域
+     * @param string $secret 密钥
+     * @return void
+     * @throws RuntimeException
      */
     protected function assertHmacSecretLength(string $guard, string $secret): void
     {
@@ -252,3 +289,5 @@ class JwtTokenManager
         ));
     }
 }
+
+

@@ -17,7 +17,7 @@ class Cors implements MiddlewareInterface
      * 处理请求。
      *
      * @param Request $request 请求对象
-     * @param callable $handler 下一个中间件处理函数
+     * @param callable $handler handler
      * @return Response 响应对象
      */
     public function process(Request $request, callable $handler): Response
@@ -32,3 +32,7 @@ class Cors implements MiddlewareInterface
         ]);
     }
 }
+
+
+
+

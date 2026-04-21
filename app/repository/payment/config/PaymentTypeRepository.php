@@ -7,11 +7,15 @@ use app\model\payment\PaymentType;
 
 /**
  * 支付方式字典仓库。
+ *
+ * 封装支付方式启用列表和按编码查询方法。
  */
 class PaymentTypeRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,9 @@ class PaymentTypeRepository extends BaseRepository
 
     /**
      * 获取所有启用的支付方式。
+     *
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PaymentType> 启用支付方式列表
      */
     public function enabledList(array $columns = ['*'])
     {
@@ -31,6 +38,10 @@ class PaymentTypeRepository extends BaseRepository
 
     /**
      * 根据支付方式编码查询字典。
+     *
+     * @param string $code 支付方式编码
+     * @param array $columns 字段列表
+     * @return PaymentType|null 支付方式记录
      */
     public function findByCode(string $code, array $columns = ['*']): ?PaymentType
     {
@@ -39,5 +50,9 @@ class PaymentTypeRepository extends BaseRepository
             ->first($columns);
     }
 }
+
+
+
+
 
 

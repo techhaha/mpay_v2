@@ -9,12 +9,17 @@ use support\Request;
 use support\Response;
 
 /**
- * 商户接口凭证管理控制器。
+ * 商户 API 凭证管理控制器。
+ *
+ * @property MerchantApiCredentialService $merchantApiCredentialService 商户 API 凭证服务
  */
 class MerchantApiCredentialController extends BaseController
 {
     /**
-     * 构造函数，注入商户 API 凭证服务。
+     * 构造方法。
+     *
+     * @param MerchantApiCredentialService $merchantApiCredentialService 商户 API 凭证服务
+     * @return void
      */
     public function __construct(
         protected MerchantApiCredentialService $merchantApiCredentialService
@@ -23,6 +28,9 @@ class MerchantApiCredentialController extends BaseController
 
     /**
      * 查询商户 API 凭证列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -39,6 +47,10 @@ class MerchantApiCredentialController extends BaseController
 
     /**
      * 查询商户 API 凭证详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户 API 凭证ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -46,7 +58,7 @@ class MerchantApiCredentialController extends BaseController
         $credential = $this->merchantApiCredentialService->findById((int) $data['id']);
 
         if (!$credential) {
-            return $this->fail('商户接口凭证不存在', 404);
+            return $this->fail('商户 API 凭证不存在', 404);
         }
 
         return $this->success($credential);
@@ -54,6 +66,9 @@ class MerchantApiCredentialController extends BaseController
 
     /**
      * 新增商户 API 凭证。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function store(Request $request): Response
     {
@@ -64,6 +79,10 @@ class MerchantApiCredentialController extends BaseController
 
     /**
      * 修改商户 API 凭证。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户 API 凭证ID
+     * @return Response 响应对象
      */
     public function update(Request $request, string $id): Response
     {
@@ -75,7 +94,7 @@ class MerchantApiCredentialController extends BaseController
 
         $credential = $this->merchantApiCredentialService->update((int) $data['id'], $data);
         if (!$credential) {
-            return $this->fail('商户接口凭证不存在', 404);
+            return $this->fail('商户 API 凭证不存在', 404);
         }
 
         return $this->success($credential);
@@ -83,6 +102,10 @@ class MerchantApiCredentialController extends BaseController
 
     /**
      * 删除商户 API 凭证。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户 API 凭证ID
+     * @return Response 响应对象
      */
     public function destroy(Request $request, string $id): Response
     {
@@ -90,14 +113,19 @@ class MerchantApiCredentialController extends BaseController
         $credential = $this->merchantApiCredentialService->findById((int) $data['id']);
 
         if (!$credential) {
-            return $this->fail('商户接口凭证不存在', 404);
+            return $this->fail('商户 API 凭证不存在', 404);
         }
 
         if (!$this->merchantApiCredentialService->delete((int) $data['id'])) {
-            return $this->fail('商户接口凭证删除失败');
+            return $this->fail('商户 API 凭证删除失败');
         }
 
         return $this->success(true);
     }
 }
+
+
+
+
+
 

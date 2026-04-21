@@ -16,11 +16,19 @@ use app\repository\payment\trade\PayOrderRepository;
  * 支付单生命周期服务。
  *
  * 负责支付单状态推进、关闭、超时和手续费处理。
+ *
+ * @property PayOrderFeeService $payOrderFeeService 支付单手续费服务
+ * @property BizOrderRepository $bizOrderRepository 业务订单仓库
+ * @property PayOrderRepository $payOrderRepository 支付单仓库
  */
 class PayOrderLifecycleService extends BaseService
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param PayOrderFeeService $payOrderFeeService 支付单手续费服务
+     * @param BizOrderRepository $bizOrderRepository 业务订单仓库
+     * @param PayOrderRepository $payOrderRepository 支付订单仓库
      */
     public function __construct(
         protected PayOrderFeeService $payOrderFeeService,
@@ -35,8 +43,8 @@ class PayOrderLifecycleService extends BaseService
      * 用于支付回调或主动查单成功后的状态推进；自有通道在这里完成手续费正式扣减。
      *
      * @param string $payNo 支付单号
-     * @param array $input 回调或查单入参
-     * @return PayOrder
+     * @param array $input 状态数据
+     * @return PayOrder 支付订单模型
      */
     public function markPaySuccess(string $payNo, array $input = []): PayOrder
     {
@@ -51,8 +59,10 @@ class PayOrderLifecycleService extends BaseService
      * 该方法只处理状态推进和资金动作，不负责外部通道请求。
      *
      * @param string $payNo 支付单号
-     * @param array $input 回调或查单入参
-     * @return PayOrder
+     * @param array $input 状态数据
+     * @return PayOrder 支付订单模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
      */
     public function markPaySuccessInCurrentTransaction(string $payNo, array $input = []): PayOrder
     {
@@ -77,16 +87,19 @@ class PayOrderLifecycleService extends BaseService
             ]);
         }
 
+        // 成功态优先使用插件回传的实际手续费，没有则沿用预估值。
         $actualFee = array_key_exists('fee_actual_amount', $input)
             ? (int) $input['fee_actual_amount']
             : (int) $payOrder->fee_estimated_amount;
         $traceNo = (string) ($payOrder->trace_no ?: $payOrder->biz_no);
 
+        // 成功后正式结算手续费，避免自有通道只冻结不扣减。
         $this->payOrderFeeService->settleSuccessFee($payOrder, $actualFee, $payNo, $traceNo);
 
         $payOrder->status = TradeConstant::ORDER_STATUS_SUCCESS;
         $payOrder->paid_at = $input['paid_at'] ?? $this->now();
         $payOrder->fee_actual_amount = $actualFee;
+        // 平台代收和自有通道的手续费、结算状态规则不同，这里统一收口。
         $payOrder->fee_status = (int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_SELF
             ? TradeConstant::FEE_STATUS_DEDUCTED
             : TradeConstant::FEE_STATUS_NONE;
@@ -102,6 +115,7 @@ class PayOrderLifecycleService extends BaseService
         $payOrder->ext_json = array_merge((array) $payOrder->ext_json, $input['ext_json'] ?? []);
         $payOrder->save();
 
+        // 业务单状态也要一起收口，保证支付单和业务单一致。
         $this->syncBizOrderAfterSuccess($payOrder, $traceNo);
 
         return $payOrder->refresh();
@@ -109,6 +123,10 @@ class PayOrderLifecycleService extends BaseService
 
     /**
      * 标记支付失败。
+     *
+     * @param string $payNo 支付单号
+     * @param array $input 状态数据
+     * @return PayOrder 支付订单模型
      */
     public function markPayFailed(string $payNo, array $input = []): PayOrder
     {
@@ -119,6 +137,12 @@ class PayOrderLifecycleService extends BaseService
 
     /**
      * 在当前事务中标记支付失败。
+     *
+     * @param string $payNo 支付单号
+     * @param array $input 状态数据
+     * @return PayOrder 支付订单模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
      */
     public function markPayFailedInCurrentTransaction(string $payNo, array $input = []): PayOrder
     {
@@ -144,6 +168,7 @@ class PayOrderLifecycleService extends BaseService
         }
 
         $traceNo = (string) ($payOrder->trace_no ?: $payOrder->biz_no);
+        // 失败时只释放需要冻结的手续费，避免重复扣减或重复释放。
         $this->payOrderFeeService->releaseFrozenFeeIfNeeded($payOrder, $payNo, $traceNo, '支付失败释放手续费');
 
         $payOrder->status = TradeConstant::ORDER_STATUS_FAILED;
@@ -159,6 +184,7 @@ class PayOrderLifecycleService extends BaseService
         $payOrder->ext_json = array_merge((array) $payOrder->ext_json, $input['ext_json'] ?? []);
         $payOrder->save();
 
+        // 支付单进入终态后，同步回业务单，避免上游只能依赖支付单判断结果。
         $this->syncBizOrderAfterTerminalStatus($payOrder, $payNo, $traceNo, TradeConstant::ORDER_STATUS_FAILED, 'failed_at');
 
         return $payOrder->refresh();
@@ -166,6 +192,10 @@ class PayOrderLifecycleService extends BaseService
 
     /**
      * 关闭支付单。
+     *
+     * @param string $payNo 支付单号
+     * @param array $input 状态数据
+     * @return PayOrder 支付订单模型
      */
     public function closePayOrder(string $payNo, array $input = []): PayOrder
     {
@@ -176,6 +206,12 @@ class PayOrderLifecycleService extends BaseService
 
     /**
      * 在当前事务中关闭支付单。
+     *
+     * @param string $payNo 支付单号
+     * @param array $input 状态数据
+     * @return PayOrder 支付订单模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
      */
     public function closePayOrderInCurrentTransaction(string $payNo, array $input = []): PayOrder
     {
@@ -201,6 +237,7 @@ class PayOrderLifecycleService extends BaseService
         }
 
         $traceNo = (string) ($payOrder->trace_no ?: $payOrder->biz_no);
+        // 关闭单据时同样要处理冻结手续费，防止资金一直占用。
         $this->payOrderFeeService->releaseFrozenFeeIfNeeded($payOrder, $payNo, $traceNo, '支付关闭释放手续费');
 
         $payOrder->status = TradeConstant::ORDER_STATUS_CLOSED;
@@ -217,6 +254,7 @@ class PayOrderLifecycleService extends BaseService
         $payOrder->ext_json = array_merge($extJson, $input['ext_json'] ?? []);
         $payOrder->save();
 
+        // 关闭态也要同步给业务单，避免后续继续拉起支付。
         $this->syncBizOrderAfterTerminalStatus($payOrder, $payNo, $traceNo, TradeConstant::ORDER_STATUS_CLOSED, 'closed_at');
 
         return $payOrder->refresh();
@@ -224,6 +262,10 @@ class PayOrderLifecycleService extends BaseService
 
     /**
      * 标记支付超时。
+     *
+     * @param string $payNo 支付单号
+     * @param array $input 状态数据
+     * @return PayOrder 支付订单模型
      */
     public function timeoutPayOrder(string $payNo, array $input = []): PayOrder
     {
@@ -234,6 +276,12 @@ class PayOrderLifecycleService extends BaseService
 
     /**
      * 在当前事务中标记支付超时。
+     *
+     * @param string $payNo 支付单号
+     * @param array $input 状态数据
+     * @return PayOrder 支付订单模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
      */
     public function timeoutPayOrderInCurrentTransaction(string $payNo, array $input = []): PayOrder
     {
@@ -259,6 +307,7 @@ class PayOrderLifecycleService extends BaseService
         }
 
         $traceNo = (string) ($payOrder->trace_no ?: $payOrder->biz_no);
+        // 超时单同样释放冻结手续费，确保后续可以重新发起支付。
         $this->payOrderFeeService->releaseFrozenFeeIfNeeded($payOrder, $payNo, $traceNo, '支付超时释放手续费');
 
         $payOrder->status = TradeConstant::ORDER_STATUS_TIMEOUT;
@@ -282,6 +331,10 @@ class PayOrderLifecycleService extends BaseService
 
     /**
      * 同步支付成功后的业务单状态。
+     *
+     * @param PayOrder $payOrder 支付订单
+     * @param string $traceNo 追踪号
+     * @return void
      */
     private function syncBizOrderAfterSuccess(PayOrder $payOrder, string $traceNo): void
     {
@@ -302,11 +355,19 @@ class PayOrderLifecycleService extends BaseService
 
     /**
      * 同步支付终态后的业务单状态。
+     *
+     * @param PayOrder $payOrder 支付订单
+     * @param string $payNo 支付单号
+     * @param string $traceNo 追踪号
+     * @param int $status 状态
+     * @param string $timestampField 时间字段名
+     * @return void
      */
     private function syncBizOrderAfterTerminalStatus(PayOrder $payOrder, string $payNo, string $traceNo, int $status, string $timestampField): void
     {
         $bizOrder = $this->bizOrderRepository->findForUpdateByBizNo((string) $payOrder->biz_no);
         if (!$bizOrder || (string) $bizOrder->active_pay_no !== $payNo) {
+            // 只有当前生效的支付单才允许回写业务单，避免旧重试单覆盖新单状态。
             return;
         }
 

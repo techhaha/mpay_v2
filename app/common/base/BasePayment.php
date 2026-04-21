@@ -14,7 +14,7 @@ use support\Log;
 /**
  * 支付插件基类（建议所有插件继承）
  *
- * 目标：把“插件共性”集中在这里，具体渠道差异留给子类实现 `PaymentInterface`。
+ * 目标：把“插件共性”集中在这里，具体渠道差异留给子类补齐支付动作能力。
  *
  * 生命周期：
  * - 服务层会在每次动作前调用 `init($channelConfig)` 注入该通道配置。
@@ -48,15 +48,19 @@ abstract class BasePayment implements PayPluginInterface
      */
     protected array $channelConfig = [];
 
-    /** HTTP 请求客户端（GuzzleHttp） */
+    /**
+     * HTTP 请求客户端（GuzzleHttp）
+     *
+     * @var Client|null
+     */
     private ?Client $httpClient = null;
 
     // ==================== 初始化 ====================
 
     /**
-     * 初始化插件，加载通道配置并创建 HTTP 客户端
+     * 初始化插件，加载通道配置并创建 HTTP 客户端。
      *
-     * @param array<string, mixed> $channelConfig 通道配置（商户号、密钥等）
+     * @param array $channelConfig 渠道配置
      * @return void
      */
     public function init(array $channelConfig): void
@@ -71,11 +75,11 @@ abstract class BasePayment implements PayPluginInterface
     }
 
     /**
-     * 获取通道配置项
+     * 获取通道配置项。
      *
-     * @param string $key    配置键
-     * @param mixed  $default 默认值（键不存在时返回）
-     * @return mixed
+     * @param string $key 配置键
+     * @param mixed $default 默认值
+     * @return mixed 通道配置值
      */
     protected function getConfig(string $key, mixed $default = null): mixed
     {
@@ -84,31 +88,51 @@ abstract class BasePayment implements PayPluginInterface
 
     // ==================== 插件元信息 ====================
 
-    /** 获取插件代码（唯一标识） */
+    /**
+     * 获取插件代码（唯一标识）。
+     *
+     * @return string 插件代码
+     */
     public function getCode(): string
     {
         return $this->paymentInfo['code'] ?? '';
     }
 
-    /** 获取插件名称 */
+    /**
+     * 获取插件名称。
+     *
+     * @return string 插件名称
+     */
     public function getName(): string
     {
         return $this->paymentInfo['name'] ?? '';
     }
 
-    /** 获取作者名称 */
+    /**
+     * 获取作者名称。
+     *
+     * @return string 作者名称
+     */
     public function getAuthorName(): string
     {
         return $this->paymentInfo['author'] ?? '';
     }
 
-    /** 获取作者链接 */
+    /**
+     * 获取作者链接。
+     *
+     * @return string 作者链接
+     */
     public function getAuthorLink(): string
     {
         return $this->paymentInfo['link'] ?? '';
     }
 
-    /** 获取版本号 */
+    /**
+     * 获取版本号。
+     *
+     * @return string 版本号
+     */
     public function getVersion(): string
     {
         return $this->paymentInfo['version'] ?? '';
@@ -117,9 +141,9 @@ abstract class BasePayment implements PayPluginInterface
     // ==================== 能力声明 ====================
 
     /**
-     * 获取插件支持的支付方式列表
+     * 获取插件支持的支付方式列表。
      *
-     * @return array<string> 支付方式代码数组，如 ['alipay', 'wechat']
+     * @return array 支持的支付方式编码
      */
     public function getEnabledPayTypes(): array
     {
@@ -127,9 +151,9 @@ abstract class BasePayment implements PayPluginInterface
     }
 
     /**
-     * 获取插件支持的转账方式列表
+     * 获取插件支持的转账方式列表。
      *
-     * @return array<string> 转账方式代码数组
+     * @return array 支持的转账方式编码
      */
     public function getEnabledTransferTypes(): array
     {
@@ -137,9 +161,9 @@ abstract class BasePayment implements PayPluginInterface
     }
 
     /**
-     * 获取插件配置表单结构（用于后台配置界面）
+     * 获取插件配置表单结构（用于后台配置界面）。
      *
-     * @return array<string, mixed> 表单字段定义数组
+     * @return array 配置表单结构
      */
     public function getConfigSchema(): array
     {
@@ -149,13 +173,13 @@ abstract class BasePayment implements PayPluginInterface
     // ==================== HTTP 请求 ====================
 
     /**
-     * 统一 HTTP 请求（对外调用支付渠道 API）
+     * 统一 HTTP 请求（对外调用支付渠道 API）。
      *
-     * @param string               $method  请求方法（GET/POST/PUT/DELETE 等）
-     * @param string               $url     请求地址
-     * @param array<string, mixed> $options Guzzle 请求选项（headers、json、form_params 等）
-     * @return ResponseInterface
-     * @throws PaymentException 未调用 init() 或渠道请求失败时
+     * @param string $method 请求方法
+     * @param string $url 请求地址
+     * @param array $options 请求选项
+     * @return ResponseInterface 响应对象
+     * @throws PaymentException
      */
     protected function request(string $method, string $url, array $options = []): ResponseInterface
     {
@@ -171,3 +195,8 @@ abstract class BasePayment implements PayPluginInterface
         }
     }
 }
+
+
+
+
+

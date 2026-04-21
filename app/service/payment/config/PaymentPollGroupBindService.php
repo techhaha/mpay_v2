@@ -11,9 +11,23 @@ use app\repository\payment\config\PaymentPollGroupRepository;
 
 /**
  * 商户分组路由绑定服务。
+ *
+ * 负责把商户分组和支付方式绑定到指定轮询组，并校验轮询组与支付方式的匹配关系。
+ *
+ * @property PaymentPollGroupBindRepository $paymentPollGroupBindRepository 支付轮询分组绑定仓库
+ * @property MerchantGroupRepository $merchantGroupRepository 商户分组仓库
+ * @property PaymentPollGroupRepository $paymentPollGroupRepository 支付轮询分组仓库
  */
 class PaymentPollGroupBindService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param PaymentPollGroupBindRepository $paymentPollGroupBindRepository 支付轮询分组绑定仓库
+     * @param MerchantGroupRepository $merchantGroupRepository 商户分组仓库
+     * @param PaymentPollGroupRepository $paymentPollGroupRepository 支付轮询分组仓库
+     * @return void
+     */
     public function __construct(
         protected PaymentPollGroupBindRepository $paymentPollGroupBindRepository,
         protected MerchantGroupRepository $merchantGroupRepository,
@@ -23,6 +37,11 @@ class PaymentPollGroupBindService extends BaseService
 
     /**
      * 分页查询商户分组路由绑定。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -76,11 +95,24 @@ class PaymentPollGroupBindService extends BaseService
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
     }
 
+    /**
+     * 按 ID 查询路由绑定。
+     *
+     * @param int $id 绑定ID
+     * @return PaymentPollGroupBind|null 绑定模型
+     */
     public function findById(int $id): ?PaymentPollGroupBind
     {
         return $this->paymentPollGroupBindRepository->find($id);
     }
 
+    /**
+     * 创建路由绑定。
+     *
+     * @param array $data 写入数据
+     * @return PaymentPollGroupBind 新增后的绑定模型
+     * @throws PaymentException
+     */
     public function create(array $data): PaymentPollGroupBind
     {
         $this->assertBindingUnique((int) $data['merchant_group_id'], (int) $data['pay_type_id']);
@@ -89,6 +121,14 @@ class PaymentPollGroupBindService extends BaseService
         return $this->paymentPollGroupBindRepository->create($this->normalizePayload($data));
     }
 
+    /**
+     * 更新路由绑定。
+     *
+     * @param int $id 绑定ID
+     * @param array $data 写入数据
+     * @return PaymentPollGroupBind|null 更新后的绑定模型
+     * @throws PaymentException
+     */
     public function update(int $id, array $data): ?PaymentPollGroupBind
     {
         $current = $this->paymentPollGroupBindRepository->find($id);
@@ -96,6 +136,7 @@ class PaymentPollGroupBindService extends BaseService
             return null;
         }
 
+        // 更新时要以现有记录为底，把未传的分组和支付方式补齐后再做唯一性校验。
         $merchantGroupId = (int) ($data['merchant_group_id'] ?? $current->merchant_group_id);
         $payTypeId = (int) ($data['pay_type_id'] ?? $current->pay_type_id);
         $this->assertBindingUnique($merchantGroupId, $payTypeId, $id);
@@ -108,11 +149,23 @@ class PaymentPollGroupBindService extends BaseService
         return $this->paymentPollGroupBindRepository->find($id);
     }
 
+    /**
+     * 删除路由绑定。
+     *
+     * @param int $id 绑定ID
+     * @return bool 是否删除成功
+     */
     public function delete(int $id): bool
     {
         return $this->paymentPollGroupBindRepository->deleteById($id);
     }
 
+    /**
+     * 标准化路由绑定写入数据。
+     *
+     * @param array $data 写入数据
+     * @return array<string, mixed> 标准化后的数据
+     */
     private function normalizePayload(array $data): array
     {
         return [
@@ -124,6 +177,15 @@ class PaymentPollGroupBindService extends BaseService
         ];
     }
 
+    /**
+     * 校验商户分组与支付方式的绑定唯一性。
+     *
+     * @param int $merchantGroupId 商户分组ID
+     * @param int $payTypeId 支付方式ID
+     * @param int $ignoreId 排除的绑定ID
+     * @return void
+     * @throws PaymentException
+     */
     private function assertBindingUnique(int $merchantGroupId, int $payTypeId, int $ignoreId = 0): void
     {
         $query = $this->paymentPollGroupBindRepository->query()
@@ -142,11 +204,19 @@ class PaymentPollGroupBindService extends BaseService
         }
     }
 
+    /**
+     * 校验轮询组与支付方式是否一致。
+     *
+     * @param array $data 写入数据
+     * @return void
+     * @throws PaymentException
+     */
     private function assertPollGroupMatchesPayType(array $data): void
     {
         $pollGroupId = (int) ($data['poll_group_id'] ?? 0);
         $payTypeId = (int) ($data['pay_type_id'] ?? 0);
 
+        // 轮询组和支付方式必须保持一致；轮询组缺失时交给上层必填校验处理。
         $pollGroup = $this->paymentPollGroupRepository->find($pollGroupId);
         if (!$pollGroup) {
             return;
@@ -160,3 +230,5 @@ class PaymentPollGroupBindService extends BaseService
         }
     }
 }
+
+

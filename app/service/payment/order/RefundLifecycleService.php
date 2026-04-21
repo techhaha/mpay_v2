@@ -17,11 +17,22 @@ use app\service\account\funds\MerchantAccountService;
  * 退款单生命周期服务。
  *
  * 负责退款单创建、处理中、成功、失败和重试等状态推进。
+ *
+ * @property PayOrderRepository $payOrderRepository 支付单仓库
+ * @property BizOrderRepository $bizOrderRepository 业务订单仓库
+ * @property RefundOrderRepository $refundOrderRepository 退款单仓库
+ * @property MerchantAccountService $merchantAccountService 商户账户服务
  */
 class RefundLifecycleService extends BaseService
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param PayOrderRepository $payOrderRepository 支付订单仓库
+     * @param BizOrderRepository $bizOrderRepository 业务订单仓库
+     * @param RefundOrderRepository $refundOrderRepository 退款单仓库
+     * @param MerchantAccountService $merchantAccountService 商户账户服务
+     * @return void
      */
     public function __construct(
         protected PayOrderRepository $payOrderRepository,
@@ -33,6 +44,12 @@ class RefundLifecycleService extends BaseService
 
     /**
      * 标记退款处理中。
+     *
+     * 由渠道受理后推进到处理中态，幂等地处理重复请求。
+     *
+     * @param string $refundNo 退款单号
+     * @param array $input 输入参数
+     * @return RefundOrder 退款单模型
      */
     public function markRefundProcessing(string $refundNo, array $input = []): RefundOrder
     {
@@ -43,6 +60,12 @@ class RefundLifecycleService extends BaseService
 
     /**
      * 退款重试。
+     *
+     * 仅允许失败态退款单重新推进到处理中。
+     *
+     * @param string $refundNo 退款单号
+     * @param array $input 输入参数
+     * @return RefundOrder 退款单模型
      */
     public function retryRefund(string $refundNo, array $input = []): RefundOrder
     {
@@ -53,6 +76,13 @@ class RefundLifecycleService extends BaseService
 
     /**
      * 在当前事务中标记退款处理中或重试。
+     *
+     * @param string $refundNo 退款单号
+     * @param array $input 输入参数
+     * @param bool $isRetry 是否来自重试流程
+     * @return RefundOrder 退款单模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
      */
     public function markRefundProcessingInCurrentTransaction(string $refundNo, array $input = [], bool $isRetry = false): RefundOrder
     {
@@ -77,6 +107,7 @@ class RefundLifecycleService extends BaseService
             ]);
         }
 
+        // 退款失败后再重试时，只有失败态才允许重新推进到处理中。
         if ($currentStatus === TradeConstant::REFUND_STATUS_FAILED && !$isRetry) {
             return $refundOrder;
         }
@@ -92,6 +123,7 @@ class RefundLifecycleService extends BaseService
         }
         $refundOrder->last_error = (string) ($input['last_error'] ?? $refundOrder->last_error ?? '');
         if ($isRetry) {
+            // 重试时生成新的渠道请求号，避免和上一轮失败请求混在一起。
             $refundOrder->retry_count = (int) $refundOrder->retry_count + 1;
             $refundOrder->channel_request_no = $this->generateNo('RQR');
         }
@@ -99,6 +131,7 @@ class RefundLifecycleService extends BaseService
         $extJson = (array) $refundOrder->ext_json;
         $reason = trim((string) ($input['reason'] ?? ''));
         if ($reason !== '') {
+            // 把处理/重试原因单独保留到扩展字段里，便于后台排查。
             $extJson[$isRetry ? 'retry_reason' : 'processing_reason'] = $reason;
         }
         $refundOrder->ext_json = array_merge($extJson, $input['ext_json'] ?? []);
@@ -113,8 +146,8 @@ class RefundLifecycleService extends BaseService
      * 成功后会推进退款单状态，并在平台代收场景下做余额冲减或结算逆向处理。
      *
      * @param string $refundNo 退款单号
-     * @param array $input 回调或查单入参
-     * @return RefundOrder
+     * @param array $input 输入参数
+     * @return RefundOrder 退款单模型
      */
     public function markRefundSuccess(string $refundNo, array $input = []): RefundOrder
     {
@@ -127,8 +160,10 @@ class RefundLifecycleService extends BaseService
      * 在当前事务中标记退款成功。
      *
      * @param string $refundNo 退款单号
-     * @param array $input 回调或查单入参
-     * @return RefundOrder
+     * @param array $input 输入参数
+     * @return RefundOrder 退款单模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
      */
     public function markRefundSuccessInCurrentTransaction(string $refundNo, array $input = []): RefundOrder
     {
@@ -150,6 +185,7 @@ class RefundLifecycleService extends BaseService
             return $refundOrder;
         }
 
+        // 先锁定原支付单，避免退款推进时原单状态被并发修改。
         $payOrder = $this->payOrderRepository->findForUpdateByPayNo((string) $refundOrder->pay_no);
         if (!$payOrder || (int) $payOrder->status !== TradeConstant::ORDER_STATUS_SUCCESS) {
             throw new BusinessStateException('原支付单状态不允许退款', [
@@ -160,6 +196,7 @@ class RefundLifecycleService extends BaseService
 
         $traceNo = (string) ($refundOrder->trace_no ?: $refundOrder->biz_no);
         if ((int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_COLLECT) {
+            // 平台代收退款在已结算时，需要同步冲减商户可提现余额，口径按实收净额处理。
             $reverseAmount = max(0, (int) $payOrder->pay_amount - (int) $payOrder->fee_actual_amount);
             if ((int) $payOrder->settlement_status === TradeConstant::SETTLEMENT_STATUS_SETTLED && $reverseAmount > 0) {
                 $this->merchantAccountService->debitAvailableAmountInCurrentTransaction(
@@ -175,10 +212,12 @@ class RefundLifecycleService extends BaseService
                 );
             }
 
+            // 已结算的代收单被退款后，状态要回写成 reversed，表示结算已被抵消。
             $payOrder->settlement_status = TradeConstant::SETTLEMENT_STATUS_REVERSED;
             $payOrder->save();
         }
 
+        // 退款成功后，退款单和业务单都要同步收口到成功态。
         $refundOrder->status = TradeConstant::REFUND_STATUS_SUCCESS;
         $refundOrder->succeeded_at = $input['succeeded_at'] ?? $this->now();
         $refundOrder->channel_refund_no = (string) ($input['channel_refund_no'] ?? $refundOrder->channel_refund_no ?? '');
@@ -188,6 +227,7 @@ class RefundLifecycleService extends BaseService
 
         $bizOrder = $this->bizOrderRepository->findForUpdateByBizNo((string) $refundOrder->biz_no);
         if ($bizOrder) {
+            // 业务单的退款金额直接收口到原支付金额，避免后续展示和统计再做推导。
             $bizOrder->refund_amount = (int) $bizOrder->order_amount;
             if (empty($bizOrder->trace_no)) {
                 $bizOrder->trace_no = $traceNo;
@@ -200,6 +240,10 @@ class RefundLifecycleService extends BaseService
 
     /**
      * 退款失败。
+     *
+     * @param string $refundNo 退款单号
+     * @param array $input 输入参数
+     * @return RefundOrder 退款单模型
      */
     public function markRefundFailed(string $refundNo, array $input = []): RefundOrder
     {
@@ -210,6 +254,12 @@ class RefundLifecycleService extends BaseService
 
     /**
      * 在当前事务中标记退款失败。
+     *
+     * @param string $refundNo 退款单号
+     * @param array $input 输入参数
+     * @return RefundOrder 退款单模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
      */
     public function markRefundFailedInCurrentTransaction(string $refundNo, array $input = []): RefundOrder
     {
@@ -234,6 +284,7 @@ class RefundLifecycleService extends BaseService
             ]);
         }
 
+        // 失败状态只更新失败信息，不再改动原支付单和业务单。
         $refundOrder->status = TradeConstant::REFUND_STATUS_FAILED;
         $refundOrder->failed_at = $input['failed_at'] ?? $this->now();
         $refundOrder->channel_refund_no = (string) ($input['channel_refund_no'] ?? $refundOrder->channel_refund_no ?? '');
@@ -241,6 +292,7 @@ class RefundLifecycleService extends BaseService
         $extJson = (array) $refundOrder->ext_json;
         $reason = trim((string) ($input['reason'] ?? ''));
         if ($reason !== '') {
+            // 失败原因也放进扩展字段，方便后台对比渠道返回和内部处理结果。
             $extJson['fail_reason'] = $reason;
         }
         $refundOrder->ext_json = array_merge($extJson, $input['ext_json'] ?? []);

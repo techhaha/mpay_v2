@@ -10,11 +10,16 @@ use support\Response;
 
 /**
  * 通道日统计控制器。
+ *
+ * @property ChannelDailyStatService $channelDailyStatService 渠道日统计服务
  */
 class ChannelDailyStatController extends BaseController
 {
     /**
-     * 构造函数，注入通道日统计服务。
+     * 构造方法。
+     *
+     * @param ChannelDailyStatService $channelDailyStatService 渠道日统计服务
+     * @return void
      */
     public function __construct(
         protected ChannelDailyStatService $channelDailyStatService
@@ -23,6 +28,9 @@ class ChannelDailyStatController extends BaseController
 
     /**
      * 查询通道日统计列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -39,6 +47,10 @@ class ChannelDailyStatController extends BaseController
 
     /**
      * 查询通道日统计详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 渠道日统计ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -52,3 +64,8 @@ class ChannelDailyStatController extends BaseController
         return $this->success($stat);
     }
 }
+
+
+
+
+

@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class PaymentChannelValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -33,6 +38,11 @@ class PaymentChannelValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '通道ID',
         'keyword' => '关键字',
@@ -49,12 +59,17 @@ class PaymentChannelValidator extends Validator
         'min_amount' => '最小金额',
         'max_amount' => '最大金额',
         'remark' => '备注',
-        'status' => '状态',
+        'status' => '通道状态',
         'sort_no' => '排序',
         'page' => '页码',
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'merchant_id', 'pay_type_id', 'plugin_code', 'channel_mode', 'status', 'page', 'page_size'],
         'store' => ['merchant_id', 'name', 'split_rate_bp', 'cost_rate_bp', 'channel_mode', 'pay_type_id', 'plugin_code', 'api_config_id', 'daily_limit_amount', 'daily_limit_count', 'min_amount', 'max_amount', 'remark', 'status', 'sort_no'],
@@ -64,6 +79,11 @@ class PaymentChannelValidator extends Validator
         'destroy' => ['id'],
     ];
 
+    /**
+     * 根据场景返回支付通道校验规则。
+     *
+     * @return array 校验规则
+     */
     public function rules(): array
     {
         $rules = parent::rules();
@@ -101,3 +121,6 @@ class PaymentChannelValidator extends Validator
         };
     }
 }
+
+
+

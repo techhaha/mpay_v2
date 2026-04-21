@@ -9,6 +9,11 @@ use support\validation\Validator;
  */
 class FileRecordValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -21,6 +26,11 @@ class FileRecordValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '文件ID',
         'keyword' => '关键字',
@@ -33,13 +43,20 @@ class FileRecordValidator extends Validator
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'scene', 'source_type', 'visibility', 'storage_engine', 'page', 'page_size'],
         'show' => ['id'],
         'destroy' => ['id'],
         'preview' => ['id'],
         'download' => ['id'],
-        'store' => ['scene', 'visibility'],
-        'importRemote' => ['remote_url', 'scene', 'visibility'],
+        'store' => ['scene', 'visibility', 'storage_engine'],
+        'importRemote' => ['remote_url', 'scene', 'visibility', 'storage_engine'],
     ];
 }
+
+

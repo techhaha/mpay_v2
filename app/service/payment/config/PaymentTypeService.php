@@ -11,11 +11,16 @@ use app\repository\payment\config\PaymentTypeRepository;
  * 支付方式字典服务。
  *
  * 负责支付方式的基础列表查询、新增、修改、删除和下拉选项输出。
+ *
+ * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
  */
 class PaymentTypeService extends BaseService
 {
     /**
-     * 构造函数，注入支付方式仓库。
+     * 构造方法。
+     *
+     * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+     * @return void
      */
     public function __construct(
         protected PaymentTypeRepository $paymentTypeRepository
@@ -24,6 +29,11 @@ class PaymentTypeService extends BaseService
 
     /**
      * 分页查询支付方式。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -59,6 +69,8 @@ class PaymentTypeService extends BaseService
 
     /**
      * 查询启用中的支付方式选项。
+     *
+     * @return array<int, array{label: string, value: int, code: string}> 启用支付方式选项
      */
     public function enabledOptions(): array
     {
@@ -76,6 +88,10 @@ class PaymentTypeService extends BaseService
 
     /**
      * 解析启用中的支付方式，优先按编码匹配，未命中则取首个启用项。
+     *
+     * @param string $code 支付方式编码
+     * @return PaymentType 支付方式模型
+     * @throws ValidationException
      */
     public function resolveEnabledType(string $code = ''): PaymentType
     {
@@ -87,6 +103,7 @@ class PaymentTypeService extends BaseService
             }
         }
 
+        // 没有传编码或编码不可用时，直接回退到系统当前首个启用支付方式。
         $paymentType = $this->paymentTypeRepository->enabledList()->first();
         if (!$paymentType) {
             throw new ValidationException('未配置可用支付方式');
@@ -97,6 +114,9 @@ class PaymentTypeService extends BaseService
 
     /**
      * 根据支付方式编码查询字典。
+     *
+     * @param string $code 支付方式编码
+     * @return PaymentType|null 支付方式模型
      */
     public function findByCode(string $code): ?PaymentType
     {
@@ -105,6 +125,9 @@ class PaymentTypeService extends BaseService
 
     /**
      * 根据支付方式 ID 解析支付方式编码。
+     *
+     * @param int $id 支付方式ID
+     * @return string 支付方式编码
      */
     public function resolveCodeById(int $id): string
     {
@@ -114,6 +137,9 @@ class PaymentTypeService extends BaseService
 
     /**
      * 按 ID 查询支付方式。
+     *
+     * @param int $id 支付方式ID
+     * @return PaymentType|null 支付方式模型
      */
     public function findById(int $id): ?PaymentType
     {
@@ -122,6 +148,9 @@ class PaymentTypeService extends BaseService
 
     /**
      * 新增支付方式。
+     *
+     * @param array $data 写入数据
+     * @return PaymentType 新增后的支付方式模型
      */
     public function create(array $data): PaymentType
     {
@@ -130,6 +159,10 @@ class PaymentTypeService extends BaseService
 
     /**
      * 更新支付方式。
+     *
+     * @param int $id 支付方式ID
+     * @param array $data 写入数据
+     * @return PaymentType|null 更新后的支付方式模型
      */
     public function update(int $id, array $data): ?PaymentType
     {
@@ -142,9 +175,14 @@ class PaymentTypeService extends BaseService
 
     /**
      * 删除支付方式。
+     *
+     * @param int $id 支付方式ID
+     * @return bool 是否删除成功
      */
     public function delete(int $id): bool
     {
         return $this->paymentTypeRepository->deleteById($id);
     }
 }
+
+

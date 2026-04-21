@@ -12,11 +12,16 @@ use support\Response;
  * 支付方式管理控制器。
  *
  * 负责支付方式字典的列表、详情、新增、修改、删除和选项输出。
+ *
+ * @property PaymentTypeService $paymentTypeService 支付类型服务
  */
 class PaymentTypeController extends BaseController
 {
     /**
-     * 构造函数，注入支付方式服务。
+     * 构造方法。
+     *
+     * @param PaymentTypeService $paymentTypeService 支付类型服务
+     * @return void
      */
     public function __construct(
         protected PaymentTypeService $paymentTypeService
@@ -25,6 +30,9 @@ class PaymentTypeController extends BaseController
 
     /**
      * 查询支付方式列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -37,6 +45,10 @@ class PaymentTypeController extends BaseController
 
     /**
      * 查询支付方式详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付类型ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -52,6 +64,9 @@ class PaymentTypeController extends BaseController
 
     /**
      * 新增支付方式。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function store(Request $request): Response
     {
@@ -62,6 +77,10 @@ class PaymentTypeController extends BaseController
 
     /**
      * 修改支付方式。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付类型ID
+     * @return Response 响应对象
      */
     public function update(Request $request, string $id): Response
     {
@@ -83,6 +102,10 @@ class PaymentTypeController extends BaseController
 
     /**
      * 删除支付方式。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付类型ID
+     * @return Response 响应对象
      */
     public function destroy(Request $request, string $id): Response
     {
@@ -97,9 +120,17 @@ class PaymentTypeController extends BaseController
 
     /**
      * 查询支付方式下拉选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function options(Request $request): Response
     {
         return $this->success($this->paymentTypeService->enabledOptions());
     }
 }
+
+
+
+
+

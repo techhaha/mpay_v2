@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class RefundOrderValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'keyword' => 'sometimes|string|max:128',
         'merchant_id' => 'sometimes|integer|min:1',
@@ -21,6 +26,11 @@ class RefundOrderValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'keyword' => '关键字',
         'merchant_id' => '商户ID',
@@ -31,7 +41,14 @@ class RefundOrderValidator extends Validator
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'merchant_id', 'pay_type_id', 'status', 'channel_mode', 'page', 'page_size'],
     ];
 }
+
+

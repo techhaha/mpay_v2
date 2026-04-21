@@ -43,9 +43,13 @@ class BaseModel extends Model
      *
      * 避免前端收到 ISO8601（如 2026-04-02T01:50:40.000000Z）这类不直观的时间串，
      * 统一改为后台常用的本地展示格式。
+     *
+     * @param DateTimeInterface $date 时间对象
+     * @return string 格式化后的日期时间
      */
     protected function serializeDate(DateTimeInterface $date): string
     {
         return FormatHelper::dateTime($date);
     }
 }
+

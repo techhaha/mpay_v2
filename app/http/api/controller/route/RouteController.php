@@ -9,14 +9,19 @@ use support\Request;
 use support\Response;
 
 /**
- * 路由预览控制器。
+ * 路由解析控制器。
  *
- * 用于返回指定商户分组、支付方式和金额条件下的路由解析结果。
+ * 用于根据商户分组、支付方式和金额条件返回路由候选与最终选中通道。
+ *
+ * @property PaymentRouteService $paymentRouteService 支付路由服务
  */
 class RouteController extends BaseController
 {
     /**
-     * 构造函数，注入路由服务。
+     * 构造方法。
+     *
+     * @param PaymentRouteService $paymentRouteService 支付路由服务
+     * @return void
      */
     public function __construct(
         protected PaymentRouteService $paymentRouteService
@@ -24,9 +29,12 @@ class RouteController extends BaseController
     }
 
     /**
-     * GET /api/routes/resolve
-     *
      * 解析支付路由。
+     *
+     * 这个接口会返回当前条件下的候选通道和最终命中的通道信息，通常用于下单前查看结果。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function resolve(Request $request): Response
     {
@@ -40,4 +48,9 @@ class RouteController extends BaseController
         ));
     }
 }
+
+
+
+
+
 

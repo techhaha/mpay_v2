@@ -11,20 +11,37 @@ use support\validation\Validator;
  */
 class SettlementActionValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'settle_no' => 'required|string|min:1|max:64|exists:ma_settlement_order,settle_no',
         'reason' => 'nullable|string|max:255',
         'ext_json' => 'nullable|array',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'settle_no' => '清算单号',
         'reason' => '原因',
         'ext_json' => '扩展信息',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'complete' => ['settle_no'],
         'fail' => ['settle_no', 'reason', 'ext_json'],
     ];
 }
+
+

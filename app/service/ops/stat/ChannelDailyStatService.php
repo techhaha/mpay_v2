@@ -8,11 +8,18 @@ use app\repository\ops\stat\ChannelDailyStatRepository;
 
 /**
  * 通道日统计查询服务。
+ *
+ * 负责渠道日统计列表、详情和展示字段补充。
+ *
+ * @property ChannelDailyStatRepository $channelDailyStatRepository 渠道日统计仓库
  */
 class ChannelDailyStatService extends BaseService
 {
     /**
-     * 构造函数，注入通道日统计仓库。
+     * 构造方法。
+     *
+     * @param ChannelDailyStatRepository $channelDailyStatRepository 渠道日统计仓库
+     * @return void
      */
     public function __construct(
         protected ChannelDailyStatRepository $channelDailyStatRepository
@@ -21,6 +28,11 @@ class ChannelDailyStatService extends BaseService
 
     /**
      * 分页查询通道日统计。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -67,7 +79,10 @@ class ChannelDailyStatService extends BaseService
     }
 
     /**
-     * 按 ID 查询详情。
+     * 按 ID 查询渠道日统计详情。
+     *
+     * @param int $id 渠道日统计ID
+     * @return ChannelDailyStat|null 统计模型
      */
     public function findById(int $id): ?ChannelDailyStat
     {
@@ -80,6 +95,9 @@ class ChannelDailyStatService extends BaseService
 
     /**
      * 格式化单条统计记录。
+     *
+     * @param object $row 查询结果对象
+     * @return object 格式化后的对象
      */
     private function decorateRow(object $row): object
     {
@@ -96,6 +114,8 @@ class ChannelDailyStatService extends BaseService
 
     /**
      * 构建基础查询。
+     *
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
      */
     private function baseQuery()
     {
@@ -130,3 +150,7 @@ class ChannelDailyStatService extends BaseService
     }
 
 }
+
+
+
+

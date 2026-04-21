@@ -9,6 +9,11 @@ use support\validation\Validator;
  */
 class ChannelDailyStatValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'required|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -19,6 +24,11 @@ class ChannelDailyStatValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '统计ID',
         'keyword' => '关键词',
@@ -29,8 +39,15 @@ class ChannelDailyStatValidator extends Validator
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'merchant_id', 'channel_id', 'stat_date', 'page', 'page_size'],
         'show' => ['id'],
     ];
 }
+
+

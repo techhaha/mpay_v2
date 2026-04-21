@@ -8,14 +8,18 @@ use app\model\merchant\MerchantApiCredential;
 use app\repository\merchant\credential\MerchantApiCredentialRepository;
 
 /**
- * 商户接口凭证查询服务。
+ * 商户 API 凭证查询服务。
  *
  * 负责凭证列表和详情展示，不承载验签和写入逻辑。
+ *
+ * @property MerchantApiCredentialRepository $merchantApiCredentialRepository 商户 API 凭证仓库
  */
 class MerchantApiCredentialQueryService extends BaseService
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param MerchantApiCredentialRepository $merchantApiCredentialRepository 商户 API 凭证仓库
      */
     public function __construct(
         protected MerchantApiCredentialRepository $merchantApiCredentialRepository
@@ -23,7 +27,12 @@ class MerchantApiCredentialQueryService extends BaseService
     }
 
     /**
-     * 分页查询商户接口凭证。
+     * 分页查询商户 API 凭证。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页对象
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -63,7 +72,10 @@ class MerchantApiCredentialQueryService extends BaseService
     }
 
     /**
-     * 查询商户接口凭证详情。
+     * 查询商户 API 凭证详情。
+     *
+     * @param int $id 商户 API 凭证ID
+     * @return MerchantApiCredential|null 凭证模型
      */
     public function findById(int $id): ?MerchantApiCredential
     {
@@ -73,6 +85,9 @@ class MerchantApiCredentialQueryService extends BaseService
 
     /**
      * 查询商户对应的接口凭证详情。
+     *
+     * @param int $merchantId 商户ID
+     * @return MerchantApiCredential|null 凭证模型
      */
     public function findByMerchantId(int $merchantId): ?MerchantApiCredential
     {
@@ -82,6 +97,9 @@ class MerchantApiCredentialQueryService extends BaseService
 
     /**
      * 统一构造查询对象。
+     *
+     * @param bool $maskCredentialValue 是否脱敏接口凭证
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
      */
     private function baseQuery(bool $maskCredentialValue = false)
     {
@@ -112,6 +130,9 @@ class MerchantApiCredentialQueryService extends BaseService
 
     /**
      * 给详情行补充展示字段。
+     *
+     * @param object|null $row 原始记录对象
+     * @return MerchantApiCredential|null 凭证模型
      */
     private function decorateRow(mixed $row): ?MerchantApiCredential
     {

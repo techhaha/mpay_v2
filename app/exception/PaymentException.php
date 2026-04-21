@@ -12,7 +12,12 @@ use Webman\Exception\BusinessException;
 class PaymentException extends BusinessException
 {
     /**
-     * 构造函数，统一组装业务码与附加数据。
+     * 构造方法。
+     *
+     * @param string $message message
+     * @param int $bizCode 业务Code
+     * @param array $data 数据
+     * @return void
      */
     public function __construct(string $message = '支付渠道处理失败', int $bizCode = 40200, array $data = [])
     {
@@ -23,3 +28,8 @@ class PaymentException extends BusinessException
         }
     }
 }
+
+
+
+
+

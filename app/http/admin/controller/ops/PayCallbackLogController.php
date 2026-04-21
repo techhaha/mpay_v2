@@ -10,11 +10,16 @@ use support\Response;
 
 /**
  * 支付回调日志控制器。
+ *
+ * @property PayCallbackLogService $payCallbackLogService 支付回调日志服务
  */
 class PayCallbackLogController extends BaseController
 {
     /**
-     * 构造函数，注入支付回调日志服务。
+     * 构造方法。
+     *
+     * @param PayCallbackLogService $payCallbackLogService 支付回调日志服务
+     * @return void
      */
     public function __construct(
         protected PayCallbackLogService $payCallbackLogService
@@ -23,6 +28,9 @@ class PayCallbackLogController extends BaseController
 
     /**
      * 查询支付回调日志列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -39,6 +47,10 @@ class PayCallbackLogController extends BaseController
 
     /**
      * 查询支付回调日志详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付回调日志ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -52,3 +64,8 @@ class PayCallbackLogController extends BaseController
         return $this->success($log);
     }
 }
+
+
+
+
+

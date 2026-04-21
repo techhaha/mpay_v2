@@ -6,12 +6,16 @@ use app\common\base\BaseRepository;
 use app\model\payment\PayOrder;
 
 /**
- * 支付单仓库。
+ * 支付单基础查询仓库。
+ *
+ * 封装支付单号、业务单号、追踪号和商户请求号等常用查询方法。
  */
 class PayOrderRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,10 @@ class PayOrderRepository extends BaseRepository
 
     /**
      * 根据支付单号查询支付单。
+     *
+     * @param string $payNo 支付单号
+     * @param array $columns 字段列表
+     * @return PayOrder|null 支付单记录
      */
     public function findByPayNo(string $payNo, array $columns = ['*'])
     {
@@ -30,6 +38,10 @@ class PayOrderRepository extends BaseRepository
 
     /**
      * 根据追踪号查询支付单。
+     *
+     * @param string $traceNo 追踪号
+     * @param array $columns 字段列表
+     * @return PayOrder|null 支付单记录
      */
     public function findByTraceNo(string $traceNo, array $columns = ['*'])
     {
@@ -40,6 +52,10 @@ class PayOrderRepository extends BaseRepository
 
     /**
      * 根据追踪号查询支付单列表。
+     *
+     * @param string $traceNo 追踪号
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PayOrder> 支付单列表
      */
     public function listByTraceNo(string $traceNo, array $columns = ['*'])
     {
@@ -52,6 +68,10 @@ class PayOrderRepository extends BaseRepository
 
     /**
      * 根据业务单号查询支付单列表。
+     *
+     * @param string $bizNo 业务单号
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PayOrder> 支付单列表
      */
     public function listByBizNo(string $bizNo, array $columns = ['*'])
     {
@@ -64,6 +84,10 @@ class PayOrderRepository extends BaseRepository
 
     /**
      * 根据业务单号查询最新支付单。
+     *
+     * @param string $bizNo 业务单号
+     * @param array $columns 字段列表
+     * @return PayOrder|null 支付单记录
      */
     public function findLatestByBizNo(string $bizNo, array $columns = ['*'])
     {
@@ -75,6 +99,11 @@ class PayOrderRepository extends BaseRepository
 
     /**
      * 根据商户和渠道请求号查询支付单。
+     *
+     * @param int $merchantId 商户ID
+     * @param string $channelRequestNo 渠道Request号
+     * @param array $columns 字段列表
+     * @return PayOrder|null 支付单记录
      */
     public function findByChannelRequestNo(int $merchantId, string $channelRequestNo, array $columns = ['*'])
     {
@@ -86,6 +115,10 @@ class PayOrderRepository extends BaseRepository
 
     /**
      * 根据支付单号加锁查询支付单。
+     *
+     * @param string $payNo 支付单号
+     * @param array $columns 字段列表
+     * @return PayOrder|null 支付单记录
      */
     public function findForUpdateByPayNo(string $payNo, array $columns = ['*'])
     {
@@ -97,6 +130,10 @@ class PayOrderRepository extends BaseRepository
 
     /**
      * 根据追踪号加锁查询支付单。
+     *
+     * @param string $traceNo 追踪号
+     * @param array $columns 字段列表
+     * @return PayOrder|null 支付单记录
      */
     public function findForUpdateByTraceNo(string $traceNo, array $columns = ['*'])
     {
@@ -108,6 +145,10 @@ class PayOrderRepository extends BaseRepository
 
     /**
      * 根据业务单号加锁查询最新支付单。
+     *
+     * @param string $bizNo 业务单号
+     * @param array $columns 字段列表
+     * @return PayOrder|null 支付单记录
      */
     public function findLatestForUpdateByBizNo(string $bizNo, array $columns = ['*'])
     {
@@ -120,6 +161,10 @@ class PayOrderRepository extends BaseRepository
 
     /**
      * 查询商户最近支付单列表，用于总览展示。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $limit 限制条数
+     * @return \Illuminate\Database\Eloquent\Collection<int, PayOrder> 最近支付单列表
      */
     public function recentByMerchantId(int $merchantId, int $limit = 5)
     {
@@ -140,4 +185,8 @@ class PayOrderRepository extends BaseRepository
             ]);
     }
 }
+
+
+
+
 

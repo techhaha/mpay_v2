@@ -3,16 +3,35 @@
 namespace app\common\constant;
 
 /**
- * 通用状态常量。
+ * 通用状态枚举。
  */
 final class CommonConstant
 {
+    /**
+     * 禁用状态。
+     */
     public const STATUS_DISABLED = 0;
+
+    /**
+     * 启用状态。
+     */
     public const STATUS_ENABLED = 1;
 
+    /**
+     * 否。
+     */
     public const NO = 0;
+
+    /**
+     * 是。
+     */
     public const YES = 1;
 
+    /**
+     * 获取状态名称映射。
+     *
+     * @return array<int, string> 状态名称表
+     */
     public static function statusMap(): array
     {
         return [
@@ -21,6 +40,11 @@ final class CommonConstant
         ];
     }
 
+    /**
+     * 获取是否名称映射。
+     *
+     * @return array<int, string> 是否名称表
+     */
     public static function yesNoMap(): array
     {
         return [
@@ -29,3 +53,7 @@ final class CommonConstant
         ];
     }
 }
+
+
+
+

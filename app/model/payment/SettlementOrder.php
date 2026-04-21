@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class SettlementOrder extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_settlement_order';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'settle_no',
         'trace_no',
@@ -35,6 +45,11 @@ class SettlementOrder extends BaseModel
         'ext_json',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_id' => 'integer',
         'merchant_group_id' => 'integer',
@@ -56,5 +71,7 @@ class SettlementOrder extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

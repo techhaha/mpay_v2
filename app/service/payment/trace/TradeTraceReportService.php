@@ -17,6 +17,14 @@ class TradeTraceReportService extends BaseService
 {
     /**
      * 汇总追踪统计数据。
+     *
+     * @param BizOrder|null $bizOrder 业务订单
+     * @param array $payOrders 支付订单列表
+     * @param array $refundOrders 退款订单列表
+     * @param array $settlementOrders 清算订单列表
+     * @param array $accountLedgers 账户流水列表
+     * @param array $payCallbacks 支付回调列表
+     * @return array<string, int|bool> 汇总统计
      */
     public function buildSummary(?BizOrder $bizOrder, array $payOrders, array $refundOrders, array $settlementOrders, array $accountLedgers, array $payCallbacks): array
     {
@@ -36,6 +44,14 @@ class TradeTraceReportService extends BaseService
 
     /**
      * 根据关联记录组装追踪时间线。
+     *
+     * @param BizOrder|null $bizOrder 业务订单
+     * @param array $payOrders 支付订单列表
+     * @param array $refundOrders 退款订单列表
+     * @param array $settlementOrders 清算订单列表
+     * @param array $accountLedgers 账户流水列表
+     * @param array $payCallbacks 支付回调列表
+     * @return array<int, array<string, mixed>> 时间线事件
      */
     public function buildTimeline(?BizOrder $bizOrder, array $payOrders, array $refundOrders, array $settlementOrders, array $accountLedgers, array $payCallbacks): array
     {
@@ -213,8 +229,17 @@ class TradeTraceReportService extends BaseService
 
     /**
      * 追加一条时间线事件。
+     *
+     * @param array<int, array<string, mixed>> $events 事件列表
+     * @param int $sortOrder 当前排序号
+     * @param string $type 事件类型
+     * @param string $sourceNo 事件来源单号
+     * @param string $status 事件状态
+     * @param \DateTimeInterface|int|string|float|null $at 事件时间
+     * @param array<string, mixed> $payload 事件载荷
+     * @return void
      */
-    private function pushEvent(array &$events, int &$sortOrder, string $type, string $sourceNo, string $status, mixed $at, array $payload = []): void
+    private function pushEvent(array &$events, int &$sortOrder, string $type, string $sourceNo, string $status, \DateTimeInterface|int|string|float|null $at, array $payload = []): void
     {
         $atText = $this->formatDateTime($at);
         if ($atText === '') {
@@ -235,6 +260,10 @@ class TradeTraceReportService extends BaseService
 
     /**
      * 汇总模型列表中的数值字段。
+     *
+     * @param array $items 模型列表
+     * @param string $field 字段名
+     * @return int 汇总值
      */
     private function sumBy(array $items, string $field): int
     {
@@ -246,3 +275,6 @@ class TradeTraceReportService extends BaseService
         return $total;
     }
 }
+
+
+

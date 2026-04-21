@@ -11,9 +11,19 @@ use app\repository\account\ledger\MerchantAccountLedgerRepository;
  * 商户账户查询服务。
  *
  * 只负责账户列表、概览和快照查询，不承载资金变更逻辑。
+ *
+ * @property MerchantAccountRepository $accountRepository 账户仓库
+ * @property MerchantAccountLedgerRepository $ledgerRepository 流水仓库
  */
 class MerchantAccountQueryService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param MerchantAccountRepository $accountRepository 账户仓库
+     * @param MerchantAccountLedgerRepository $ledgerRepository 流水仓库
+     * @return void
+     */
     public function __construct(
         protected MerchantAccountRepository $accountRepository,
         protected MerchantAccountLedgerRepository $ledgerRepository
@@ -22,6 +32,11 @@ class MerchantAccountQueryService extends BaseService
 
     /**
      * 分页查询商户账户。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -73,6 +88,8 @@ class MerchantAccountQueryService extends BaseService
 
     /**
      * 资金中心概览。
+     *
+     * @return array 概览数据
      */
     public function summary(): array
     {
@@ -103,6 +120,9 @@ class MerchantAccountQueryService extends BaseService
      * 获取商户余额快照。
      *
      * 用于后台展示和接口返回，不修改任何账户数据。
+     *
+     * @param int $merchantId 商户ID
+     * @return array 快照数据
      */
     public function getBalanceSnapshot(int $merchantId): array
     {
@@ -125,6 +145,9 @@ class MerchantAccountQueryService extends BaseService
 
     /**
      * 查询商户账户详情。
+     *
+     * @param int $id 商户账户查询ID
+     * @return MerchantAccount|null 账户记录
      */
     public function findById(int $id): ?MerchantAccount
     {
@@ -158,3 +181,6 @@ class MerchantAccountQueryService extends BaseService
     }
 
 }
+
+
+

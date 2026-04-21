@@ -9,6 +9,11 @@ use support\validation\Validator;
  */
 class MerchantPortalValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'merchant_short_name' => 'sometimes|string|max:64',
         'contact_name' => 'sometimes|string|max:64',
@@ -26,6 +31,11 @@ class MerchantPortalValidator extends Validator
         'stat_date' => 'sometimes|date',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'merchant_short_name' => '商户简称',
         'contact_name' => '联系人',
@@ -43,6 +53,11 @@ class MerchantPortalValidator extends Validator
         'stat_date' => '统计日期',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'profileUpdate' => [
             'merchant_short_name',
@@ -58,3 +73,5 @@ class MerchantPortalValidator extends Validator
         'routePreview' => ['pay_type_id', 'pay_amount', 'stat_date'],
     ];
 }
+
+

@@ -12,11 +12,16 @@ use app\repository\system\user\AdminUserRepository;
  * 管理员用户管理服务。
  *
  * 负责管理员账号的列表查询、新增、修改和删除，以及密码字段的统一处理。
+ *
+ * @property AdminUserRepository $adminUserRepository 管理用户仓库
  */
 class AdminUserService extends BaseService
 {
     /**
-     * 构造函数，注入管理员用户仓库。
+     * 构造方法。
+     *
+     * @param AdminUserRepository $adminUserRepository 管理用户仓库
+     * @return void
      */
     public function __construct(
         protected AdminUserRepository $adminUserRepository
@@ -25,6 +30,11 @@ class AdminUserService extends BaseService
 
     /**
      * 分页查询管理员用户。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -80,6 +90,9 @@ class AdminUserService extends BaseService
 
     /**
      * 根据 ID 查询管理员用户。
+     *
+     * @param int $id 管理员用户ID
+     * @return AdminUser|null 管理员模型
      */
     public function findById(int $id): ?AdminUser
     {
@@ -88,6 +101,9 @@ class AdminUserService extends BaseService
 
     /**
      * 新增管理员用户。
+     *
+     * @param array $data 写入数据
+     * @return AdminUser 新增后的管理员模型
      */
     public function create(array $data): AdminUser
     {
@@ -96,6 +112,10 @@ class AdminUserService extends BaseService
 
     /**
      * 修改管理员用户。
+     *
+     * @param int $id 管理员用户ID
+     * @param array $data 写入数据
+     * @return AdminUser|null 更新后的管理员模型
      */
     public function update(int $id, array $data): ?AdminUser
     {
@@ -113,6 +133,9 @@ class AdminUserService extends BaseService
 
     /**
      * 删除管理员用户。
+     *
+     * @param int $id 管理员用户ID
+     * @return bool 是否删除成功
      */
     public function delete(int $id): bool
     {
@@ -121,6 +144,11 @@ class AdminUserService extends BaseService
 
     /**
      * 当前管理员资料。
+     *
+     * @param int $adminId 管理员ID
+     * @param string $adminUsername 管理员账号
+     * @return array<string, mixed> 当前用户资料
+     * @throws ResourceNotFoundException
      */
     public function profile(int $adminId, string $adminUsername = ''): array
     {
@@ -170,6 +198,10 @@ class AdminUserService extends BaseService
 
     /**
      * 统一整理写入字段，并处理密码哈希。
+     *
+     * @param array $data 写入数据
+     * @param bool $isUpdate 是否更新
+     * @return array<string, mixed> 标准化后的数据
      */
     private function normalizePayload(array $data, bool $isUpdate): array
     {
@@ -194,3 +226,6 @@ class AdminUserService extends BaseService
     }
 
 }
+
+
+

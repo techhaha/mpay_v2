@@ -6,12 +6,22 @@ use app\common\base\BaseModel;
 
 /**
  * 渠道通知日志模型。
- * 用于记录异步通知、查单请求和去重处理结果。
+ * 用于记录异步通知、查单请求和去重状态。
  */
 class ChannelNotifyLog extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_channel_notify_log';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'notify_no',
         'channel_id',
@@ -28,10 +38,20 @@ class ChannelNotifyLog extends BaseModel
         'last_error',
     ];
 
+    /**
+     * 隐藏字段
+     *
+     * @var mixed
+     */
     protected $hidden = [
         'raw_payload',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'channel_id' => 'integer',
         'notify_type' => 'integer',
@@ -43,5 +63,6 @@ class ChannelNotifyLog extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
 
 

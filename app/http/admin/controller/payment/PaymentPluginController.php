@@ -12,11 +12,16 @@ use support\Response;
  * 支付插件管理控制器。
  *
  * 负责插件字典的列表、详情、刷新同步和状态备注维护。
+ *
+ * @property PaymentPluginService $paymentPluginService 支付插件服务
  */
 class PaymentPluginController extends BaseController
 {
     /**
-     * 构造函数，注入支付插件服务。
+     * 构造方法。
+     *
+     * @param PaymentPluginService $paymentPluginService 支付插件服务
+     * @return void
      */
     public function __construct(
         protected PaymentPluginService $paymentPluginService
@@ -25,6 +30,9 @@ class PaymentPluginController extends BaseController
 
     /**
      * 查询支付插件列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -37,6 +45,10 @@ class PaymentPluginController extends BaseController
 
     /**
      * 查询支付插件详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $code 编码
+     * @return Response 响应对象
      */
     public function show(Request $request, string $code): Response
     {
@@ -52,6 +64,10 @@ class PaymentPluginController extends BaseController
 
     /**
      * 修改支付插件。
+     *
+     * @param Request $request 请求对象
+     * @param string $code 编码
+     * @return Response 响应对象
      */
     public function update(Request $request, string $code): Response
     {
@@ -73,6 +89,9 @@ class PaymentPluginController extends BaseController
 
     /**
      * 从插件目录刷新同步支付插件。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function refresh(Request $request): Response
     {
@@ -81,6 +100,9 @@ class PaymentPluginController extends BaseController
 
     /**
      * 查询支付插件下拉选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function options(Request $request): Response
     {
@@ -91,6 +113,9 @@ class PaymentPluginController extends BaseController
 
     /**
      * 远程查询支付插件选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function selectOptions(Request $request): Response
     {
@@ -103,6 +128,9 @@ class PaymentPluginController extends BaseController
 
     /**
      * 查询通道配置场景下的插件选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function channelOptions(Request $request): Response
     {
@@ -113,6 +141,10 @@ class PaymentPluginController extends BaseController
 
     /**
      * 查询插件配置结构。
+     *
+     * @param Request $request 请求对象
+     * @param string $code 编码
+     * @return Response 响应对象
      */
     public function schema(Request $request, string $code): Response
     {
@@ -121,3 +153,8 @@ class PaymentPluginController extends BaseController
         return $this->success($this->paymentPluginService->getSchema((string) $data['code']));
     }
 }
+
+
+
+
+

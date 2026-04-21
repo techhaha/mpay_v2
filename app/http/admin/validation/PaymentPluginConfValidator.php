@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class PaymentPluginConfValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -24,6 +29,11 @@ class PaymentPluginConfValidator extends Validator
         'ids' => 'sometimes|array',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '配置ID',
         'keyword' => '关键字',
@@ -37,6 +47,11 @@ class PaymentPluginConfValidator extends Validator
         'ids' => '配置ID集合',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'plugin_code', 'page', 'page_size'],
         'store' => ['plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
@@ -47,6 +62,11 @@ class PaymentPluginConfValidator extends Validator
         'selectOptions' => ['keyword', 'plugin_code', 'page', 'page_size', 'ids'],
     ];
 
+    /**
+     * 根据场景返回支付插件配置校验规则。
+     *
+     * @return array 校验规则
+     */
     public function rules(): array
     {
         $rules = parent::rules();
@@ -66,3 +86,5 @@ class PaymentPluginConfValidator extends Validator
         };
     }
 }
+
+

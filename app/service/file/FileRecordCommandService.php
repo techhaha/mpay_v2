@@ -4,6 +4,7 @@ namespace app\service\file;
 
 use app\common\base\BaseService;
 use app\exception\BusinessStateException;
+use app\exception\ResourceNotFoundException;
 use app\exception\ValidationException;
 use app\repository\file\FileRecordRepository;
 use app\service\file\storage\StorageManager;
@@ -12,9 +13,25 @@ use Webman\Http\UploadFile;
 
 /**
  * 文件命令服务。
+ *
+ * 负责上传、远程导入和删除文件，并负责把文件内容同步到存储驱动和数据库。
+ *
+ * @property FileRecordRepository $fileRecordRepository 文件记录仓库
+ * @property FileRecordQueryService $fileRecordQueryService 文件记录查询服务
+ * @property StorageManager $storageManager 存储管理器
+ * @property StorageConfigService $storageConfigService 存储配置服务
  */
 class FileRecordCommandService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param FileRecordRepository $fileRecordRepository 文件记录仓库
+     * @param FileRecordQueryService $fileRecordQueryService 文件记录查询服务
+     * @param StorageManager $storageManager 存储管理器
+     * @param StorageConfigService $storageConfigService 存储配置服务
+     * @return void
+     */
     public function __construct(
         protected FileRecordRepository $fileRecordRepository,
         protected FileRecordQueryService $fileRecordQueryService,
@@ -23,6 +40,15 @@ class FileRecordCommandService extends BaseService
     ) {
     }
 
+    /**
+     * 上传文件并创建记录。
+     *
+     * @param UploadFile $file 上传文件
+     * @param array $data 文件参数
+     * @param int $createdBy 创建人ID
+     * @param string $createdByName 创建人名称
+     * @return array 文件记录
+     */
     public function upload(UploadFile $file, array $data, int $createdBy = 0, string $createdByName = ''): array
     {
         $this->assertFileUpload($file);
@@ -31,7 +57,7 @@ class FileRecordCommandService extends BaseService
         try {
             $scene = $this->storageConfigService->normalizeScene($data['scene'] ?? null, (string) $file->getUploadName(), (string) $file->getUploadMimeType());
             $visibility = $this->storageConfigService->normalizeVisibility($data['visibility'] ?? null, $scene);
-            $engine = $this->storageConfigService->defaultEngine();
+            $engine = $this->resolveStorageEngine($data);
 
             $result = $this->storageManager->storeFromPath(
                 $sourcePath,
@@ -62,7 +88,10 @@ class FileRecordCommandService extends BaseService
                     'created_by_name' => $createdByName,
                 ]);
             } catch (\Throwable $e) {
-                $this->storageManager->delete($result);
+                try {
+                    $this->storageManager->delete($result);
+                } catch (\Throwable) {
+                }
                 throw $e;
             }
 
@@ -74,18 +103,28 @@ class FileRecordCommandService extends BaseService
         }
     }
 
+    /**
+     * 导入远程文件并创建记录。
+     *
+     * @param string $remoteUrl 远程地址
+     * @param array $data 文件参数
+     * @param int $createdBy 创建人ID
+     * @param string $createdByName 创建人名称
+     * @return array 文件记录
+     * @throws ValidationException
+     */
     public function importRemote(string $remoteUrl, array $data, int $createdBy = 0, string $createdByName = ''): array
     {
         $remoteUrl = trim($remoteUrl);
         if ($remoteUrl === '') {
-            throw new ValidationException('远程图片地址不能为空');
+            throw new ValidationException('远程文件地址不能为空');
         }
 
         $download = $this->downloadRemoteFile($remoteUrl, (int) ($data['scene'] ?? 0));
         try {
             $scene = $this->storageConfigService->normalizeScene($data['scene'] ?? null, $download['name'], $download['mime_type']);
             $visibility = $this->storageConfigService->normalizeVisibility($data['visibility'] ?? null, $scene);
-            $engine = $this->storageConfigService->defaultEngine();
+            $engine = $this->resolveStorageEngine($data);
 
             $result = $this->storageManager->storeFromPath(
                 $download['path'],
@@ -116,7 +155,10 @@ class FileRecordCommandService extends BaseService
                     'created_by_name' => $createdByName,
                 ]);
             } catch (\Throwable $e) {
-                $this->storageManager->delete($result);
+                try {
+                    $this->storageManager->delete($result);
+                } catch (\Throwable) {
+                }
                 throw $e;
             }
 
@@ -128,18 +170,38 @@ class FileRecordCommandService extends BaseService
         }
     }
 
+    /**
+     * 删除文件记录。
+     *
+     * @param int $id 文件记录命令ID
+     * @return bool 是否删除成功
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
+     */
     public function delete(int $id): bool
     {
         $asset = $this->fileRecordRepository->findById($id);
         if (!$asset) {
-            return false;
+            throw new ResourceNotFoundException('文件不存在', ['id' => $id]);
         }
 
         $this->storageManager->delete($this->fileRecordQueryService->formatModel($asset));
 
-        return $this->fileRecordRepository->deleteById($id);
+        if (!$this->fileRecordRepository->deleteById($id)) {
+            throw new BusinessStateException('文件删除失败');
+        }
+
+        return true;
     }
 
+    /**
+     * 校验上传文件是否合法。
+     *
+     * @param UploadFile $file 文件
+     * @return void
+     * @throws ValidationException
+     * @throws BusinessStateException
+     */
     private function assertFileUpload(UploadFile $file): void
     {
         if (!$file->isValid()) {
@@ -162,10 +224,19 @@ class FileRecordCommandService extends BaseService
         }
     }
 
+    /**
+     * 下载远程文件到临时文件。
+     *
+     * @param string $remoteUrl 远程地址
+     * @param int $scene 场景
+     * @return array 下载结果
+     * @throws ValidationException
+     * @throws BusinessStateException
+     */
     private function downloadRemoteFile(string $remoteUrl, int $scene = 0): array
     {
         if (!filter_var($remoteUrl, FILTER_VALIDATE_URL)) {
-            throw new ValidationException('远程图片地址格式不正确');
+            throw new ValidationException('远程文件地址格式不正确');
         }
 
         $scheme = strtolower((string) parse_url($remoteUrl, PHP_URL_SCHEME));
@@ -175,7 +246,7 @@ class FileRecordCommandService extends BaseService
 
         $host = (string) parse_url($remoteUrl, PHP_URL_HOST);
         if ($host === '') {
-            throw new ValidationException('远程图片地址格式不正确');
+            throw new ValidationException('远程文件地址格式不正确');
         }
 
         if (filter_var($host, FILTER_VALIDATE_IP) && Request::isIntranetIp($host)) {
@@ -278,4 +349,22 @@ class FileRecordCommandService extends BaseService
             'scene' => $scene,
         ];
     }
+
+    /**
+     * 解析存储Engine
+     *
+     * @param array $data 数据
+     * @return int 整数结果
+     */
+    private function resolveStorageEngine(array $data): int
+    {
+        if (!array_key_exists('storage_engine', $data) || $data['storage_engine'] === null || $data['storage_engine'] === '') {
+            return $this->storageConfigService->defaultEngine();
+        }
+
+        return $this->storageConfigService->normalizeEngine($data['storage_engine']);
+    }
 }
+
+
+

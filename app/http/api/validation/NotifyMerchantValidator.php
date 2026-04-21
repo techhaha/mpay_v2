@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class NotifyMerchantValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'notify_no' => 'sometimes|string|min:1|max:64',
         'merchant_id' => 'required|integer|min:1|exists:ma_merchant,id',
@@ -26,6 +31,11 @@ class NotifyMerchantValidator extends Validator
         'last_response' => 'nullable|string|max:255',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'notify_no' => '通知单号',
         'merchant_id' => '商户ID',
@@ -34,14 +44,21 @@ class NotifyMerchantValidator extends Validator
         'pay_no' => '支付单号',
         'notify_url' => '通知地址',
         'notify_data' => '通知内容',
-        'status' => '状态',
+        'status' => '通知任务状态',
         'retry_count' => '重试次数',
         'next_retry_at' => '下次重试时间',
         'last_notify_at' => '最后通知时间',
         'last_response' => '最后响应',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'store' => ['notify_no', 'merchant_id', 'merchant_group_id', 'biz_no', 'pay_no', 'notify_url', 'notify_data', 'status', 'retry_count', 'next_retry_at', 'last_notify_at', 'last_response'],
     ];
 }
+
+

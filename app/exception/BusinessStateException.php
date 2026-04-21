@@ -12,7 +12,12 @@ use Webman\Exception\BusinessException;
 class BusinessStateException extends BusinessException
 {
     /**
-     * 构造函数，组装异常信息。
+     * 构造方法。
+     *
+     * @param string $message message
+     * @param array $data 数据
+     * @param int $bizCode 业务Code
+     * @return void
      */
     public function __construct(string $message = '业务状态不允许当前操作', array $data = [], int $bizCode = 40910)
     {
@@ -23,3 +28,8 @@ class BusinessStateException extends BusinessException
         }
     }
 }
+
+
+
+
+

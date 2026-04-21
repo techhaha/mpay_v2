@@ -10,9 +10,17 @@ use support\Response;
 
 /**
  * 统一追踪查询控制器。
+ *
+ * @property TradeTraceService $tradeTraceService 交易追踪服务
  */
 class TraceController extends BaseController
 {
+    /**
+ * 构造方法。
+     *
+     * @param TradeTraceService $tradeTraceService 交易追踪服务
+     * @return void
+     */
     public function __construct(
         protected TradeTraceService $tradeTraceService
     ) {
@@ -20,6 +28,10 @@ class TraceController extends BaseController
 
     /**
      * 查询指定追踪号对应的完整交易链路。
+     *
+     * @param Request $request 请求对象
+     * @param string $traceNo 追踪号
+     * @return Response 响应对象
      */
     public function show(Request $request, string $traceNo): Response
     {
@@ -37,3 +49,8 @@ class TraceController extends BaseController
         return $this->success($result);
     }
 }
+
+
+
+
+

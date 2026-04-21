@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class NotifyTask extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_notify_task';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'notify_no',
         'merchant_id',
@@ -27,11 +37,21 @@ class NotifyTask extends BaseModel
         'last_response',
     ];
 
+    /**
+     * 隐藏字段
+     *
+     * @var mixed
+     */
     protected $hidden = [
         'notify_data',
         'last_response',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_id' => 'integer',
         'merchant_group_id' => 'integer',
@@ -43,5 +63,7 @@ class NotifyTask extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

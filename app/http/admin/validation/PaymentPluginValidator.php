@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class PaymentPluginValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'code' => 'sometimes|string|alpha_dash|min:2|max:32',
         'status' => 'sometimes|integer|in:0,1',
@@ -23,10 +28,15 @@ class PaymentPluginValidator extends Validator
         'ids' => 'sometimes|array',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'code' => '插件编码',
         'name' => '插件名称',
-        'status' => '状态',
+        'status' => '插件状态',
         'remark' => '备注',
         'keyword' => '关键字',
         'page' => '页码',
@@ -35,6 +45,11 @@ class PaymentPluginValidator extends Validator
         'ids' => '插件编码集合',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'code', 'name', 'status', 'page', 'page_size'],
         'update' => ['code', 'status', 'remark'],
@@ -43,3 +58,4 @@ class PaymentPluginValidator extends Validator
         'selectOptions' => ['keyword', 'page', 'page_size', 'pay_type_code', 'ids'],
     ];
 }
+

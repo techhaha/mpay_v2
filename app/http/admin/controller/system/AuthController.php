@@ -11,15 +11,31 @@ use support\Response;
 
 /**
  * 管理员认证控制器。
+ *
+ * @property AdminAuthService $adminAuthService 管理认证服务
+ * @property AdminUserService $adminUserService 管理用户服务
  */
 class AuthController extends BaseController
 {
+    /**
+ * 构造方法。
+     *
+     * @param AdminAuthService $adminAuthService 管理认证服务
+     * @param AdminUserService $adminUserService 管理用户服务
+     * @return void
+     */
     public function __construct(
         protected AdminAuthService $adminAuthService,
         protected AdminUserService $adminUserService
     ) {
     }
 
+    /**
+     * 管理员登录。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function login(Request $request): Response
     {
         $data = $this->validated($request->all(), AuthValidator::class, 'login');
@@ -32,6 +48,12 @@ class AuthController extends BaseController
         ));
     }
 
+    /**
+     * 管理员退出登录。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function logout(Request $request): Response
     {
         $token = trim((string) ($request->header('authorization', '') ?: $request->header('x-admin-token', '')));
@@ -47,7 +69,10 @@ class AuthController extends BaseController
     }
 
     /**
-     * 获取当前登录管理员的信息
+     * 获取当前登录管理员信息。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function profile(Request $request): Response
     {
@@ -62,4 +87,9 @@ class AuthController extends BaseController
         ));
     }
 }
+
+
+
+
+
 

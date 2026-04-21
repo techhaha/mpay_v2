@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class PaymentPollGroupValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -23,18 +28,28 @@ class PaymentPollGroupValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '轮询组ID',
         'keyword' => '关键字',
         'group_name' => '轮询组名称',
         'pay_type_id' => '支付方式',
         'route_mode' => '路由模式',
-        'status' => '状态',
+        'status' => '轮询组状态',
         'remark' => '备注',
         'page' => '页码',
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'group_name', 'pay_type_id', 'route_mode', 'status', 'page', 'page_size'],
         'store' => ['group_name', 'pay_type_id', 'route_mode', 'status', 'remark'],
@@ -44,6 +59,11 @@ class PaymentPollGroupValidator extends Validator
         'destroy' => ['id'],
     ];
 
+    /**
+     * 根据场景返回支付轮询组校验规则。
+     *
+     * @return array 校验规则
+     */
     public function rules(): array
     {
         $rules = parent::rules();
@@ -73,3 +93,6 @@ class PaymentPollGroupValidator extends Validator
         };
     }
 }
+
+
+

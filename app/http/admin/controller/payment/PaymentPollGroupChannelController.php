@@ -10,14 +10,28 @@ use support\Response;
 
 /**
  * 轮询组通道编排控制器。
+ *
+ * @property PaymentPollGroupChannelService $paymentPollGroupChannelService 支付轮询分组渠道服务
  */
 class PaymentPollGroupChannelController extends BaseController
 {
+    /**
+ * 构造方法。
+     *
+     * @param PaymentPollGroupChannelService $paymentPollGroupChannelService 支付轮询分组渠道服务
+     * @return void
+     */
     public function __construct(
         protected PaymentPollGroupChannelService $paymentPollGroupChannelService
     ) {
     }
 
+    /**
+     * 查询支付轮询分组渠道列表
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function index(Request $request): Response
     {
         $data = $this->validated($request->all(), PaymentPollGroupChannelValidator::class, 'index');
@@ -31,6 +45,13 @@ class PaymentPollGroupChannelController extends BaseController
         );
     }
 
+    /**
+     * 查询支付轮询分组渠道详情
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付轮询分组渠道ID
+     * @return Response 响应对象
+     */
     public function show(Request $request, string $id): Response
     {
         $data = $this->validated(['id' => (int) $id], PaymentPollGroupChannelValidator::class, 'show');
@@ -42,6 +63,12 @@ class PaymentPollGroupChannelController extends BaseController
         return $this->success($row);
     }
 
+    /**
+     * 新增支付轮询分组渠道
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function store(Request $request): Response
     {
         $data = $this->validated($request->all(), PaymentPollGroupChannelValidator::class, 'store');
@@ -49,6 +76,13 @@ class PaymentPollGroupChannelController extends BaseController
         return $this->success($this->paymentPollGroupChannelService->create($data));
     }
 
+    /**
+     * 更新支付轮询分组渠道
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付轮询分组渠道ID
+     * @return Response 响应对象
+     */
     public function update(Request $request, string $id): Response
     {
         $payload = $request->all();
@@ -67,6 +101,13 @@ class PaymentPollGroupChannelController extends BaseController
         return $this->success($row);
     }
 
+    /**
+     * 删除支付轮询分组渠道
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付轮询分组渠道ID
+     * @return Response 响应对象
+     */
     public function destroy(Request $request, string $id): Response
     {
         $data = $this->validated(['id' => (int) $id], PaymentPollGroupChannelValidator::class, 'destroy');
@@ -77,3 +118,8 @@ class PaymentPollGroupChannelController extends BaseController
         return $this->success(true);
     }
 }
+
+
+
+
+

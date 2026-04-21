@@ -10,9 +10,18 @@ use app\repository\merchant\base\MerchantRepository;
 
 /**
  * 商户策略服务。
+ *
+ * @property MerchantPolicyRepository $merchantPolicyRepository 商户策略仓库
+ * @property MerchantRepository $merchantRepository 商户仓库
  */
 class MerchantPolicyService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param MerchantPolicyRepository $merchantPolicyRepository 商户策略仓库
+     * @param MerchantRepository $merchantRepository 商户仓库
+     */
     public function __construct(
         protected MerchantPolicyRepository $merchantPolicyRepository,
         protected MerchantRepository $merchantRepository
@@ -21,6 +30,11 @@ class MerchantPolicyService extends BaseService
 
     /**
      * 分页查询商户策略列表。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页对象
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -106,6 +120,9 @@ class MerchantPolicyService extends BaseService
 
     /**
      * 查询单个商户的策略。
+     *
+     * @param int $merchantId 商户ID
+     * @return MerchantPolicy|null 商户策略模型
      */
     public function findByMerchantId(int $merchantId): ?MerchantPolicy
     {
@@ -114,6 +131,11 @@ class MerchantPolicyService extends BaseService
 
     /**
      * 保存商户策略。
+     *
+     * @param int $merchantId 商户ID
+     * @param array $data 策略数据
+     * @return MerchantPolicy 商户策略模型
+     * @throws ResourceNotFoundException
      */
     public function saveByMerchantId(int $merchantId, array $data): MerchantPolicy
     {
@@ -139,12 +161,21 @@ class MerchantPolicyService extends BaseService
 
     /**
      * 删除商户策略。
+     *
+     * @param int $merchantId 商户ID
+     * @return bool 是否删除成功
      */
     public function deleteByMerchantId(int $merchantId): bool
     {
         return $this->merchantPolicyRepository->deleteWhere(['merchant_id' => $merchantId]) > 0;
     }
 
+    /**
+     * 将结算周期值转换为文本。
+     *
+     * @param int $value 结算周期值
+     * @return string 结算周期文本
+     */
     private function settlementCycleText(int $value): string
     {
         return match ($value) {
@@ -158,4 +189,9 @@ class MerchantPolicyService extends BaseService
     }
 
 }
+
+
+
+
+
 

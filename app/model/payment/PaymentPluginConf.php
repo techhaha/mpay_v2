@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class PaymentPluginConf extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_payment_plugin_conf';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'plugin_code',
         'config',
@@ -20,6 +30,11 @@ class PaymentPluginConf extends BaseModel
         'remark',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'config' => 'array',
         'settlement_cycle_type' => 'integer',
@@ -27,5 +42,7 @@ class PaymentPluginConf extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

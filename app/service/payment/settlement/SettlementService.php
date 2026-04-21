@@ -6,14 +6,19 @@ use app\common\base\BaseService;
 use app\model\payment\SettlementOrder;
 
 /**
- * 清算门面服务。
+ * 清算服务。
  *
- * 对外保留原有调用契约，内部委托给清算生命周期服务。
+ * @property SettlementOrderQueryService $queryService 查询服务
+ * @property SettlementLifecycleService $lifecycleService 生命周期服务
  */
 class SettlementService extends BaseService
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param SettlementOrderQueryService $queryService 查询服务
+     * @param SettlementLifecycleService $lifecycleService 生命周期服务
+     * @return void
      */
     public function __construct(
         protected SettlementOrderQueryService $queryService,
@@ -23,6 +28,10 @@ class SettlementService extends BaseService
 
     /**
      * 创建清算单和明细。
+     *
+     * @param array $input 输入参数
+     * @param array $items 清算明细
+     * @return SettlementOrder 清算订单模型
      */
     public function createSettlementOrder(array $input, array $items = []): SettlementOrder
     {
@@ -31,6 +40,10 @@ class SettlementService extends BaseService
 
     /**
      * 查询清算订单详情。
+     *
+     * @param string $settleNo 清算单号
+     * @param int|null $merchantId 商户ID
+     * @return array 详情结构
      */
     public function detail(string $settleNo, ?int $merchantId = null): array
     {
@@ -38,7 +51,10 @@ class SettlementService extends BaseService
     }
 
     /**
-     * 清算入账成功。
+     * 标记清算入账成功。
+     *
+     * @param string $settleNo 清算单号
+     * @return SettlementOrder 清算订单模型
      */
     public function completeSettlement(string $settleNo): SettlementOrder
     {
@@ -46,10 +62,16 @@ class SettlementService extends BaseService
     }
 
     /**
-     * 清算失败。
+     * 标记清算失败。
+     *
+     * @param string $settleNo 清算单号
+     * @param string $reason 失败原因
+     * @return SettlementOrder 清算订单模型
      */
     public function failSettlement(string $settleNo, string $reason = ''): SettlementOrder
     {
         return $this->lifecycleService->failSettlement($settleNo, $reason);
     }
 }
+
+

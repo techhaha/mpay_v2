@@ -12,11 +12,16 @@ use Webman\MiddlewareInterface;
  * 管理员认证中间件。
  *
  * 负责读取管理员 token，并把管理员身份写入请求上下文。
+ *
+ * @property AdminAuthService $adminAuthService 管理认证服务
  */
 class AdminAuthMiddleware implements MiddlewareInterface
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param AdminAuthService $adminAuthService 管理认证服务
+     * @return void
      */
     public function __construct(
         protected AdminAuthService $adminAuthService
@@ -25,6 +30,10 @@ class AdminAuthMiddleware implements MiddlewareInterface
 
     /**
      * 处理请求。
+     *
+     * @param Request $request 请求对象
+     * @param callable $handler handler
+     * @return Response 响应对象
      */
     public function process(Request $request, callable $handler): Response
     {
@@ -60,3 +69,8 @@ class AdminAuthMiddleware implements MiddlewareInterface
         return $handler($request);
     }
 }
+
+
+
+
+

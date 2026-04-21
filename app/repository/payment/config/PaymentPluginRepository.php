@@ -7,11 +7,15 @@ use app\model\payment\PaymentPlugin;
 
 /**
  * 支付插件仓库。
+ *
+ * 封装支付插件字典的查询与启用列表读取。
  */
 class PaymentPluginRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,10 @@ class PaymentPluginRepository extends BaseRepository
 
     /**
      * 根据插件编码查询支付插件。
+     *
+     * @param string $code 插件编码
+     * @param array $columns 字段列表
+     * @return PaymentPlugin|null 插件记录
      */
     public function findByCode(string $code, array $columns = ['*']): ?PaymentPlugin
     {
@@ -30,6 +38,9 @@ class PaymentPluginRepository extends BaseRepository
 
     /**
      * 获取所有启用的支付插件。
+     *
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PaymentPlugin> 启用插件列表
      */
     public function enabledList(array $columns = ['*'])
     {
@@ -39,5 +50,9 @@ class PaymentPluginRepository extends BaseRepository
             ->get($columns);
     }
 }
+
+
+
+
 
 

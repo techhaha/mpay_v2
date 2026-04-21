@@ -6,12 +6,16 @@ use app\common\base\BaseRepository;
 use app\model\merchant\Merchant;
 
 /**
- * 商户仓库。
+ * 商户基础查询仓库。
+ *
+ * 封装按商户号、启用状态等基础条件读取商户记录的方法。
  */
 class MerchantRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,10 @@ class MerchantRepository extends BaseRepository
 
     /**
      * 根据商户编号查询商户。
+     *
+     * @param string $merchantNo 商户号
+     * @param array $columns 字段列表
+     * @return Merchant|null 商户记录
      */
     public function findByMerchantNo(string $merchantNo, array $columns = ['*']): ?Merchant
     {
@@ -30,6 +38,9 @@ class MerchantRepository extends BaseRepository
 
     /**
      * 获取所有启用的商户。
+     *
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, Merchant> 启用商户列表
      */
     public function enabledList(array $columns = ['*'])
     {
@@ -39,5 +50,11 @@ class MerchantRepository extends BaseRepository
             ->get($columns);
     }
 }
+
+
+
+
+
+
 
 

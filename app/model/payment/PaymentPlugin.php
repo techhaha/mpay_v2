@@ -10,14 +10,39 @@ use app\common\base\BaseModel;
  */
 class PaymentPlugin extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_payment_plugin';
 
+    /**
+     * 主键字段名
+     *
+     * @var mixed
+     */
     protected $primaryKey = 'code';
 
+    /**
+     * incrementing
+     *
+     * @var mixed
+     */
     public $incrementing = false;
 
+    /**
+     * key类型
+     *
+     * @var mixed
+     */
     protected $keyType = 'string';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'code',
         'name',
@@ -32,6 +57,11 @@ class PaymentPlugin extends BaseModel
         'remark',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'config_schema' => 'array',
         'pay_types' => 'array',
@@ -41,5 +71,7 @@ class PaymentPlugin extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

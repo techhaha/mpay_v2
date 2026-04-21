@@ -10,11 +10,16 @@ use support\Response;
 
 /**
  * 渠道通知日志控制器。
+ *
+ * @property ChannelNotifyLogService $channelNotifyLogService 渠道通知日志服务
  */
 class ChannelNotifyLogController extends BaseController
 {
     /**
-     * 构造函数，注入渠道通知日志服务。
+     * 构造方法。
+     *
+     * @param ChannelNotifyLogService $channelNotifyLogService 渠道通知日志服务
+     * @return void
      */
     public function __construct(
         protected ChannelNotifyLogService $channelNotifyLogService
@@ -23,6 +28,9 @@ class ChannelNotifyLogController extends BaseController
 
     /**
      * 查询渠道通知日志列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -39,6 +47,10 @@ class ChannelNotifyLogController extends BaseController
 
     /**
      * 查询渠道通知日志详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 渠道通知日志ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -52,3 +64,8 @@ class ChannelNotifyLogController extends BaseController
         return $this->success($log);
     }
 }
+
+
+
+
+

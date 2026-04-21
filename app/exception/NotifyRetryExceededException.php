@@ -10,7 +10,11 @@ use Webman\Exception\BusinessException;
 class NotifyRetryExceededException extends BusinessException
 {
     /**
-     * 构造函数，组装异常信息。
+     * 构造方法。
+     *
+     * @param string $notifyNo 通知号
+     * @param array $data 数据
+     * @return void
      */
     public function __construct(string $notifyNo = '', array $data = [])
     {
@@ -29,3 +33,8 @@ class NotifyRetryExceededException extends BusinessException
         }
     }
 }
+
+
+
+
+

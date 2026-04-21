@@ -10,18 +10,35 @@ use app\common\base\BaseModel;
  */
 class MerchantGroup extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_merchant_group';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'group_name',
         'status',
         'remark',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'status' => 'integer',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
 }
+
+
 

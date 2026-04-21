@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class PayTimeoutValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'pay_no' => 'required|string|min:1|max:64|exists:ma_pay_order,pay_no',
         'reason' => 'nullable|string|max:255',
@@ -18,6 +23,11 @@ class PayTimeoutValidator extends Validator
         'ext_json' => 'nullable|array',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'pay_no' => '支付单号',
         'reason' => '超时原因',
@@ -25,7 +35,14 @@ class PayTimeoutValidator extends Validator
         'ext_json' => '扩展信息',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'timeout' => ['pay_no', 'reason', 'timeout_at', 'ext_json'],
     ];
 }
+
+

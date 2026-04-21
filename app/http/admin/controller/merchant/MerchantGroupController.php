@@ -12,11 +12,16 @@ use support\Response;
  * 商户分组管理控制器。
  *
  * 负责商户分组的列表、详情、新增、修改和删除。
+ *
+ * @property MerchantGroupService $merchantGroupService 商户分组服务
  */
 class MerchantGroupController extends BaseController
 {
     /**
-     * 构造函数，注入商户分组服务。
+     * 构造方法。
+     *
+     * @param MerchantGroupService $merchantGroupService 商户分组服务
+     * @return void
      */
     public function __construct(
         protected MerchantGroupService $merchantGroupService
@@ -24,9 +29,10 @@ class MerchantGroupController extends BaseController
     }
 
     /**
-     * GET /admin/merchant-groups
-     *
      * 查询商户分组列表。
+     * 
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -42,9 +48,11 @@ class MerchantGroupController extends BaseController
     }
 
     /**
-     * GET /admin/merchant-groups/{id}
-     *
      * 查询商户分组详情。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 商户分组ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -59,9 +67,10 @@ class MerchantGroupController extends BaseController
     }
 
     /**
-     * POST /admin/merchant-groups
-     *
      * 新增商户分组。
+     * 
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function store(Request $request): Response
     {
@@ -71,9 +80,11 @@ class MerchantGroupController extends BaseController
     }
 
     /**
-     * PUT /admin/merchant-groups/{id}
-     *
      * 修改商户分组。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 商户分组ID
+     * @return Response 响应对象
      */
     public function update(Request $request, string $id): Response
     {
@@ -92,9 +103,11 @@ class MerchantGroupController extends BaseController
     }
 
     /**
-     * DELETE /admin/merchant-groups/{id}
-     *
      * 删除商户分组。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 商户分组ID
+     * @return Response 响应对象
      */
     public function destroy(Request $request, string $id): Response
     {
@@ -109,10 +122,18 @@ class MerchantGroupController extends BaseController
 
     /**
      * 查询商户分组下拉选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function options(Request $request): Response
     {
         return $this->success($this->merchantGroupService->enabledOptions());
     }
 }
+
+
+
+
+
 

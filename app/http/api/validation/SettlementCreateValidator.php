@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class SettlementCreateValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'settle_no' => 'sometimes|string|min:1|max:64',
         'merchant_id' => 'required|integer|min:1|exists:ma_merchant,id',
@@ -38,6 +43,11 @@ class SettlementCreateValidator extends Validator
         'items.*.item_status' => 'sometimes|integer|min:0',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'settle_no' => '清算单号',
         'merchant_id' => '商户ID',
@@ -45,7 +55,7 @@ class SettlementCreateValidator extends Validator
         'channel_id' => '通道ID',
         'cycle_type' => '结算周期类型',
         'cycle_key' => '结算周期键',
-        'status' => '状态',
+        'status' => '清算单状态',
         'generated_at' => '生成时间',
         'accounted_amount' => '入账金额',
         'gross_amount' => '交易总额',
@@ -57,7 +67,14 @@ class SettlementCreateValidator extends Validator
         'items' => '清算明细',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'store' => ['settle_no', 'merchant_id', 'merchant_group_id', 'channel_id', 'cycle_type', 'cycle_key', 'status', 'generated_at', 'accounted_amount', 'gross_amount', 'fee_amount', 'refund_amount', 'fee_reverse_amount', 'net_amount', 'ext_json', 'items', 'items.*.pay_no', 'items.*.refund_no', 'items.*.pay_amount', 'items.*.fee_amount', 'items.*.refund_amount', 'items.*.fee_reverse_amount', 'items.*.net_amount', 'items.*.item_status'],
     ];
 }
+
+

@@ -49,7 +49,7 @@ Route::group('/adminapi', function () {
         Route::put('/merchants/{id}', [MerchantController::class, 'update'])->name('adminApiMerchantsUpdate')->setParams(['real_name' => '更新商户']);
         Route::delete('/merchants/{id}', [MerchantController::class, 'destroy'])->name('adminApiMerchantsDestroy')->setParams(['real_name' => '删除商户']);
         Route::post('/merchants/{id}/reset-password', [MerchantController::class, 'resetPassword'])->name('adminApiMerchantsResetPassword')->setParams(['real_name' => '重置商户密码']);
-        Route::post('/merchants/{id}/issue-credential', [MerchantController::class, 'issueCredential'])->name('adminApiMerchantsIssueCredential')->setParams(['real_name' => '生成或重置接口凭证']);
+        Route::post('/merchants/{id}/issue-credential', [MerchantController::class, 'issueCredential'])->name('adminApiMerchantsIssueCredential')->setParams(['real_name' => '生成或重置商户 API 凭证']);
 
         Route::get('/admin-users', [AdminUserController::class, 'index'])->name('adminApiAdminUsersIndex')->setParams(['real_name' => '管理员列表']);
         Route::get('/admin-users/{id}', [AdminUserController::class, 'show'])->name('adminApiAdminUsersShow')->setParams(['real_name' => '管理员详情']);
@@ -58,11 +58,11 @@ Route::group('/adminapi', function () {
         Route::delete('/admin-users/{id}', [AdminUserController::class, 'destroy'])->name('adminApiAdminUsersDestroy')->setParams(['real_name' => '删除管理员']);
 
 
-        Route::get('/merchant-api-credentials', [MerchantApiCredentialController::class, 'index'])->name('adminApiMerchantApiCredentialsIndex')->setParams(['real_name' => '商户接口凭证列表']);
-        Route::get('/merchant-api-credentials/{id}', [MerchantApiCredentialController::class, 'show'])->name('adminApiMerchantApiCredentialsShow')->setParams(['real_name' => '商户接口凭证详情']);
-        Route::post('/merchant-api-credentials', [MerchantApiCredentialController::class, 'store'])->name('adminApiMerchantApiCredentialsStore')->setParams(['real_name' => '开通商户接口凭证']);
-        Route::put('/merchant-api-credentials/{id}', [MerchantApiCredentialController::class, 'update'])->name('adminApiMerchantApiCredentialsUpdate')->setParams(['real_name' => '更新商户接口凭证']);
-        Route::delete('/merchant-api-credentials/{id}', [MerchantApiCredentialController::class, 'destroy'])->name('adminApiMerchantApiCredentialsDestroy')->setParams(['real_name' => '删除商户接口凭证']);
+        Route::get('/merchant-api-credentials', [MerchantApiCredentialController::class, 'index'])->name('adminApiMerchantApiCredentialsIndex')->setParams(['real_name' => '商户 API 凭证列表']);
+        Route::get('/merchant-api-credentials/{id}', [MerchantApiCredentialController::class, 'show'])->name('adminApiMerchantApiCredentialsShow')->setParams(['real_name' => '商户 API 凭证详情']);
+        Route::post('/merchant-api-credentials', [MerchantApiCredentialController::class, 'store'])->name('adminApiMerchantApiCredentialsStore')->setParams(['real_name' => '开通商户 API 凭证']);
+        Route::put('/merchant-api-credentials/{id}', [MerchantApiCredentialController::class, 'update'])->name('adminApiMerchantApiCredentialsUpdate')->setParams(['real_name' => '更新商户 API 凭证']);
+        Route::delete('/merchant-api-credentials/{id}', [MerchantApiCredentialController::class, 'destroy'])->name('adminApiMerchantApiCredentialsDestroy')->setParams(['real_name' => '删除商户 API 凭证']);
 
         Route::get('/merchant-groups', [MerchantGroupController::class, 'index'])->name('adminApiMerchantGroupsIndex')->setParams(['real_name' => '商户分组列表']);
         Route::get('/merchant-groups/options', [MerchantGroupController::class, 'options'])->name('adminApiMerchantGroupsOptions')->setParams(['real_name' => '商户分组选项']);

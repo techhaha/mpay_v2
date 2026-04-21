@@ -12,11 +12,16 @@ use support\Response;
  * 商户后台支付订单控制器。
  *
  * 商户后台只能看到当前登录商户自己的支付订单。
+ *
+ * @property PayOrderService $payOrderService 支付订单服务
  */
 class PayOrderController extends BaseController
 {
     /**
-     * 构造函数，注入支付订单服务。
+     * 构造方法。
+     *
+     * @param PayOrderService $payOrderService 支付订单服务
+     * @return void
      */
     public function __construct(
         protected PayOrderService $payOrderService
@@ -25,6 +30,9 @@ class PayOrderController extends BaseController
 
     /**
      * 查询当前商户的支付订单列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -41,4 +49,9 @@ class PayOrderController extends BaseController
         return $this->success($this->payOrderService->paginate($data, $page, $pageSize, $merchantId));
     }
 }
+
+
+
+
+
 

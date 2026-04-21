@@ -11,11 +11,16 @@ use support\Response;
 
 /**
  * 清算订单控制器。
+ *
+ * @property SettlementOrderQueryService $settlementOrderQueryService 结算订单查询服务
  */
 class SettlementOrderController extends BaseController
 {
     /**
-     * 构造函数，注入清算订单服务。
+     * 构造方法。
+     *
+     * @param SettlementOrderQueryService $settlementOrderQueryService 结算订单查询服务
+     * @return void
      */
     public function __construct(
         protected SettlementOrderQueryService $settlementOrderQueryService
@@ -24,6 +29,9 @@ class SettlementOrderController extends BaseController
 
     /**
      * 查询清算订单列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -40,6 +48,10 @@ class SettlementOrderController extends BaseController
 
     /**
      * 查询清算订单详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $settleNo 结算单号
+     * @return Response 响应对象
      */
     public function show(Request $request, string $settleNo): Response
     {
@@ -51,3 +63,8 @@ class SettlementOrderController extends BaseController
         }
     }
 }
+
+
+
+
+

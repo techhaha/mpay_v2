@@ -15,6 +15,9 @@ class FormatHelper
 {
     /**
      * 金额格式化，单位为元。
+     *
+     * @param int $amount 金额（分）
+     * @return string 格式化后的金额字符串
      */
     public static function amount(int $amount): string
     {
@@ -23,6 +26,9 @@ class FormatHelper
 
     /**
      * 金额格式化，0 时显示不限。
+     *
+     * @param int $amount 金额（分）
+     * @return string 格式化后的金额字符串
      */
     public static function amountOrUnlimited(int $amount): string
     {
@@ -31,6 +37,9 @@ class FormatHelper
 
     /**
      * 次数格式化，0 时显示不限。
+     *
+     * @param int $count 次数
+     * @return string 格式化后的次数字符串
      */
     public static function countOrUnlimited(int $count): string
     {
@@ -39,6 +48,9 @@ class FormatHelper
 
     /**
      * 费率格式化，单位为百分点。
+     *
+     * @param int $basisPoints 基点值
+     * @return string 格式化后的费率字符串
      */
     public static function rate(int $basisPoints): string
     {
@@ -47,6 +59,9 @@ class FormatHelper
 
     /**
      * 延迟格式化。
+     *
+     * @param int $latencyMs 延迟毫秒数
+     * @return string 格式化后的延迟字符串
      */
     public static function latency(int $latencyMs): string
     {
@@ -55,6 +70,10 @@ class FormatHelper
 
     /**
      * 日期格式化。
+     *
+     * @param mixed $value 日期值
+     * @param string $emptyText 为空时显示文案
+     * @return string 格式化后的日期字符串
      */
     public static function date(mixed $value, string $emptyText = ''): string
     {
@@ -63,6 +82,10 @@ class FormatHelper
 
     /**
      * 日期时间格式化。
+     *
+     * @param mixed $value 日期时间值
+     * @param string $emptyText 为空时显示文案
+     * @return string 格式化后的日期时间字符串
      */
     public static function dateTime(mixed $value, string $emptyText = ''): string
     {
@@ -71,6 +94,11 @@ class FormatHelper
 
     /**
      * 按时间戳格式化。
+     *
+     * @param int $timestamp Unix 时间戳
+     * @param string $pattern 输出格式
+     * @param string $emptyText 为空时显示文案
+     * @return string 格式化后的时间字符串
      */
     public static function timestamp(int $timestamp, string $pattern = 'Y-m-d H:i:s', string $emptyText = ''): string
     {
@@ -83,6 +111,10 @@ class FormatHelper
 
     /**
      * JSON 文本格式化。
+     *
+     * @param mixed $value JSON 值
+     * @param string $emptyText 为空时显示文案
+     * @return string 格式化后的 JSON 文本
      */
     public static function json(mixed $value, string $emptyText = ''): string
     {
@@ -106,6 +138,11 @@ class FormatHelper
 
     /**
      * 映射表文本转换。
+     *
+     * @param int $value 待映射值
+     * @param array<int, string> $map 映射表
+     * @param string $default 默认值
+     * @return string 映射后的文本
      */
     public static function textFromMap(int $value, array $map, string $default = '未知'): string
     {
@@ -114,6 +151,10 @@ class FormatHelper
 
     /**
      * 接口凭证明文脱敏。
+     *
+     * @param string $credentialValue 凭证原文
+     * @param bool $maskShortValue 是否对短值也进行脱敏
+     * @return string 脱敏后的文本
      */
     public static function maskCredentialValue(string $credentialValue, bool $maskShortValue = true): string
     {
@@ -132,6 +173,9 @@ class FormatHelper
 
     /**
      * 将模型或对象归一化成数组。
+     *
+     * @param mixed $value 模型、对象或数组
+     * @return array|null 归一化后的数组
      */
     public static function normalizeModel(mixed $value): ?array
     {
@@ -163,6 +207,11 @@ class FormatHelper
 
     /**
      * 统一格式化时间值。
+     *
+     * @param mixed $value 时间值
+     * @param string $pattern 输出格式
+     * @param string $emptyText 为空时显示文案
+     * @return string 格式化后的时间文本
      */
     private static function formatTemporalValue(mixed $value, string $pattern, string $emptyText): string
     {
@@ -186,3 +235,4 @@ class FormatHelper
         return (string) $value;
     }
 }
+

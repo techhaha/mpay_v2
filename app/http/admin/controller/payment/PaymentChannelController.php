@@ -12,11 +12,16 @@ use support\Response;
  * 支付通道管理控制器。
  *
  * 负责支付通道的列表、详情、新增、修改和删除。
+ *
+ * @property PaymentChannelService $paymentChannelService 支付渠道服务
  */
 class PaymentChannelController extends BaseController
 {
     /**
-     * 构造函数，注入支付通道服务。
+     * 构造方法。
+     *
+     * @param PaymentChannelService $paymentChannelService 支付渠道服务
+     * @return void
      */
     public function __construct(
         protected PaymentChannelService $paymentChannelService
@@ -24,9 +29,10 @@ class PaymentChannelController extends BaseController
     }
 
     /**
-     * GET /admin/payment-channels
-     *
      * 查询支付通道列表。
+     * 
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -42,9 +48,11 @@ class PaymentChannelController extends BaseController
     }
 
     /**
-     * GET /admin/payment-channels/{id}
-     *
      * 查询支付通道详情。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 支付渠道ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -59,9 +67,10 @@ class PaymentChannelController extends BaseController
     }
 
     /**
-     * POST /admin/payment-channels
-     *
      * 新增支付通道。
+     * 
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function store(Request $request): Response
     {
@@ -71,9 +80,11 @@ class PaymentChannelController extends BaseController
     }
 
     /**
-     * PUT /admin/payment-channels/{id}
-     *
      * 修改支付通道。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 支付渠道ID
+     * @return Response 响应对象
      */
     public function update(Request $request, string $id): Response
     {
@@ -94,9 +105,11 @@ class PaymentChannelController extends BaseController
     }
 
     /**
-     * DELETE /admin/payment-channels/{id}
-     *
      * 删除支付通道。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 支付渠道ID
+     * @return Response 响应对象
      */
     public function destroy(Request $request, string $id): Response
     {
@@ -111,6 +124,9 @@ class PaymentChannelController extends BaseController
 
     /**
      * 查询启用中的通道选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function options(Request $request): Response
     {
@@ -119,6 +135,9 @@ class PaymentChannelController extends BaseController
 
     /**
      * 查询路由编排场景下的通道选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function routeOptions(Request $request): Response
     {
@@ -127,6 +146,9 @@ class PaymentChannelController extends BaseController
 
     /**
      * 远程查询支付通道选择项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function selectOptions(Request $request): Response
     {
@@ -136,3 +158,8 @@ class PaymentChannelController extends BaseController
         return $this->success($this->paymentChannelService->searchOptions($request->all(), $page, $pageSize));
     }
 }
+
+
+
+
+

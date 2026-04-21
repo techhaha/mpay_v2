@@ -23,11 +23,27 @@ use app\service\payment\runtime\PaymentRouteService;
  * 支付单发起服务。
  *
  * 负责支付单预创建、通道路由选择、第三方装单和首轮状态落库。
+ *
+ * @property MerchantService $merchantService 商户服务
+ * @property PaymentRouteService $paymentRouteService 支付路由服务
+ * @property MerchantAccountService $merchantAccountService 商户账户服务
+ * @property BizOrderRepository $bizOrderRepository 业务订单仓库
+ * @property PayOrderRepository $payOrderRepository 支付单仓库
+ * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+ * @property PayOrderChannelDispatchService $payOrderChannelDispatchService 支付单渠道派发服务
  */
 class PayOrderAttemptService extends BaseService
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param MerchantService $merchantService 商户服务
+     * @param PaymentRouteService $paymentRouteService 支付路由服务
+     * @param MerchantAccountService $merchantAccountService 商户账户服务
+     * @param BizOrderRepository $bizOrderRepository 业务订单仓库
+     * @param PayOrderRepository $payOrderRepository 支付订单仓库
+     * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+     * @param PayOrderChannelDispatchService $payOrderChannelDispatchService 支付单渠道派发服务
      */
     public function __construct(
         protected MerchantService $merchantService,
@@ -45,8 +61,11 @@ class PayOrderAttemptService extends BaseService
      *
      * 该方法会完成商户、支付方式、路由、通道限额、串行尝试和自有通道手续费预占的完整预检查。
      *
-     * @param array $input 支付请求参数
-     * @return array{merchant:mixed,biz_order:mixed,pay_order:mixed,route:array,payment_result:array,pay_params:array}
+     * @param array $input 支付预创建参数
+     * @return array 发起结果
+     * @throws ValidationException
+     * @throws BusinessStateException
+     * @throws ConflictException
      */
     public function preparePayAttempt(array $input): array
     {
@@ -59,6 +78,7 @@ class PayOrderAttemptService extends BaseService
             throw new ValidationException('支付入参不完整');
         }
 
+        // 先校验商户和支付方式是否可用，避免进入事务后才发现前置条件不满足。
         $merchant = $this->merchantService->ensureMerchantEnabled($merchantId);
         $merchantGroupId = (int) $merchant->group_id;
         if ($merchantGroupId <= 0) {
@@ -72,6 +92,7 @@ class PayOrderAttemptService extends BaseService
             throw new BusinessStateException('支付方式不支持', ['pay_type_id' => $payTypeId]);
         }
 
+        // 根据商户分组、支付金额和请求参数选择可用通道。
         $route = $this->paymentRouteService->resolveByMerchantGroup($merchantGroupId, $payTypeId, $payAmount, $input);
         $selected = $route['selected_channel'];
         /** @var PaymentChannel $channel */
@@ -93,10 +114,12 @@ class PayOrderAttemptService extends BaseService
             $payNo,
             $channelRequestNo
         ) {
+            // 在事务中完成业务单和支付单的原子创建，保证幂等与状态一致。
             $existingBizOrder = $this->bizOrderRepository->findForUpdateByMerchantAndOrderNo($merchantId, $merchantOrderNo);
             $bizTraceNo = '';
 
             if ($existingBizOrder) {
+                // 同一商户订单号只能复用原业务单，且金额必须完全一致。
                 if ((int) $existingBizOrder->order_amount !== $payAmount) {
                     throw new ValidationException('同一商户订单号金额不一致', [
                         'merchant_id' => $merchantId,
@@ -128,6 +151,7 @@ class PayOrderAttemptService extends BaseService
                 $bizOrder = $existingBizOrder;
                 $bizTraceNo = trim((string) ($bizOrder->trace_no ?? ''));
                 if ($bizTraceNo === '') {
+                    // 旧单如果没有 trace_no，就补成业务单号，方便后续串起来查。
                     $bizTraceNo = (string) $bizOrder->biz_no;
                     $bizOrder->trace_no = $bizTraceNo;
                 }
@@ -155,9 +179,11 @@ class PayOrderAttemptService extends BaseService
 
             $feeRateBp = (int) $channel->cost_rate_bp;
             $splitRateBp = (int) $channel->split_rate_bp ?: 10000;
+            // 手续费和分账费率都按快照落库，后续配置变化不会影响这笔单的口径。
             $feeEstimated = $this->calculateAmountByBp($payAmount, $feeRateBp);
 
             if ((int) $channel->channel_mode === RouteConstant::CHANNEL_MODE_SELF && $feeEstimated > 0) {
+                // 自有通道先冻结预估手续费，避免后续余额不足。
                 $this->merchantAccountService->freezeAmountInCurrentTransaction(
                     $merchantId,
                     $feeEstimated,
@@ -214,6 +240,7 @@ class PayOrderAttemptService extends BaseService
             $bizOrder->merchant_group_id = $merchantGroupId;
             $bizOrder->poll_group_id = (int) $route['poll_group']->id;
             if ($bizTraceNo !== '' && (string) ($bizOrder->trace_no ?? '') === '') {
+                // 把追踪号回写到业务单上，后续查单和对账能串到同一条链路。
                 $bizOrder->trace_no = $bizTraceNo;
             }
             $bizOrder->save();
@@ -233,6 +260,7 @@ class PayOrderAttemptService extends BaseService
         /** @var \app\model\payment\PaymentChannel $channel */
         $channel = $prepared['route']['selected_channel']['channel'];
 
+        // 支付单落库后立即拉起渠道订单，补全渠道返回的单号和参数快照。
         $channelDispatchResult = $this->payOrderChannelDispatchService->dispatch($payOrder, $bizOrder, $channel);
 
         $prepared['pay_order'] = $channelDispatchResult['pay_order'];
@@ -244,6 +272,10 @@ class PayOrderAttemptService extends BaseService
 
     /**
      * 计算手续费金额。
+     *
+     * @param int $amount 金额（分）
+     * @param int $bp 费率基点，`10000` 表示 100%
+     * @return int 手续费金额（分）
      */
     private function calculateAmountByBp(int $amount, int $bp): int
     {
@@ -251,6 +283,7 @@ class PayOrderAttemptService extends BaseService
             return 0;
         }
 
+        // 基点换算统一向下取整，避免手续费计算时出现超扣。
         return (int) floor($amount * $bp / 10000);
     }
 }

@@ -14,11 +14,18 @@ use app\repository\system\user\AdminUserRepository;
  * 管理员认证服务。
  *
  * 负责管理员账号校验、JWT 签发、登录态校验和主动注销。
+ *
+ * @property AdminUserRepository $adminUserRepository 管理用户仓库
+ * @property JwtTokenManager $jwtTokenManager jwtToken管理器
  */
 class AdminAuthService extends BaseService
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param AdminUserRepository $adminUserRepository 管理用户仓库
+     * @param JwtTokenManager $jwtTokenManager jwtToken管理器
+     * @return void
      */
     public function __construct(
         protected AdminUserRepository $adminUserRepository,
@@ -28,6 +35,11 @@ class AdminAuthService extends BaseService
 
     /**
      * 校验中间件传入的管理员登录 token。
+     *
+     * @param string $token 登录令牌
+     * @param string $ip 请求 IP
+     * @param string $userAgent 用户代理
+     * @return AdminUser|null 管理员模型
      */
     public function authenticateToken(string $token, string $ip = '', string $userAgent = ''): ?AdminUser
     {
@@ -52,6 +64,13 @@ class AdminAuthService extends BaseService
 
     /**
      * 校验管理员账号密码并签发 JWT。
+     *
+     * @param string $username 管理员账号
+     * @param string $password 密码
+     * @param string $ip 请求 IP
+     * @param string $userAgent 用户代理
+     * @return array{token: string, expires_in: int, admin: AdminUser} 登录结果
+     * @throws ValidationException
      */
     public function authenticateCredentials(string $username, string $password, string $ip = '', string $userAgent = ''): array
     {
@@ -73,6 +92,9 @@ class AdminAuthService extends BaseService
 
     /**
      * 撤销当前管理员登录 token。
+     *
+     * @param string $token 登录令牌
+     * @return bool 是否撤销成功
      */
     public function revokeToken(string $token): bool
     {
@@ -81,6 +103,13 @@ class AdminAuthService extends BaseService
 
     /**
      * 签发新的管理员登录 token。
+     *
+     * @param int $adminId 管理员ID
+     * @param int $ttlSeconds 过期秒数
+     * @param string $ip 请求 IP
+     * @param string $userAgent 用户代理
+     * @return array{token: string, expires_in: int, admin: AdminUser} 登录结果
+     * @throws ValidationException
      */
     public function issueToken(int $adminId, int $ttlSeconds = 86400, string $ip = '', string $userAgent = ''): array
     {
@@ -111,3 +140,7 @@ class AdminAuthService extends BaseService
         ];
     }
 }
+
+
+
+

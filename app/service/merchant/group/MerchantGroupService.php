@@ -9,11 +9,15 @@ use app\repository\merchant\base\MerchantGroupRepository;
 
 /**
  * 商户分组管理服务。
+ *
+ * @property MerchantGroupRepository $merchantGroupRepository 商户分组仓库
  */
 class MerchantGroupService extends BaseService
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param MerchantGroupRepository $merchantGroupRepository 商户分组仓库
      */
     public function __construct(
         protected MerchantGroupRepository $merchantGroupRepository
@@ -24,6 +28,8 @@ class MerchantGroupService extends BaseService
      * 获取启用中的商户分组选项。
      *
      * 前端筛选框直接使用 `label / value` 结构即可。
+     *
+     * @return array 启用分组选项
      */
     public function enabledOptions(): array
     {
@@ -40,6 +46,11 @@ class MerchantGroupService extends BaseService
 
     /**
      * 分页查询商户分组。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页对象
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -66,6 +77,9 @@ class MerchantGroupService extends BaseService
 
     /**
      * 根据 ID 查询商户分组。
+     *
+     * @param int $id 商户分组ID
+     * @return MerchantGroup|null 商户分组模型
      */
     public function findById(int $id): ?MerchantGroup
     {
@@ -74,6 +88,9 @@ class MerchantGroupService extends BaseService
 
     /**
      * 新增商户分组。
+     *
+     * @param array $data 分组数据
+     * @return MerchantGroup 商户分组模型
      */
     public function create(array $data): MerchantGroup
     {
@@ -83,6 +100,10 @@ class MerchantGroupService extends BaseService
 
     /**
      * 更新商户分组。
+     *
+     * @param int $id 商户分组ID
+     * @param array $data 分组数据
+     * @return MerchantGroup|null 商户分组模型
      */
     public function update(int $id, array $data): ?MerchantGroup
     {
@@ -96,6 +117,9 @@ class MerchantGroupService extends BaseService
 
     /**
      * 删除商户分组。
+     *
+     * @param int $id 商户分组ID
+     * @return bool 是否删除成功
      */
     public function delete(int $id): bool
     {
@@ -104,6 +128,11 @@ class MerchantGroupService extends BaseService
 
     /**
      * 校验商户分组名称唯一。
+     *
+     * @param string $groupName 分组名称
+     * @param int $ignoreId 忽略的分组ID
+     * @return void
+     * @throws ValidationException
      */
     private function assertGroupNameUnique(string $groupName, int $ignoreId = 0): void
     {
@@ -117,4 +146,9 @@ class MerchantGroupService extends BaseService
         }
     }
 }
+
+
+
+
+
 

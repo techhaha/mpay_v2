@@ -12,11 +12,16 @@ use Webman\MiddlewareInterface;
  * 商户认证中间件。
  *
  * 负责读取商户 token，并把商户身份写入请求上下文。
+ *
+ * @property MerchantAuthService $merchantAuthService 商户认证服务
  */
 class MerchantAuthMiddleware implements MiddlewareInterface
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param MerchantAuthService $merchantAuthService 商户认证服务
+     * @return void
      */
     public function __construct(
         protected MerchantAuthService $merchantAuthService
@@ -25,6 +30,10 @@ class MerchantAuthMiddleware implements MiddlewareInterface
 
     /**
      * 处理请求。
+     *
+     * @param Request $request 请求对象
+     * @param callable $handler handler
+     * @return Response 响应对象
      */
     public function process(Request $request, callable $handler): Response
     {
@@ -60,4 +69,9 @@ class MerchantAuthMiddleware implements MiddlewareInterface
         return $handler($request);
     }
 }
+
+
+
+
+
 

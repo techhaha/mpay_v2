@@ -12,14 +12,28 @@ use support\Response;
  * 支付插件配置控制器。
  *
  * 负责插件公共配置的列表、详情、增删改和选项输出。
+ *
+ * @property PaymentPluginConfService $paymentPluginConfService 支付插件配置服务
  */
 class PaymentPluginConfController extends BaseController
 {
+    /**
+     * 构造方法。
+     *
+     * @param PaymentPluginConfService $paymentPluginConfService 支付插件配置服务
+     * @return void
+     */
     public function __construct(
         protected PaymentPluginConfService $paymentPluginConfService
     ) {
     }
 
+    /**
+     * 查询支付插件配置列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function index(Request $request): Response
     {
         $data = $this->validated($request->all(), PaymentPluginConfValidator::class, 'index');
@@ -29,6 +43,13 @@ class PaymentPluginConfController extends BaseController
         return $this->page($this->paymentPluginConfService->paginate($data, $page, $pageSize));
     }
 
+    /**
+     * 查询支付插件配置详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付插件配置ID
+     * @return Response 响应对象
+     */
     public function show(Request $request, string $id): Response
     {
         $data = $this->validated(['id' => (int) $id], PaymentPluginConfValidator::class, 'show');
@@ -41,6 +62,12 @@ class PaymentPluginConfController extends BaseController
         return $this->success($pluginConf);
     }
 
+    /**
+     * 新增支付插件配置。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function store(Request $request): Response
     {
         $data = $this->validated($request->all(), PaymentPluginConfValidator::class, 'store');
@@ -48,6 +75,13 @@ class PaymentPluginConfController extends BaseController
         return $this->success($this->paymentPluginConfService->create($data));
     }
 
+    /**
+     * 更新支付插件配置。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付插件配置ID
+     * @return Response 响应对象
+     */
     public function update(Request $request, string $id): Response
     {
         $data = $this->validated(
@@ -64,6 +98,13 @@ class PaymentPluginConfController extends BaseController
         return $this->success($pluginConf);
     }
 
+    /**
+     * 删除支付插件配置。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付插件配置ID
+     * @return Response 响应对象
+     */
     public function destroy(Request $request, string $id): Response
     {
         $data = $this->validated(['id' => (int) $id], PaymentPluginConfValidator::class, 'destroy');
@@ -75,6 +116,12 @@ class PaymentPluginConfController extends BaseController
         return $this->success(true);
     }
 
+    /**
+     * 获取支付插件配置选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
     public function options(Request $request): Response
     {
         $data = $this->validated($request->all(), PaymentPluginConfValidator::class, 'options');
@@ -86,6 +133,9 @@ class PaymentPluginConfController extends BaseController
 
     /**
      * 远程查询插件配置选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function selectOptions(Request $request): Response
     {
@@ -96,3 +146,8 @@ class PaymentPluginConfController extends BaseController
         return $this->success($this->paymentPluginConfService->searchOptions($data, $page, $pageSize));
     }
 }
+
+
+
+
+

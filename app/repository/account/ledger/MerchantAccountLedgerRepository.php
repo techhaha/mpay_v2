@@ -7,11 +7,15 @@ use app\model\merchant\MerchantAccountLedger;
 
 /**
  * 商户余额流水仓库。
+ *
+ * 封装幂等键、追踪号、业务单号和商户维度的流水查询。
  */
 class MerchantAccountLedgerRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,10 @@ class MerchantAccountLedgerRepository extends BaseRepository
 
     /**
      * 根据幂等键查询流水记录。
+     *
+     * @param string $idempotencyKey 幂等键
+     * @param array $columns 字段列表
+     * @return MerchantAccountLedger|null 流水记录
      */
     public function findByIdempotencyKey(string $idempotencyKey, array $columns = ['*'])
     {
@@ -30,6 +38,10 @@ class MerchantAccountLedgerRepository extends BaseRepository
 
     /**
      * 根据追踪号查询流水记录。
+     *
+     * @param string $traceNo 追踪号
+     * @param array $columns 字段列表
+     * @return MerchantAccountLedger|null 流水记录
      */
     public function findByTraceNo(string $traceNo, array $columns = ['*'])
     {
@@ -41,6 +53,10 @@ class MerchantAccountLedgerRepository extends BaseRepository
 
     /**
      * 查询指定追踪号的流水列表。
+     *
+     * @param string $traceNo 追踪号
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, MerchantAccountLedger> 流水列表
      */
     public function listByTraceNo(string $traceNo, array $columns = ['*'])
     {
@@ -51,10 +67,11 @@ class MerchantAccountLedgerRepository extends BaseRepository
     }
 
     /**
-     * 查询商户指定业务类型和业务单号的流水列表。
-     */
-    /**
      * 查询指定业务单号的流水列表。
+     *
+     * @param string $bizNo 业务单号
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, MerchantAccountLedger> 流水列表
      */
     public function listByBizNo(string $bizNo, array $columns = ['*'])
     {
@@ -64,6 +81,15 @@ class MerchantAccountLedgerRepository extends BaseRepository
             ->get($columns);
     }
 
+    /**
+     * 按商户、业务类型和业务单号查询流水列表。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $bizType 业务类型
+     * @param string $bizNo 业务单号
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, MerchantAccountLedger> 流水列表
+     */
     public function listByMerchantAndBiz(int $merchantId, int $bizType, string $bizNo, array $columns = ['*'])
     {
         return $this->model->newQuery()
@@ -74,5 +100,8 @@ class MerchantAccountLedgerRepository extends BaseRepository
             ->get($columns);
     }
 }
+
+
+
 
 

@@ -10,7 +10,13 @@ use Webman\Exception\BusinessException;
 class BalanceInsufficientException extends BusinessException
 {
     /**
-     * 构造函数，组装异常信息。
+     * 构造方法。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $needAmount needAmount
+     * @param int $availableAmount 可用Amount
+     * @param array $data 数据
+     * @return void
      */
     public function __construct(int $merchantId = 0, int $needAmount = 0, int $availableAmount = 0, array $data = [])
     {
@@ -31,3 +37,8 @@ class BalanceInsufficientException extends BusinessException
         }
     }
 }
+
+
+
+
+

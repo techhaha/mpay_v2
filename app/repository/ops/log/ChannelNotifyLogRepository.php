@@ -7,11 +7,15 @@ use app\model\admin\ChannelNotifyLog;
 
 /**
  * 渠道通知日志仓库。
+ *
+ * 封装通知单号查询与重复通知识别。
  */
 class ChannelNotifyLogRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,10 @@ class ChannelNotifyLogRepository extends BaseRepository
 
     /**
      * 根据通知单号查询渠道通知日志。
+     *
+     * @param string $notifyNo 通知号
+     * @param array $columns 字段列表
+     * @return ChannelNotifyLog|null 日志记录
      */
     public function findByNotifyNo(string $notifyNo, array $columns = ['*'])
     {
@@ -30,6 +38,12 @@ class ChannelNotifyLogRepository extends BaseRepository
 
     /**
      * 根据渠道、通知类型和业务单号查询重复通知记录。
+     *
+     * @param int $channelId 渠道ID
+     * @param int $notifyType 通知类型
+     * @param string $bizNo 业务单号
+     * @param array $columns 字段列表
+     * @return ChannelNotifyLog|null 日志记录
      */
     public function findDuplicate(int $channelId, int $notifyType, string $bizNo, array $columns = ['*'])
     {
@@ -40,5 +54,9 @@ class ChannelNotifyLogRepository extends BaseRepository
             ->first($columns);
     }
 }
+
+
+
+
 
 

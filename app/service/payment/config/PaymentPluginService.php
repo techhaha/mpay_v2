@@ -11,11 +11,18 @@ use app\repository\payment\config\PaymentPluginRepository;
  * 支付插件管理服务。
  *
  * 负责插件目录同步、插件列表查询，以及 JSON 字段写入前的归一化。
+ *
+ * @property PaymentPluginRepository $paymentPluginRepository 支付插件仓库
+ * @property PaymentPluginSyncService $paymentPluginSyncService 支付插件同步服务
  */
 class PaymentPluginService extends BaseService
 {
     /**
-     * 构造函数，注入支付插件仓库。
+     * 构造方法。
+     *
+     * @param PaymentPluginRepository $paymentPluginRepository 支付插件仓库
+     * @param PaymentPluginSyncService $paymentPluginSyncService 支付插件同步服务
+     * @return void
      */
     public function __construct(
         protected PaymentPluginRepository $paymentPluginRepository,
@@ -25,6 +32,11 @@ class PaymentPluginService extends BaseService
 
     /**
      * 分页查询支付插件。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -60,6 +72,8 @@ class PaymentPluginService extends BaseService
 
     /**
      * 查询启用中的支付插件选项。
+     *
+     * @return array<int, array{label: string, value: string, code: string, name: string}> 启用插件选项
      */
     public function enabledOptions(): array
     {
@@ -77,7 +91,12 @@ class PaymentPluginService extends BaseService
     }
 
     /**
-     * 远程查询支付插件选择项。
+     * 搜索支付插件选择项。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return array{list: array<int, array{label: string, value: string, code: string, name: string, pay_types: array<int, string>}>, total: int, page: int, size: int} 插件搜索结果
      */
     public function searchOptions(array $filters = [], int $page = 1, int $pageSize = 20): array
     {
@@ -88,6 +107,7 @@ class PaymentPluginService extends BaseService
 
         $ids = $filters['ids'] ?? [];
         if (is_array($ids) && $ids !== []) {
+            // 显式传 ID 时优先按编码集合回显，避免关键词过滤把手工选择项漏掉。
             $query->whereIn('code', array_values(array_filter(array_map('strval', $ids))));
         } else {
             $keyword = trim((string) ($filters['keyword'] ?? ''));
@@ -100,6 +120,7 @@ class PaymentPluginService extends BaseService
 
             $payTypeCode = trim((string) ($filters['pay_type_code'] ?? ''));
             if ($payTypeCode !== '') {
+                // 如果前端按支付方式筛选，就只保留 pay_types 中包含该编码的插件。
                 $query->whereJsonContains('pay_types', $payTypeCode);
             }
         }
@@ -124,9 +145,12 @@ class PaymentPluginService extends BaseService
 
     /**
      * 查询通道配置场景使用的支付插件选项。
+     *
+     * @return array<int, array{label: string, value: string, code: string, name: string, pay_types: array<int, string>}> 通道配置选项
      */
     public function channelOptions(): array
     {
+        // 通道配置场景只需要启用中的插件，并且要带上支付方式集合供前端联动展示。
         return $this->paymentPluginRepository->enabledList([
             'code',
             'name',
@@ -147,6 +171,9 @@ class PaymentPluginService extends BaseService
 
     /**
      * 按插件编码查询插件。
+     *
+     * @param string $code 插件编码
+     * @return PaymentPlugin|null 插件模型
      */
     public function findByCode(string $code): ?PaymentPlugin
     {
@@ -156,7 +183,9 @@ class PaymentPluginService extends BaseService
     /**
      * 查询插件配置结构。
      *
-     * @return array<string, mixed>
+     * @param string $code 插件编码
+     * @return array{config_schema: array<int, mixed>} 配置结构
+     * @throws PaymentException
      */
     public function getSchema(string $code): array
     {
@@ -174,10 +203,15 @@ class PaymentPluginService extends BaseService
 
     /**
      * 更新支付插件。
+     *
+     * @param string $code 插件编码
+     * @param array $data 写入数据
+     * @return PaymentPlugin|null 更新后的插件模型
      */
     public function update(string $code, array $data): ?PaymentPlugin
     {
         $payload = [];
+        // 插件元信息由文件同步维护，后台这里只允许调整状态和备注，避免人工改动覆盖同步结果。
         if (array_key_exists('status', $data)) {
             $payload['status'] = (int) $data['status'];
         }
@@ -199,6 +233,8 @@ class PaymentPluginService extends BaseService
 
     /**
      * 从插件目录刷新并同步支付插件定义。
+     *
+     * @return array{count: int, plugins: array<int, PaymentPlugin>} 同步结果
      */
     public function refreshFromClasses(): array
     {

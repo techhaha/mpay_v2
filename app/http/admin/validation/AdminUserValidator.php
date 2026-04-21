@@ -9,6 +9,11 @@ use support\validation\Validator;
  */
 class AdminUserValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -24,6 +29,11 @@ class AdminUserValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '管理员ID',
         'keyword' => '关键词',
@@ -33,12 +43,17 @@ class AdminUserValidator extends Validator
         'mobile' => '手机号',
         'email' => '邮箱',
         'is_super' => '超级管理员',
-        'status' => '状态',
+        'status' => '管理员状态',
         'remark' => '备注',
         'page' => '页码',
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'status', 'is_super', 'page', 'page_size'],
         'store' => ['username', 'password', 'real_name', 'mobile', 'email', 'is_super', 'status', 'remark'],
@@ -47,6 +62,11 @@ class AdminUserValidator extends Validator
         'destroy' => ['id'],
     ];
 
+    /**
+     * 配置新增管理员场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneStore(): static
     {
         return $this->appendRules([
@@ -58,6 +78,11 @@ class AdminUserValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置更新管理员场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneUpdate(): static
     {
         return $this->appendRules([
@@ -69,6 +94,11 @@ class AdminUserValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置管理员详情场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneShow(): static
     {
         return $this->appendRules([
@@ -76,8 +106,14 @@ class AdminUserValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置删除管理员场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneDestroy(): static
     {
         return $this->sceneShow();
     }
 }
+

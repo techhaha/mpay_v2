@@ -13,12 +13,17 @@ use support\Response;
 /**
  * 清算接口控制器。
  *
- * 负责清算单创建、查询和清算状态推进。
+ * 负责清算单创建、查询和清算终态推进。
+ *
+ * @property SettlementService $settlementService 结算服务
  */
 class SettlementController extends BaseController
 {
     /**
-     * 构造函数，注入清算相关依赖。
+     * 构造方法。
+     *
+     * @param SettlementService $settlementService 结算服务
+     * @return void
      */
     public function __construct(
         protected SettlementService $settlementService,
@@ -26,7 +31,12 @@ class SettlementController extends BaseController
     }
 
     /**
-     * 创建清结算单。
+     * 创建清算单。
+     *
+     * 会把传入的清算明细和汇总一起交给清算生命周期服务落库。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function create(Request $request): Response
     {
@@ -37,7 +47,13 @@ class SettlementController extends BaseController
     }
 
     /**
-     * 查询清结算单详情。
+     * 查询清算单详情。
+     *
+     * 用于查看批次金额、状态和关联支付单明细。
+     *
+     * @param Request $request 请求对象
+     * @param string $settleNo 结算单号
+     * @return Response 响应对象
      */
     public function show(Request $request, string $settleNo): Response
     {
@@ -49,7 +65,13 @@ class SettlementController extends BaseController
     }
 
     /**
-     * 标记清结算成功。
+     * 标记清算成功。
+     *
+     * 会触发商户余额入账，并同步清算单、清算明细和关联支付单状态。
+     *
+     * @param Request $request 请求对象
+     * @param string $settleNo 结算单号
+     * @return Response 响应对象
      */
     public function complete(Request $request, string $settleNo): Response
     {
@@ -63,7 +85,13 @@ class SettlementController extends BaseController
     }
 
     /**
-     * 标记清结算失败。
+     * 标记清算失败。
+     *
+     * 仅在清算批次未成功入账时使用，用于把批次推进到失败终态并保留原因。
+     *
+     * @param Request $request 请求对象
+     * @param string $settleNo 结算单号
+     * @return Response 响应对象
      */
     public function failSettlement(Request $request, string $settleNo): Response
     {
@@ -76,3 +104,7 @@ class SettlementController extends BaseController
         return $this->success($this->settlementService->failSettlement($settleNo, (string) ($data['reason'] ?? '')));
     }
 }
+
+
+
+

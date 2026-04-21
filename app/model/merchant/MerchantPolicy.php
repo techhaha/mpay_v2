@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class MerchantPolicy extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_merchant_policy';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'merchant_id',
         'settlement_cycle_override',
@@ -24,6 +34,11 @@ class MerchantPolicy extends BaseModel
         'remark',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_id' => 'integer',
         'settlement_cycle_override' => 'integer',
@@ -37,5 +52,7 @@ class MerchantPolicy extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

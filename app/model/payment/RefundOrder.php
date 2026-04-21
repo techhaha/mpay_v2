@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class RefundOrder extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_refund_order';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'refund_no',
         'merchant_id',
@@ -36,6 +46,11 @@ class RefundOrder extends BaseModel
         'ext_json',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_id' => 'integer',
         'merchant_group_id' => 'integer',
@@ -53,5 +68,7 @@ class RefundOrder extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

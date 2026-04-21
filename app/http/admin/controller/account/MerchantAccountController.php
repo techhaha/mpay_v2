@@ -10,11 +10,16 @@ use support\Response;
 
 /**
  * 商户账户控制器。
+ *
+ * @property MerchantAccountService $merchantAccountService 商户账户服务
  */
 class MerchantAccountController extends BaseController
 {
     /**
-     * 构造函数，注入商户账户服务。
+     * 构造方法。
+     *
+     * @param MerchantAccountService $merchantAccountService 商户账户服务
+     * @return void
      */
     public function __construct(
         protected MerchantAccountService $merchantAccountService
@@ -23,6 +28,9 @@ class MerchantAccountController extends BaseController
 
     /**
      * 查询商户账户列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -39,6 +47,9 @@ class MerchantAccountController extends BaseController
 
     /**
      * 资金中心概览。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function summary(Request $request): Response
     {
@@ -47,6 +58,10 @@ class MerchantAccountController extends BaseController
 
     /**
      * 查询商户账户详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户账户ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -60,4 +75,9 @@ class MerchantAccountController extends BaseController
         return $this->success($account);
     }
 }
+
+
+
+
+
 

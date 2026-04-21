@@ -3,7 +3,7 @@
 namespace app\common\constant;
 
 /**
- * 交易、订单与结算相关枚举。
+ * 交易、订单与结算状态枚举。
  */
 final class TradeConstant
 {
@@ -36,6 +36,11 @@ final class TradeConstant
     public const REFUND_STATUS_FAILED = 3;
     public const REFUND_STATUS_CLOSED = 4;
 
+    /**
+     * 获取清算周期映射。
+     *
+     * @return array<int, string> 清算周期名称表
+     */
     public static function settlementCycleMap(): array
     {
         return [
@@ -47,6 +52,11 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 获取订单状态映射。
+     *
+     * @return array<int, string> 订单状态名称表
+     */
     public static function orderStatusMap(): array
     {
         return [
@@ -59,6 +69,11 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 获取手续费状态映射。
+     *
+     * @return array<int, string> 手续费状态名称表
+     */
     public static function feeStatusMap(): array
     {
         return [
@@ -69,6 +84,11 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 获取清算状态映射。
+     *
+     * @return array<int, string> 清算状态名称表
+     */
     public static function settlementStatusMap(): array
     {
         return [
@@ -79,6 +99,11 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 获取退款状态映射。
+     *
+     * @return array<int, string> 退款状态名称表
+     */
     public static function refundStatusMap(): array
     {
         return [
@@ -90,6 +115,11 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 获取可变更的订单状态列表。
+     *
+     * @return array<int, int> 状态列表
+     */
     public static function orderMutableStatuses(): array
     {
         return [
@@ -98,6 +128,11 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 获取订单终态列表。
+     *
+     * @return array<int, int> 状态列表
+     */
     public static function orderTerminalStatuses(): array
     {
         return [
@@ -108,11 +143,22 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 判断订单是否为终态。
+     *
+     * @param int $status 状态
+     * @return bool 是否为终态
+     */
     public static function isOrderTerminalStatus(int $status): bool
     {
         return in_array($status, self::orderTerminalStatuses(), true);
     }
 
+    /**
+     * 获取可变更的退款状态列表。
+     *
+     * @return array<int, int> 状态列表
+     */
     public static function refundMutableStatuses(): array
     {
         return [
@@ -122,6 +168,11 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 获取退款终态列表。
+     *
+     * @return array<int, int> 状态列表
+     */
     public static function refundTerminalStatuses(): array
     {
         return [
@@ -130,11 +181,22 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 判断退款是否为终态。
+     *
+     * @param int $status 状态
+     * @return bool 是否为终态
+     */
     public static function isRefundTerminalStatus(int $status): bool
     {
         return in_array($status, self::refundTerminalStatuses(), true);
     }
 
+    /**
+     * 获取可变更的清算状态列表。
+     *
+     * @return array<int, int> 状态列表
+     */
     public static function settlementMutableStatuses(): array
     {
         return [
@@ -142,6 +204,11 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 获取清算终态列表。
+     *
+     * @return array<int, int> 状态列表
+     */
     public static function settlementTerminalStatuses(): array
     {
         return [
@@ -150,8 +217,18 @@ final class TradeConstant
         ];
     }
 
+    /**
+     * 判断清算是否为终态。
+     *
+     * @param int $status 状态
+     * @return bool 是否为终态
+     */
     public static function isSettlementTerminalStatus(int $status): bool
     {
         return in_array($status, self::settlementTerminalStatuses(), true);
     }
 }
+
+
+
+

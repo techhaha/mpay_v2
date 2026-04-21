@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class PaymentType extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_payment_type';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'code',
         'name',
@@ -21,6 +31,11 @@ class PaymentType extends BaseModel
         'remark',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'sort_no' => 'integer',
         'status' => 'integer',
@@ -28,5 +43,7 @@ class PaymentType extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

@@ -12,12 +12,17 @@ use support\Response;
 /**
  * Epay 协议兼容控制器。
  *
- * 负责 submit.php、mapi.php 和 api.php 的入口场景校验与结果分发。
+ * 负责兼容入口场景的校验与结果分发。
+ *
+ * @property EpayCompatService $epayCompatService Epay 兼容服务
  */
 class EpayController extends BaseController
 {
     /**
-     * 构造函数，注入兼容服务。
+     * 构造方法。
+     *
+     * @param EpayCompatService $epayCompatService Epay 兼容服务
+     * @return void
      */
     public function __construct(
         protected EpayCompatService $epayCompatService
@@ -25,6 +30,9 @@ class EpayController extends BaseController
 
     /**
      * 页面跳转支付入口。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function submit(Request $request): Response
     {
@@ -47,6 +55,9 @@ class EpayController extends BaseController
 
     /**
      * API 接口支付入口。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function mapi(Request $request): Response
     {
@@ -69,6 +80,9 @@ class EpayController extends BaseController
 
     /**
      * 标准 API 接口入口。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function api(Request $request): Response
     {
@@ -98,3 +112,8 @@ class EpayController extends BaseController
         }
     }
 }
+
+
+
+
+

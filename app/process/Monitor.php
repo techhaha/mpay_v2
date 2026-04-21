@@ -15,32 +15,44 @@ use Workerman\Timer;
 use Workerman\Worker;
 
 /**
- * 文件监控器。
+ * Webman 文件监控进程。
+ *
+ * 负责监听指定目录或文件的变更，并在需要时触发自动重载或内存回收。
  */
 class Monitor
 {
     /**
      * 监控路径列表。
+     *
+     * @var array
      */
     protected array $paths = [];
 
     /**
      * 监控扩展名列表。
+     *
+     * @var array
      */
     protected array $extensions = [];
 
     /**
      * 已加载文件列表。
+     *
+     * @var array
      */
     protected array $loadedFiles = [];
 
     /**
      * 父进程 ID。
+     *
+     * @var int
      */
     protected int $ppid = 0;
 
     /**
      * 暂停监控。
+     *
+     * @return void
      */
     public static function pause(): void
     {
@@ -49,6 +61,8 @@ class Monitor
 
     /**
      * 恢复监控。
+     *
+     * @return void
      */
     public static function resume(): void
     {
@@ -60,6 +74,8 @@ class Monitor
 
     /**
      * 判断监控是否已暂停。
+     *
+     * @return bool 是否已暂停
      */
     public static function isPaused(): bool
     {
@@ -69,6 +85,8 @@ class Monitor
 
     /**
      * 锁文件路径。
+     *
+     * @return string 锁文件路径
      */
     protected static function lockFile(): string
     {
@@ -77,6 +95,11 @@ class Monitor
 
     /**
      * 构造文件监控器。
+     *
+     * @param mixed $monitorDir 监控目录或文件路径
+     * @param mixed $monitorExtensions 监控文件扩展名
+     * @param array $options 选项参数
+     * @return void
      */
     public function __construct($monitorDir, $monitorExtensions, array $options = [])
     {
@@ -112,6 +135,9 @@ class Monitor
 
     /**
      * 检查指定路径是否有文件变化。
+     *
+     * @param mixed $monitorDir 监控目录或文件路径
+     * @return bool 是否发生变化
      */
     public function checkFilesChange($monitorDir): bool
     {
@@ -125,9 +151,13 @@ class Monitor
                 return false;
             }
             $iterator = [new SplFileInfo($monitorDir)];
+            /** @var RecursiveDirectoryIterator $dirIterator */
         } else {
+            /** @var RecursiveIteratorIterator $iterator */
                 // 递归遍历目录
+            /** @var RecursiveDirectoryIterator $dirIterator */
             $dirIterator = new RecursiveDirectoryIterator($monitorDir, FilesystemIterator::SKIP_DOTS | FilesystemIterator::FOLLOW_SYMLINKS);
+            /** @var RecursiveIteratorIterator $iterator */
             $iterator = new RecursiveIteratorIterator($dirIterator);
         }
         $count = 0;
@@ -171,7 +201,9 @@ class Monitor
     }
 
     /**
-     * @return int
+     * 获取主进程 PID。
+     *
+     * @return int 主进程 PID
      */
     public function getMasterPid(): int
     {
@@ -195,6 +227,8 @@ class Monitor
 
     /**
      * 检查所有监控路径是否有变化。
+     *
+     * @return bool 是否发生变化
      */
     public function checkAllFilesChange(): bool
     {
@@ -211,6 +245,9 @@ class Monitor
 
     /**
      * 检查子进程内存占用。
+     *
+     * @param mixed $memoryLimit 内存限制阈值（MB）
+     * @return void
      */
     public function checkMemory($memoryLimit): void
     {
@@ -246,6 +283,9 @@ class Monitor
 
     /**
      * 计算内存限制值。
+     *
+     * @param mixed $memoryLimit 原始内存限制配置
+     * @return int 内存限制值（MB）
      */
     protected function getMemoryLimit($memoryLimit): int
     {
@@ -284,3 +324,5 @@ class Monitor
     }
 
 }
+
+

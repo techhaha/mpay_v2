@@ -9,11 +9,18 @@ use app\repository\ops\log\ChannelNotifyLogRepository;
 
 /**
  * 渠道通知日志查询服务。
+ *
+ * 负责查询渠道通知记录、补充展示字段和还原通知处理状态。
+ *
+ * @property ChannelNotifyLogRepository $channelNotifyLogRepository 渠道通知日志仓库
  */
 class ChannelNotifyLogService extends BaseService
 {
     /**
-     * 构造函数，注入渠道通知日志仓库。
+     * 构造方法。
+     *
+     * @param ChannelNotifyLogRepository $channelNotifyLogRepository 渠道通知日志仓库
+     * @return void
      */
     public function __construct(
         protected ChannelNotifyLogRepository $channelNotifyLogRepository
@@ -22,6 +29,11 @@ class ChannelNotifyLogService extends BaseService
 
     /**
      * 分页查询渠道通知日志。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -84,7 +96,10 @@ class ChannelNotifyLogService extends BaseService
     }
 
     /**
-     * 按 ID 查询详情。
+     * 按 ID 查询渠道通知日志详情。
+     *
+     * @param int $id 渠道通知日志ID
+     * @return ChannelNotifyLog|null 日志模型
      */
     public function findById(int $id): ?ChannelNotifyLog
     {
@@ -97,6 +112,9 @@ class ChannelNotifyLogService extends BaseService
 
     /**
      * 格式化单条记录。
+     *
+     * @param object $row 查询结果对象
+     * @return object 格式化后的对象
      */
     private function decorateRow(object $row): object
     {
@@ -113,6 +131,8 @@ class ChannelNotifyLogService extends BaseService
 
     /**
      * 构建基础查询。
+     *
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
      */
     private function baseQuery()
     {
@@ -152,3 +172,6 @@ class ChannelNotifyLogService extends BaseService
     }
 
 }
+
+
+

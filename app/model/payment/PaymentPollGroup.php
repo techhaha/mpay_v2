@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class PaymentPollGroup extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_payment_poll_group';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'group_name',
         'pay_type_id',
@@ -20,6 +30,11 @@ class PaymentPollGroup extends BaseModel
         'remark',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'pay_type_id' => 'integer',
         'route_mode' => 'integer',
@@ -28,4 +43,6 @@ class PaymentPollGroup extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 

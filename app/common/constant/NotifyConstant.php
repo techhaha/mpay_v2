@@ -3,7 +3,7 @@
 namespace app\common\constant;
 
 /**
- * 通知与回调相关枚举。
+ * 通知与回调枚举。
  */
 final class NotifyConstant
 {
@@ -25,6 +25,11 @@ final class NotifyConstant
     public const TASK_STATUS_SUCCESS = 1;
     public const TASK_STATUS_FAILED = 2;
 
+    /**
+     * 获取通知类型映射。
+     *
+     * @return array<int, string> 通知类型名称表
+     */
     public static function notifyTypeMap(): array
     {
         return [
@@ -33,6 +38,11 @@ final class NotifyConstant
         ];
     }
 
+    /**
+     * 获取回调类型映射。
+     *
+     * @return array<int, string> 回调类型名称表
+     */
     public static function callbackTypeMap(): array
     {
         return [
@@ -41,6 +51,11 @@ final class NotifyConstant
         ];
     }
 
+    /**
+     * 验证状态Map
+     *
+     * @return array<int, string> 验证状态名称表
+     */
     public static function verifyStatusMap(): array
     {
         return [
@@ -50,6 +65,11 @@ final class NotifyConstant
         ];
     }
 
+    /**
+     * 处理状态Map
+     *
+     * @return array<int, string> 处理状态名称表
+     */
     public static function processStatusMap(): array
     {
         return [
@@ -59,6 +79,11 @@ final class NotifyConstant
         ];
     }
 
+    /**
+     * 获取任务状态映射。
+     *
+     * @return array<int, string> 任务状态名称表
+     */
     public static function taskStatusMap(): array
     {
         return [
@@ -68,3 +93,7 @@ final class NotifyConstant
         ];
     }
 }
+
+
+
+

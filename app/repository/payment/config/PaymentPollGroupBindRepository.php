@@ -7,11 +7,15 @@ use app\model\payment\PaymentPollGroupBind;
 
 /**
  * 商户分组与轮询组绑定仓库。
+ *
+ * 封装路由绑定的启用记录与编排展示查询。
  */
 class PaymentPollGroupBindRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,11 @@ class PaymentPollGroupBindRepository extends BaseRepository
 
     /**
      * 根据商户分组和支付方式查询启用的绑定关系。
+     *
+     * @param int $merchantGroupId 商户分组ID
+     * @param int $payTypeId 支付类型ID
+     * @param array $columns 字段列表
+     * @return PaymentPollGroupBind|null 绑定记录
      */
     public function findActiveByMerchantGroupAndPayType(int $merchantGroupId, int $payTypeId, array $columns = ['*'])
     {
@@ -32,6 +41,9 @@ class PaymentPollGroupBindRepository extends BaseRepository
 
     /**
      * 查询商户分组下的路由绑定概览。
+     *
+     * @param int $merchantGroupId 商户分组ID
+     * @return \Illuminate\Database\Eloquent\Collection<int, PaymentPollGroupBind> 绑定概览列表
      */
     public function listSummaryByMerchantGroupId(int $merchantGroupId)
     {
@@ -54,4 +66,8 @@ class PaymentPollGroupBindRepository extends BaseRepository
             ]);
     }
 }
+
+
+
+
 

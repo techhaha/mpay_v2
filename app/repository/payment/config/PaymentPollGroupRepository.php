@@ -11,7 +11,9 @@ use app\model\payment\PaymentPollGroup;
 class PaymentPollGroupRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +22,10 @@ class PaymentPollGroupRepository extends BaseRepository
 
     /**
      * 判断轮询组名称是否已存在。
+     *
+     * @param string $groupName 轮询组名称
+     * @param int $ignoreId 需要排除的记录ID
+     * @return bool 是否存在
      */
     public function existsByGroupName(string $groupName, int $ignoreId = 0): bool
     {
@@ -33,3 +39,7 @@ class PaymentPollGroupRepository extends BaseRepository
         return $query->exists();
     }
 }
+
+
+
+

@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class PayPrepareValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'merchant_id' => 'required|integer|min:1|exists:ma_merchant,id',
         'merchant_order_no' => 'required|string|min:1|max:64',
@@ -21,6 +26,11 @@ class PayPrepareValidator extends Validator
         'ext_json' => 'nullable|array',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'merchant_id' => '商户ID',
         'merchant_order_no' => '商户订单号',
@@ -31,7 +41,14 @@ class PayPrepareValidator extends Validator
         'ext_json' => '扩展信息',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'prepare' => ['merchant_id', 'merchant_order_no', 'pay_type_id', 'pay_amount', 'subject', 'body', 'ext_json'],
     ];
 }
+
+

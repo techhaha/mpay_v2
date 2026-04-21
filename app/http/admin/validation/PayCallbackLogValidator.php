@@ -9,6 +9,11 @@ use support\validation\Validator;
  */
 class PayCallbackLogValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'required|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -21,6 +26,11 @@ class PayCallbackLogValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '日志ID',
         'keyword' => '关键词',
@@ -33,8 +43,15 @@ class PayCallbackLogValidator extends Validator
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'merchant_id', 'channel_id', 'callback_type', 'verify_status', 'process_status', 'page', 'page_size'],
         'show' => ['id'],
     ];
 }
+
+

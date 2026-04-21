@@ -7,11 +7,15 @@ use app\model\merchant\MerchantPolicy;
 
 /**
  * 商户策略仓库。
+ *
+ * 封装商户策略的基础查询。
  */
 class MerchantPolicyRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,10 @@ class MerchantPolicyRepository extends BaseRepository
 
     /**
      * 根据商户 ID 查询商户策略。
+     *
+     * @param int $merchantId 商户ID
+     * @param array $columns 字段列表
+     * @return MerchantPolicy|null 策略记录
      */
     public function findByMerchantId(int $merchantId, array $columns = ['*'])
     {
@@ -28,5 +36,9 @@ class MerchantPolicyRepository extends BaseRepository
             ->first($columns);
     }
 }
+
+
+
+
 
 

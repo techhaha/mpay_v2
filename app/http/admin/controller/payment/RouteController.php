@@ -9,14 +9,19 @@ use support\Request;
 use support\Response;
 
 /**
- * 管理后台路由预览控制器。
+ * 管理后台路由解析控制器。
  *
  * 负责按商户分组、支付方式和金额条件解析可用通道。
+ *
+ * @property PaymentRouteService $paymentRouteService 支付路由服务
  */
 class RouteController extends BaseController
 {
     /**
-     * 构造函数，注入路由服务。
+     * 构造方法。
+     *
+     * @param PaymentRouteService $paymentRouteService 支付路由服务
+     * @return void
      */
     public function __construct(
         protected PaymentRouteService $paymentRouteService
@@ -24,9 +29,10 @@ class RouteController extends BaseController
     }
 
     /**
-     * GET /admin/routes/resolve
-     *
      * 解析路由结果。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function resolve(Request $request): Response
     {
@@ -40,4 +46,9 @@ class RouteController extends BaseController
         ));
     }
 }
+
+
+
+
+
 

@@ -11,9 +11,18 @@ use app\repository\payment\config\PaymentChannelRepository;
  * 商户门户通道查询服务。
  *
  * 负责商户通道列表查询和通道行格式化。
+ *
+ * @property MerchantPortalSupportService $supportService 支持服务
+ * @property PaymentChannelRepository $paymentChannelRepository 支付渠道仓库
  */
 class MerchantPortalChannelQueryService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param MerchantPortalSupportService $supportService 支持服务
+     * @param PaymentChannelRepository $paymentChannelRepository 支付渠道仓库
+     */
     public function __construct(
         protected MerchantPortalSupportService $supportService,
         protected PaymentChannelRepository $paymentChannelRepository
@@ -22,6 +31,12 @@ class MerchantPortalChannelQueryService extends BaseService
 
     /**
      * 查询当前商户的通道列表。
+     *
+     * @param array $filters 筛选条件
+     * @param int $merchantId 商户ID
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return array 通道列表数据
      */
     public function myChannels(array $filters, int $merchantId, int $page, int $pageSize): array
     {
@@ -95,19 +110,27 @@ class MerchantPortalChannelQueryService extends BaseService
         ];
     }
 
+    /**
+     * 为通道行补充文本字段。
+     *
+     * @param object $row 通道行
+     * @return object 处理后的通道行
+     */
     private function decorateChannelRow(object $row): object
     {
         $row->channel_mode_text = (string) (RouteConstant::channelModeMap()[(int) $row->channel_mode] ?? '未知');
         $row->status_text = (string) (CommonConstant::statusMap()[(int) $row->status] ?? '未知');
-        $row->split_rate_text = $this->supportService->formatRate((int) $row->split_rate_bp);
-        $row->cost_rate_text = $this->supportService->formatRate((int) $row->cost_rate_bp);
-        $row->daily_limit_amount_text = $this->supportService->formatAmountOrUnlimited((int) $row->daily_limit_amount);
-        $row->daily_limit_count_text = $this->supportService->formatCountOrUnlimited((int) $row->daily_limit_count);
-        $row->min_amount_text = $this->supportService->formatAmountOrUnlimited((int) $row->min_amount);
-        $row->max_amount_text = $this->supportService->formatAmountOrUnlimited((int) $row->max_amount);
-        $row->created_at_text = $this->supportService->formatDateTime($row->created_at ?? null);
-        $row->updated_at_text = $this->supportService->formatDateTime($row->updated_at ?? null);
+        $row->split_rate_text = $this->formatRate((int) $row->split_rate_bp);
+        $row->cost_rate_text = $this->formatRate((int) $row->cost_rate_bp);
+        $row->daily_limit_amount_text = $this->formatAmountOrUnlimited((int) $row->daily_limit_amount);
+        $row->daily_limit_count_text = $this->formatCountOrUnlimited((int) $row->daily_limit_count);
+        $row->min_amount_text = $this->formatAmountOrUnlimited((int) $row->min_amount);
+        $row->max_amount_text = $this->formatAmountOrUnlimited((int) $row->max_amount);
+        $row->created_at_text = $this->formatDateTime($row->created_at ?? null);
+        $row->updated_at_text = $this->formatDateTime($row->updated_at ?? null);
 
         return $row;
     }
 }
+
+

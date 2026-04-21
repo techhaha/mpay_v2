@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\FileConstant;
 use app\common\interface\PaymentInterface;
+use app\common\interface\PayPluginInterface;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use Psr\Http\Message\ResponseInterface;
@@ -15,14 +17,16 @@ use Yansongda\Pay\Pay;
 use Yansongda\Supports\Collection;
 
 /**
- * 支付宝支付插件（基于 yansongda/pay ~3.7）
+ * 支付宝支付插件。
  *
- * 支持：web（电脑网站）、h5（手机网站）、app（APP 支付）、mini（小程序）、pos（刷卡）、scan（扫码）、transfer（转账）
+ * 基于 `yansongda/pay` 封装支付宝直连能力，支持网页、H5、APP、小程序、刷卡、扫码和转账。
  *
- * 通道配置：app_id, app_secret_cert, app_public_cert_path, alipay_public_cert_path,
- * alipay_root_cert_path, mode(0正式/1沙箱)
+ * 通道配置：`app_id`、`app_secret_cert`、`app_public_cert_path`、`alipay_public_cert_path`、
+ * `alipay_root_cert_path`、`mode`（0 正式 / 1 沙箱）。
+ *
+ * 证书字段通过上传选择器保存 `object_key`，初始化时会自动解析成本地可读路径。
  */
-class AlipayPayment extends BasePayment implements PaymentInterface
+class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
     private const PRODUCT_WEB      = 'alipay_web';
     private const PRODUCT_H5       = 'alipay_h5';
@@ -56,6 +60,11 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         'transfer' => self::PRODUCT_TRANSFER,
     ];
 
+    /**
+     * 插件元信息。
+     *
+     * @var array<string, mixed>
+     */
     protected array $paymentInfo = [
         'code'           => 'alipay',
         'name'           => '支付宝直连',
@@ -67,9 +76,54 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         'config_schema'  => [
             ["type" => "input", "field" => "app_id", "title" => "应用ID", "value" => "", "props" => ["placeholder" => "请输入应用ID"], "validate" => [["required" => true, "message" => "应用ID不能为空"]]],
             ["type" => "textarea", "field" => "app_secret_cert", "title" => "应用私钥", "value" => "", "props" => ["placeholder" => "请输入应用私钥", "rows" => 4], "validate" => [["required" => true, "message" => "应用私钥不能为空"]]],
-            ["type" => "input", "field" => "app_public_cert_path", "title" => "应用公钥证书路径", "value" => "", "props" => ["placeholder" => "请输入应用公钥证书路径"], "validate" => [["required" => true, "message" => "应用公钥证书路径不能为空"]]],
-            ["type" => "input", "field" => "alipay_public_cert_path", "title" => "支付宝公钥证书路径", "value" => "", "props" => ["placeholder" => "请输入支付宝公钥证书路径"], "validate" => [["required" => true, "message" => "支付宝公钥证书路径不能为空"]]],
-            ["type" => "input", "field" => "alipay_root_cert_path", "title" => "支付宝根证书路径", "value" => "", "props" => ["placeholder" => "请输入支付宝根证书路径"], "validate" => [["required" => true, "message" => "支付宝根证书路径不能为空"]]],
+            [
+                "type" => "upload",
+                "field" => "app_public_cert_path",
+                "title" => "应用公钥证书",
+                "value" => "",
+                "props" => [
+                    "fileUpload" => [
+                        "selectorType" => "file",
+                        "scene" => FileConstant::SCENE_CERTIFICATE,
+                        "isLocal" => true,
+                        "isPublic" => false,
+                        "getKey" => "object_key",
+                    ],
+                ],
+                "validate" => [["required" => true, "message" => "应用公钥证书不能为空"]],
+            ],
+            [
+                "type" => "upload",
+                "field" => "alipay_public_cert_path",
+                "title" => "支付宝公钥证书",
+                "value" => "",
+                "props" => [
+                    "fileUpload" => [
+                        "selectorType" => "file",
+                        "scene" => FileConstant::SCENE_CERTIFICATE,
+                        "isLocal" => true,
+                        "isPublic" => false,
+                        "getKey" => "object_key",
+                    ],
+                ],
+                "validate" => [["required" => true, "message" => "支付宝公钥证书不能为空"]],
+            ],
+            [
+                "type" => "upload",
+                "field" => "alipay_root_cert_path",
+                "title" => "支付宝根证书",
+                "value" => "",
+                "props" => [
+                    "fileUpload" => [
+                        "selectorType" => "file",
+                        "scene" => FileConstant::SCENE_CERTIFICATE,
+                        "isLocal" => true,
+                        "isPublic" => false,
+                        "getKey" => "object_key",
+                    ],
+                ],
+                "validate" => [["required" => true, "message" => "支付宝根证书不能为空"]],
+            ],
             [
                 "type" => "checkbox",
                 "field" => "enabled_products",
@@ -90,6 +144,12 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         ],
     ];
 
+    /**
+     * 初始化支付宝插件。
+     *
+     * @param array $channelConfig 渠道配置
+     * @return void
+     */
     public function init(array $channelConfig): void
     {
         parent::init($channelConfig);
@@ -98,9 +158,9 @@ class AlipayPayment extends BasePayment implements PaymentInterface
                 'default' => [
                     'app_id'                  => $this->getConfig('app_id', ''),
                     'app_secret_cert'         => $this->getConfig('app_secret_cert', ''),
-                    'app_public_cert_path'    => $this->getConfig('app_public_cert_path', ''),
-                    'alipay_public_cert_path' => $this->getConfig('alipay_public_cert_path', ''),
-                    'alipay_root_cert_path'   => $this->getConfig('alipay_root_cert_path', ''),
+                    'app_public_cert_path'    => runtime_path((string) $this->getConfig('app_public_cert_path', '')),
+                    'alipay_public_cert_path' => runtime_path((string) $this->getConfig('alipay_public_cert_path', '')),
+                    'alipay_root_cert_path'   => runtime_path((string) $this->getConfig('alipay_root_cert_path', '')),
                     'notify_url'              => $this->getConfig('notify_url', ''),
                     'return_url'              => $this->getConfig('return_url', ''),
                     'mode'                    => (int)($this->getConfig('mode', Pay::MODE_NORMAL)),
@@ -110,6 +170,14 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         Pay::config(array_merge($config, ['_force' => true]));
     }
 
+    /**
+     * 根据订单上下文选择支付宝产品。
+     *
+     * @param array $order 订单上下文
+     * @param bool $validateEnabled 是否校验已开通产品
+     * @return string 产品编码
+     * @throws PaymentException
+     */
     private function chooseProduct(array $order, bool $validateEnabled = true): string
     {
         $enabled = $this->normalizeEnabledProducts($this->channelConfig['enabled_products'] ?? self::DEFAULT_ENABLED_PRODUCTS);
@@ -152,6 +220,12 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         return in_array($prefer, $enabled, true) ? $prefer : ($enabled[0] ?? self::PRODUCT_WEB);
     }
 
+    /**
+     * 标准化已开通产品列表。
+     *
+     * @param array|string|null $products 已开通产品配置
+     * @return array 标准化后的产品编码列表
+     */
     private function normalizeEnabledProducts(mixed $products): array
     {
         if (is_string($products)) {
@@ -176,6 +250,12 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         return $normalized !== [] ? $normalized : self::DEFAULT_ENABLED_PRODUCTS;
     }
 
+    /**
+     * 解析显式指定的产品。
+     *
+     * @param array $order 订单上下文
+     * @return string|null 产品编码
+     */
     private function resolveExplicitProduct(array $order): ?string
     {
         $context = $this->collectOrderContext($order);
@@ -197,6 +277,12 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         return null;
     }
 
+    /**
+     * 归一化产品编码。
+     *
+     * @param mixed $value 原始产品标识
+     * @return string|null 标准化后的产品编码
+     */
     private function normalizeProductCode(mixed $value): ?string
     {
         $value = strtolower(trim((string) $value));
@@ -215,11 +301,23 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         return null;
     }
 
+    /**
+     * 获取产品对应的动作名。
+     *
+     * @param string $product 产品编码
+     * @return string 动作名
+     */
     private function productAction(string $product): string
     {
         return self::PRODUCT_ACTION_MAP[$product] ?? $product;
     }
 
+    /**
+     * 合并订单上下文。
+     *
+     * @param array $order 订单上下文
+     * @return array 合并后的上下文
+     */
     private function collectOrderContext(array $order): array
     {
         $context = $order;
@@ -236,6 +334,12 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         return $context;
     }
 
+    /**
+     * 标准化参数包。
+     *
+     * @param array|string|null $param 原始参数包
+     * @return array<string, mixed> 参数数组
+     */
     private function normalizeParamBag(mixed $param): array
     {
         if (is_array($param)) {
@@ -257,6 +361,12 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         return [];
     }
 
+    /**
+     * 构建基础下单参数。
+     *
+     * @param array $params 原始参数
+     * @return array 基础下单参数
+     */
     private function buildBasePayParams(array $params): array
     {
         $base = [
@@ -283,6 +393,14 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         return $base;
     }
 
+    /**
+     * 从集合中提取首个非空值。
+     *
+     * @param Collection $result 结果集合
+     * @param array $keys 候选键
+     * @param mixed $default 默认值
+     * @return mixed 提取到的首个非空值
+     */
     private function extractCollectionValue(Collection $result, array $keys, mixed $default = ''): mixed
     {
         foreach ($keys as $key) {
@@ -295,6 +413,13 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         return $default;
     }
 
+    /**
+     * 发起支付宝下单。
+     *
+     * @param array $order 订单上下文
+     * @return array 下单结果
+     * @throws PaymentException
+     */
     public function pay(array $order): array
     {
         $orderId   = (string) ($order['order_id'] ?? $order['pay_no'] ?? '');
@@ -338,6 +463,12 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         }
     }
 
+    /**
+     * 发起网页支付。
+     *
+     * @param array $params 基础参数
+     * @return array 下单结果
+     */
     private function doWeb(array $params): array
     {
         $response = Pay::alipay()->web($params);
@@ -358,6 +489,12 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         ];
     }
 
+    /**
+     * 发起 H5 支付。
+     *
+     * @param array $params 基础参数
+     * @return array 下单结果
+     */
     private function doH5(array $params): array
     {
         $returnUrl = $params['_return_url'] ?? $this->getConfig('return_url', '');
@@ -382,6 +519,12 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         ];
     }
 
+    /**
+     * 发起扫码支付。
+     *
+     * @param array $params 基础参数
+     * @return array 下单结果
+     */
     private function doScan(array $params): array
     {
         /** @var Collection $result */
@@ -402,6 +545,12 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         ];
     }
 
+    /**
+     * 发起 APP 支付。
+     *
+     * @param array $params 基础参数
+     * @return array 下单结果
+     */
     private function doApp(array $params): array
     {
         /** @var Collection $result */
@@ -422,6 +571,14 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         ];
     }
 
+    /**
+     * 发起小程序支付。
+     *
+     * @param array $params 基础参数
+     * @param array $order 订单上下文
+     * @return array 下单结果
+     * @throws PaymentException
+     */
     private function doMini(array $params, array $order): array
     {
         $context = $this->collectOrderContext($order);
@@ -454,6 +611,14 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         ];
     }
 
+    /**
+     * 发起刷卡支付。
+     *
+     * @param array $params 基础参数
+     * @param array $order 订单上下文
+     * @return array 下单结果
+     * @throws PaymentException
+     */
     private function doPos(array $params, array $order): array
     {
         $context = $this->collectOrderContext($order);
@@ -486,6 +651,14 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         ];
     }
 
+    /**
+     * 发起转账。
+     *
+     * @param array $params 基础参数
+     * @param array $order 订单上下文
+     * @return array 下单结果
+     * @throws PaymentException
+     */
     private function doTransfer(array $params, array $order): array
     {
         $context = $this->collectOrderContext($order);
@@ -537,6 +710,13 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         ];
     }
 
+    /**
+     * 查询支付宝订单状态。
+     *
+     * @param array $order 订单上下文
+     * @return array 查询结果
+     * @throws PaymentException
+     */
     public function query(array $order): array
     {
         $product = $this->chooseProduct($order, false);
@@ -569,6 +749,13 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         }
     }
 
+    /**
+     * 关闭支付宝订单。
+     *
+     * @param array $order 订单上下文
+     * @return array 关闭结果
+     * @throws PaymentException
+     */
     public function close(array $order): array
     {
         $product = $this->chooseProduct($order, false);
@@ -591,6 +778,13 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         }
     }
 
+    /**
+     * 发起支付宝退款。
+     *
+     * @param array $order 订单上下文
+     * @return array 退款结果
+     * @throws PaymentException
+     */
     public function refund(array $order): array
     {
         $product = $this->chooseProduct($order, false);
@@ -637,6 +831,13 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         }
     }
 
+    /**
+     * 解析支付宝回调通知。
+     *
+     * @param Request $request 请求对象
+     * @return array 回调结果
+     * @throws PaymentException
+     */
     public function notify(Request $request): array
     {
         $params = array_merge($request->get(), $request->post());
@@ -670,13 +871,26 @@ class AlipayPayment extends BasePayment implements PaymentInterface
         }
     }
 
+    /**
+     * 返回回调成功响应。
+     *
+     * @return string|Response 响应内容
+     */
     public function notifySuccess(): string|Response
     {
         return 'success';
     }
 
+    /**
+     * 返回回调失败响应。
+     *
+     * @return string|Response 响应内容
+     */
     public function notifyFail(): string|Response
     {
         return 'fail';
     }
 }
+
+
+

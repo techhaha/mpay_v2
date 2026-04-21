@@ -10,7 +10,12 @@ use Webman\Exception\BusinessException;
 class ValidationException extends BusinessException
 {
     /**
-     * 构造函数，组装异常信息。
+     * 构造方法。
+     *
+     * @param string $message message
+     * @param int|array $bizCodeOrData 业务CodeOr数据
+     * @param array $data 数据
+     * @return void
      */
     public function __construct(string $message = '参数校验失败', int|array $bizCodeOrData = 40001, array $data = [])
     {
@@ -28,3 +33,8 @@ class ValidationException extends BusinessException
         }
     }
 }
+
+
+
+
+

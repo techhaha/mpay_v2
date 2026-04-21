@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class MerchantGroupValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -21,16 +26,26 @@ class MerchantGroupValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '分组ID',
         'keyword' => '关键字',
         'group_name' => '分组名称',
-        'status' => '状态',
+        'status' => '分组状态',
         'remark' => '备注',
         'page' => '页码',
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'group_name', 'status', 'page', 'page_size'],
         'store' => ['group_name', 'status', 'remark'],
@@ -39,6 +54,11 @@ class MerchantGroupValidator extends Validator
         'destroy' => ['id'],
     ];
 
+    /**
+     * 配置新增商户分组场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneStore(): static
     {
         return $this->appendRules([
@@ -47,6 +67,11 @@ class MerchantGroupValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置更新商户分组场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneUpdate(): static
     {
         return $this->appendRules([
@@ -56,6 +81,11 @@ class MerchantGroupValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置商户分组详情场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneShow(): static
     {
         return $this->appendRules([
@@ -63,8 +93,16 @@ class MerchantGroupValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置删除商户分组场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneDestroy(): static
     {
         return $this->sceneShow();
     }
 }
+
+
+

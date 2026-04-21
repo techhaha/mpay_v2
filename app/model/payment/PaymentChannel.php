@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class PaymentChannel extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_payment_channel';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'merchant_id',
         'name',
@@ -30,6 +40,11 @@ class PaymentChannel extends BaseModel
         'sort_no',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_id' => 'integer',
         'split_rate_bp' => 'integer',
@@ -47,5 +62,7 @@ class PaymentChannel extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

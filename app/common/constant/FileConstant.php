@@ -4,23 +4,69 @@ namespace app\common\constant;
 
 /**
  * 文件相关常量。
+ *
+ * 用于描述文件来源、可见性、场景、存储引擎和文件类型白名单。
  */
 final class FileConstant
 {
+    /**
+     * 上传来源。
+     */
     public const SOURCE_UPLOAD = 1;
+
+    /**
+     * 远程 URL 导入来源。
+     */
     public const SOURCE_REMOTE_URL = 2;
 
+    /**
+     * 公开可访问文件。
+     */
     public const VISIBILITY_PUBLIC = 1;
+
+    /**
+     * 私有文件。
+     */
     public const VISIBILITY_PRIVATE = 2;
 
+    /**
+     * 图片场景。
+     */
     public const SCENE_IMAGE = 1;
+
+    /**
+     * 证书场景。
+     */
     public const SCENE_CERTIFICATE = 2;
+
+    /**
+     * 文本场景。
+     */
     public const SCENE_TEXT = 3;
+
+    /**
+     * 其他场景。
+     */
     public const SCENE_OTHER = 4;
 
+    /**
+     * 本地存储引擎。
+     */
     public const STORAGE_LOCAL = 1;
+
+    /**
+     * 阿里云 OSS 存储引擎。
+     */
     public const STORAGE_ALIYUN_OSS = 2;
+
+    /**
+     * 腾讯云 COS 存储引擎。
+     */
     public const STORAGE_TENCENT_COS = 3;
+
+    /**
+     * 远程引用存储引擎。
+     */
     public const STORAGE_REMOTE_URL = 4;
 
     public const CONFIG_DEFAULT_ENGINE = 'file_storage_default_engine';
@@ -42,6 +88,11 @@ final class FileConstant
     public const CONFIG_COS_SECRET_KEY = 'file_storage_tencent_cos_secret_key';
     public const CONFIG_COS_PUBLIC_DOMAIN = 'file_storage_tencent_cos_public_domain';
 
+    /**
+     * 获取文件来源映射。
+     *
+     * @return array<int, string> 来源名称表
+     */
     public static function sourceTypeMap(): array
     {
         return [
@@ -50,6 +101,11 @@ final class FileConstant
         ];
     }
 
+    /**
+     * 获取文件可见性映射。
+     *
+     * @return array<int, string> 可见性名称表
+     */
     public static function visibilityMap(): array
     {
         return [
@@ -58,6 +114,11 @@ final class FileConstant
         ];
     }
 
+    /**
+     * 获取文件场景映射。
+     *
+     * @return array<int, string> 场景名称表
+     */
     public static function sceneMap(): array
     {
         return [
@@ -68,6 +129,11 @@ final class FileConstant
         ];
     }
 
+    /**
+     * 获取存储引擎映射。
+     *
+     * @return array<int, string> 存储引擎名称表
+     */
     public static function storageEngineMap(): array
     {
         return [
@@ -78,6 +144,11 @@ final class FileConstant
         ];
     }
 
+    /**
+     * 获取可选存储引擎映射。
+     *
+     * @return array<int, string> 可选存储引擎名称表
+     */
     public static function selectableStorageEngineMap(): array
     {
         return [
@@ -87,6 +158,11 @@ final class FileConstant
         ];
     }
 
+    /**
+     * 获取图片扩展名白名单。
+     *
+     * @return array<string, bool> 白名单集合
+     */
     public static function imageExtensionMap(): array
     {
         return [
@@ -100,6 +176,11 @@ final class FileConstant
         ];
     }
 
+    /**
+     * 获取证书扩展名白名单。
+     *
+     * @return array<string, bool> 白名单集合
+     */
     public static function certificateExtensionMap(): array
     {
         return [
@@ -112,6 +193,11 @@ final class FileConstant
         ];
     }
 
+    /**
+     * 获取文本扩展名白名单。
+     *
+     * @return array<string, bool> 白名单集合
+     */
     public static function textExtensionMap(): array
     {
         return [
@@ -128,8 +214,17 @@ final class FileConstant
         ];
     }
 
+    /**
+     * 获取默认允许上传的扩展名。
+     *
+     * @return array<int, string> 扩展名列表
+     */
     public static function defaultAllowedExtensions(): array
     {
         return array_keys(self::imageExtensionMap() + self::certificateExtensionMap() + self::textExtensionMap());
     }
 }
+
+
+
+

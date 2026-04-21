@@ -8,9 +8,27 @@ use support\Response;
 
 /**
  * 文件存储驱动管理器。
+ *
+ * 负责根据存储引擎分发文件操作。
+ *
+ * @property StorageConfigService $storageConfigService 存储配置服务
+ * @property LocalStorageDriver $localStorageDriver 本地存储驱动
+ * @property OssStorageDriver $ossStorageDriver oss存储驱动
+ * @property CosStorageDriver $cosStorageDriver cos存储驱动
+ * @property RemoteUrlStorageDriver $remoteUrlStorageDriver remoteUrl存储驱动
  */
 class StorageManager
 {
+    /**
+     * 构造方法。
+     *
+     * @param StorageConfigService $storageConfigService 存储配置服务
+     * @param LocalStorageDriver $localStorageDriver 本地存储驱动
+     * @param OssStorageDriver $ossStorageDriver oss存储驱动
+     * @param CosStorageDriver $cosStorageDriver cos存储驱动
+     * @param RemoteUrlStorageDriver $remoteUrlStorageDriver remoteUrl存储驱动
+     * @return void
+     */
     public function __construct(
         protected StorageConfigService $storageConfigService,
         protected LocalStorageDriver $localStorageDriver,
@@ -20,6 +38,18 @@ class StorageManager
     ) {
     }
 
+    /**
+     * 构建存储上下文。
+     *
+     * @param string $sourcePath 源文件路径
+     * @param string $originalName 原始文件名
+     * @param int|null $scene 场景
+     * @param int|null $visibility 可见性
+     * @param int|null $engine 存储引擎
+     * @param string|null $sourceUrl 源地址
+     * @param string $sourceType 来源类型
+     * @return array 上下文数据
+     */
     public function buildContext(
         string $sourcePath,
         string $originalName,
@@ -58,6 +88,18 @@ class StorageManager
         ];
     }
 
+    /**
+     * 从文件路径保存文件。
+     *
+     * @param string $sourcePath 源文件路径
+     * @param string $originalName 原始文件名
+     * @param int|null $scene 场景
+     * @param int|null $visibility 可见性
+     * @param int|null $engine 存储引擎
+     * @param string|null $sourceUrl 源地址
+     * @param string $sourceType 来源类型
+     * @return array 保存结果
+     */
     public function storeFromPath(
         string $sourcePath,
         string $originalName,
@@ -73,36 +115,72 @@ class StorageManager
         return array_merge($context, $driver->storeFromPath($sourcePath, $context));
     }
 
+    /**
+     * 删除存储对象。
+     *
+     * @param array $asset 文件记录
+     * @return bool 是否删除成功
+     */
     public function delete(array $asset): bool
     {
         return $this->resolveDriver((int) ($asset['storage_engine'] ?? FileConstant::STORAGE_LOCAL))
             ->delete($asset);
     }
 
+    /**
+     * 获取预览响应。
+     *
+     * @param array $asset 文件记录
+     * @return Response 响应对象
+     */
     public function previewResponse(array $asset): Response
     {
         return $this->resolveDriver((int) ($asset['storage_engine'] ?? FileConstant::STORAGE_LOCAL))
             ->previewResponse($asset);
     }
 
+    /**
+     * 获取下载响应。
+     *
+     * @param array $asset 文件记录
+     * @return Response 响应对象
+     */
     public function downloadResponse(array $asset): Response
     {
         return $this->resolveDriver((int) ($asset['storage_engine'] ?? FileConstant::STORAGE_LOCAL))
             ->downloadResponse($asset);
     }
 
+    /**
+     * 获取公开访问 URL。
+     *
+     * @param array $asset 文件记录
+     * @return string 访问 URL
+     */
     public function publicUrl(array $asset): string
     {
         return $this->resolveDriver((int) ($asset['storage_engine'] ?? FileConstant::STORAGE_LOCAL))
             ->publicUrl($asset);
     }
 
+    /**
+     * 获取临时访问 URL。
+     *
+     * @param array $asset 文件记录
+     * @return string 访问 URL
+     */
     public function temporaryUrl(array $asset): string
     {
         return $this->resolveDriver((int) ($asset['storage_engine'] ?? FileConstant::STORAGE_LOCAL))
             ->temporaryUrl($asset);
     }
 
+    /**
+     * 解析对应的存储驱动。
+     *
+     * @param int $engine 存储引擎
+     * @return StorageDriverInterface 存储驱动
+     */
     public function resolveDriver(int $engine): StorageDriverInterface
     {
         return match ($engine) {
@@ -114,6 +192,14 @@ class StorageManager
         };
     }
 
+    /**
+     * 按存储引擎构建公开访问 URL。
+     *
+     * @param int $engine 存储引擎
+     * @param int $visibility 可见性
+     * @param string $objectKey 对象键
+     * @return string 访问 URL
+     */
     private function buildPublicUrlByEngine(int $engine, int $visibility, string $objectKey): string
     {
         if ($engine === FileConstant::STORAGE_LOCAL && $visibility === FileConstant::VISIBILITY_PUBLIC) {
@@ -123,6 +209,13 @@ class StorageManager
         return '';
     }
 
+    /**
+     * 估算 MIME 类型。
+     *
+     * @param string $sourcePath 源文件路径
+     * @param string $originalName 原始文件名
+     * @return string MIME 类型
+     */
     private function guessMimeType(string $sourcePath, string $originalName): string
     {
         $mimeType = '';
@@ -156,3 +249,5 @@ class StorageManager
         };
     }
 }
+
+

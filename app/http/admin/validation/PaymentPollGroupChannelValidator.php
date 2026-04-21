@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class PaymentPollGroupChannelValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -25,12 +30,17 @@ class PaymentPollGroupChannelValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '编排ID',
         'keyword' => '关键字',
         'poll_group_id' => '轮询组',
         'channel_id' => '支付通道',
-        'status' => '状态',
+        'status' => '通道编排状态',
         'sort_no' => '排序',
         'weight' => '权重',
         'is_default' => '默认通道',
@@ -39,6 +49,11 @@ class PaymentPollGroupChannelValidator extends Validator
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'poll_group_id', 'channel_id', 'status', 'page', 'page_size'],
         'store' => ['poll_group_id', 'channel_id', 'sort_no', 'weight', 'is_default', 'status', 'remark'],
@@ -48,6 +63,11 @@ class PaymentPollGroupChannelValidator extends Validator
         'destroy' => ['id'],
     ];
 
+    /**
+     * 根据场景返回轮询组通道校验规则。
+     *
+     * @return array 校验规则
+     */
     public function rules(): array
     {
         $rules = parent::rules();

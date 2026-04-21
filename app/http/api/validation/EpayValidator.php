@@ -7,10 +7,15 @@ use support\validation\Validator;
 /**
  * ePay 兼容层请求校验器。
  *
- * 根据 submit、mapi、api.php 的不同入口场景做分场景校验，不依赖隐藏标记字段。
+ * 用于校验兼容层不同入口的请求参数。
  */
 class EpayValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'act' => 'required|string|in:query,settle,order,orders,refund',
         'pid' => 'required|integer|gt:0',
@@ -33,6 +38,11 @@ class EpayValidator extends Validator
         'page' => 'sometimes|integer|gt:0',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'act' => '操作类型',
         'pid' => '商户ID',
@@ -55,6 +65,11 @@ class EpayValidator extends Validator
         'page' => '页码',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'submit' => ['pid', 'type', 'out_trade_no', 'notify_url', 'return_url', 'name', 'money', 'sign', 'sign_type', 'param'],
         'mapi' => ['pid', 'type', 'out_trade_no', 'notify_url', 'return_url', 'name', 'money', 'clientip', 'device', 'sign', 'sign_type', 'param'],
@@ -67,6 +82,11 @@ class EpayValidator extends Validator
         'refund_out_trade_no' => ['act', 'pid', 'key', 'out_trade_no', 'money', 'refund_no', 'reason'],
     ];
 
+    /**
+     * 根据场景返回 ePay 兼容层校验规则。
+     *
+     * @return array 校验规则
+     */
     public function rules(): array
     {
         $rules = parent::rules();
@@ -111,3 +131,4 @@ class EpayValidator extends Validator
         };
     }
 }
+

@@ -9,11 +9,18 @@ use app\repository\account\ledger\MerchantAccountLedgerRepository;
 
 /**
  * 商户账户流水查询服务。
+ *
+ * 负责商户账户流水的列表、详情和展示字段装配。
+ *
+ * @property MerchantAccountLedgerRepository $merchantAccountLedgerRepository 商户账户流水仓库
  */
 class MerchantAccountLedgerService extends BaseService
 {
     /**
-     * 构造函数，注入流水仓库。
+     * 构造方法。
+     *
+     * @param MerchantAccountLedgerRepository $merchantAccountLedgerRepository 商户账户流水仓库
+     * @return void
      */
     public function __construct(
         protected MerchantAccountLedgerRepository $merchantAccountLedgerRepository
@@ -22,6 +29,11 @@ class MerchantAccountLedgerService extends BaseService
 
     /**
      * 分页查询账户流水。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -72,6 +84,9 @@ class MerchantAccountLedgerService extends BaseService
 
     /**
      * 查询流水详情。
+     *
+     * @param int $id 商户账户流水ID
+     * @return MerchantAccountLedger|null 流水模型
      */
     public function findById(int $id): ?MerchantAccountLedger
     {
@@ -84,6 +99,9 @@ class MerchantAccountLedgerService extends BaseService
 
     /**
      * 格式化记录。
+     *
+     * @param object $row 原始查询行
+     * @return object 格式化后的记录
      */
     private function decorateRow(object $row): object
     {
@@ -103,6 +121,8 @@ class MerchantAccountLedgerService extends BaseService
 
     /**
      * 构建查询。
+     *
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
      */
     private function baseQuery()
     {
@@ -136,3 +156,6 @@ class MerchantAccountLedgerService extends BaseService
     }
 
 }
+
+
+

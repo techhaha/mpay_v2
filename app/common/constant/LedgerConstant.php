@@ -3,7 +3,7 @@
 namespace app\common\constant;
 
 /**
- * 账户流水相关枚举。
+ * 账户流水枚举。
  */
 final class LedgerConstant
 {
@@ -22,6 +22,11 @@ final class LedgerConstant
     public const DIRECTION_IN = 0;
     public const DIRECTION_OUT = 1;
 
+    /**
+     * 获取业务类型映射。
+     *
+     * @return array<int, string> 业务类型名称表
+     */
     public static function bizTypeMap(): array
     {
         return [
@@ -34,6 +39,11 @@ final class LedgerConstant
         ];
     }
 
+    /**
+     * 获取事件类型映射。
+     *
+     * @return array<int, string> 事件类型名称表
+     */
     public static function eventTypeMap(): array
     {
         return [
@@ -44,6 +54,11 @@ final class LedgerConstant
         ];
     }
 
+    /**
+     * 获取流水方向映射。
+     *
+     * @return array<int, string> 方向名称表
+     */
     public static function directionMap(): array
     {
         return [
@@ -52,3 +67,7 @@ final class LedgerConstant
         ];
     }
 }
+
+
+
+

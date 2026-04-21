@@ -11,12 +11,17 @@ use app\model\payment\PayOrder;
 /**
  * 支付单结果组装服务。
  *
- * 负责支付单列表和详情页的展示字段格式化。
+ * 负责支付单列表、详情页和时间线的展示字段格式化。
  */
 class PayOrderReportService extends BaseService
 {
     /**
      * 格式化支付订单行，统一输出前端需要的中文字段。
+     *
+     * 该方法只做展示层字段补齐，不修改原始业务语义。
+     *
+     * @param array<string, mixed> $row 原始查询行
+     * @return array<string, mixed> 格式化后的支付单行
      */
     public function formatPayOrderRow(array $row): array
     {
@@ -58,11 +63,17 @@ class PayOrderReportService extends BaseService
 
     /**
      * 构造支付时间线。
+     *
+     * 按创建、成功、关闭、失败、超时的顺序输出，方便前端直接渲染状态流转。
+     *
+     * @param PayOrder $payOrder 支付订单
+     * @return array<int, array<string, mixed>> 支付时间线
      */
     public function buildPayTimeline(PayOrder $payOrder): array
     {
         $extJson = (array) ($payOrder->ext_json ?? []);
 
+        // 只保留真实发生过的节点，未触发的状态直接过滤掉，避免时间线里出现空占位。
         return array_values(array_filter([
             [
                 'status' => 'created',
@@ -75,11 +86,13 @@ class PayOrderReportService extends BaseService
             $payOrder->closed_at ? [
                 'status' => 'closed',
                 'at' => $this->formatDateTime($payOrder->closed_at, '—'),
+                // 关闭原因优先取扩展信息里的记录，便于展示人工关单或自动关单原因。
                 'reason' => (string) ($extJson['close_reason'] ?? ''),
             ] : null,
             $payOrder->failed_at ? [
                 'status' => 'failed',
                 'at' => $this->formatDateTime($payOrder->failed_at, '—'),
+                // 失败原因先看渠道返回，再回落到扩展信息里保存的统一原因字段。
                 'reason' => (string) ($payOrder->channel_error_msg ?: ($extJson['reason'] ?? '')),
             ] : null,
             $payOrder->timeout_at ? [
@@ -90,3 +103,5 @@ class PayOrderReportService extends BaseService
         ]));
     }
 }
+
+

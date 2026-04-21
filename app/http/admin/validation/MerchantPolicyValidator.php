@@ -9,6 +9,11 @@ use support\validation\Validator;
  */
 class MerchantPolicyValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'merchant_id' => 'sometimes|integer|min:1|exists:ma_merchant,id',
@@ -27,6 +32,11 @@ class MerchantPolicyValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '策略ID',
         'merchant_id' => '所属商户',
@@ -45,6 +55,11 @@ class MerchantPolicyValidator extends Validator
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'merchant_id', 'group_id', 'has_policy', 'settlement_cycle_override', 'auto_payout', 'page', 'page_size'],
         'show' => ['merchant_id'],
@@ -72,6 +87,11 @@ class MerchantPolicyValidator extends Validator
         ],
     ];
 
+    /**
+     * 配置新增商户策略场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneStore(): static
     {
         return $this->appendRules([
@@ -82,8 +102,15 @@ class MerchantPolicyValidator extends Validator
         ]);
     }
 
+    /**
+     * 配置更新商户策略场景规则。
+     *
+     * @return static 校验器实例
+     */
     public function sceneUpdate(): static
     {
         return $this->sceneStore();
     }
 }
+
+

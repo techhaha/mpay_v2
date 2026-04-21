@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class RefundActionValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'refund_no' => 'required|string|min:1|max:64|exists:ma_refund_order,refund_no',
         'reason' => 'nullable|string|max:255',
@@ -20,6 +25,11 @@ class RefundActionValidator extends Validator
         'ext_json' => 'nullable|array',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'refund_no' => '退款单号',
         'reason' => '原因',
@@ -29,9 +39,16 @@ class RefundActionValidator extends Validator
         'ext_json' => '扩展信息',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'processing' => ['refund_no', 'reason', 'last_error', 'processing_at', 'ext_json'],
         'retry' => ['refund_no', 'reason', 'last_error', 'processing_at', 'ext_json'],
         'fail' => ['refund_no', 'reason', 'last_error', 'failed_at', 'ext_json'],
     ];
 }
+
+

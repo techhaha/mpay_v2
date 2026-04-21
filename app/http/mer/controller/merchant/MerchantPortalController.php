@@ -12,9 +12,17 @@ use support\Response;
  * 商户后台基础页面控制器。
  *
  * 统一承接当前商户可见的资料、通道、路由、凭证、清算和资金页面数据。
+ *
+ * @property MerchantPortalService $merchantPortalService 商户门户服务
  */
 class MerchantPortalController extends BaseController
 {
+    /**
+ * 构造方法。
+     *
+     * @param MerchantPortalService $merchantPortalService 商户门户服务
+     * @return void
+     */
     public function __construct(
         protected MerchantPortalService $merchantPortalService
     ) {
@@ -22,6 +30,9 @@ class MerchantPortalController extends BaseController
 
     /**
      * 当前商户资料。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function profile(Request $request): Response
     {
@@ -35,6 +46,9 @@ class MerchantPortalController extends BaseController
 
     /**
      * 更新当前商户资料。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function updateProfile(Request $request): Response
     {
@@ -50,6 +64,9 @@ class MerchantPortalController extends BaseController
 
     /**
      * 修改当前商户登录密码。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function changePassword(Request $request): Response
     {
@@ -65,6 +82,9 @@ class MerchantPortalController extends BaseController
 
     /**
      * 我的通道列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function myChannels(Request $request): Response
     {
@@ -81,7 +101,10 @@ class MerchantPortalController extends BaseController
     }
 
     /**
-     * 路由预览。
+     * 获取路由解析结果。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function routePreview(Request $request): Response
     {
@@ -99,7 +122,10 @@ class MerchantPortalController extends BaseController
     }
 
     /**
-     * 当前商户接口凭证。
+     * 当前商户 API 凭证。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function apiCredential(Request $request): Response
     {
@@ -113,6 +139,9 @@ class MerchantPortalController extends BaseController
 
     /**
      * 生成或重置接口凭证。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function issueCredential(Request $request): Response
     {
@@ -126,6 +155,9 @@ class MerchantPortalController extends BaseController
 
     /**
      * 当前商户的清算记录列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function settlementRecords(Request $request): Response
     {
@@ -143,6 +175,10 @@ class MerchantPortalController extends BaseController
 
     /**
      * 当前商户的清算记录详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $settleNo 结算单号
+     * @return Response 响应对象
      */
     public function settlementRecordShow(Request $request, string $settleNo): Response
     {
@@ -161,6 +197,9 @@ class MerchantPortalController extends BaseController
 
     /**
      * 当前商户可提现余额快照。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function withdrawableBalance(Request $request): Response
     {
@@ -174,6 +213,9 @@ class MerchantPortalController extends BaseController
 
     /**
      * 当前商户资金流水列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function balanceFlows(Request $request): Response
     {
@@ -189,3 +231,8 @@ class MerchantPortalController extends BaseController
         return $this->success($this->merchantPortalService->balanceFlows($payload, $merchantId, $page, $pageSize));
     }
 }
+
+
+
+
+

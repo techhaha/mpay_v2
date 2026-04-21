@@ -11,14 +11,31 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
+/**
+ * 系统配置同步命令。
+ *
+ * 将系统配置定义中的默认值同步到数据库，并刷新运行时配置缓存。
+ */
 #[AsCommand('system:config-sync', '同步系统配置默认值到数据库')]
 class SystemConfigSync extends Command
 {
+    /**
+     * 配置命令说明。
+     *
+     * @return void
+     */
     protected function configure(): void
     {
         $this->setDescription('同步 config/system_config.php 中定义的系统配置默认值到数据库。');
     }
 
+    /**
+     * 将系统配置定义同步到数据库并刷新运行时缓存。
+     *
+     * @param InputInterface $input 命令输入
+     * @param OutputInterface $output 命令输出
+     * @return int 命令退出码
+     */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         try {
@@ -68,3 +85,6 @@ class SystemConfigSync extends Command
         }
     }
 }
+
+
+

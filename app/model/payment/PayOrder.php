@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class PayOrder extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_pay_order';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'pay_no',
         'biz_no',
@@ -49,6 +59,11 @@ class PayOrder extends BaseModel
         'ext_json',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_id' => 'integer',
         'merchant_group_id' => 'integer',
@@ -79,5 +94,7 @@ class PayOrder extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

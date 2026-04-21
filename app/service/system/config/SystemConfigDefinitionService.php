@@ -5,20 +5,35 @@ namespace app\service\system\config;
 use app\common\base\BaseService;
 use RuntimeException;
 
+/**
+ * 系统配置定义解析服务。
+ *
+ * 负责读取 `system_config` 配置并标准化为标签页、规则和默认值结构。
+ */
 class SystemConfigDefinitionService extends BaseService
 {
     protected const VIRTUAL_FIELD_PREFIX = '__';
 
     /**
      * 已解析的标签页缓存。
+     *
+     * @var array|null
      */
     protected ?array $tabCache = null;
 
     /**
      * 标签页键到定义的缓存。
+     *
+     * @var array|null
      */
     protected ?array $tabMapCache = null;
 
+    /**
+     * 获取全部系统配置标签页。
+     *
+     * @return array 标签页列表
+     * @throws RuntimeException
+     */
     public function tabs(): array
     {
         if ($this->tabCache !== null) {
@@ -82,6 +97,12 @@ class SystemConfigDefinitionService extends BaseService
         return $this->tabCache;
     }
 
+    /**
+     * 根据分组代码获取标签页定义。
+     *
+     * @param string $groupCode 分组代码
+     * @return array|null 标签页定义
+     */
     public function tab(string $groupCode): ?array
     {
         $groupCode = strtolower(trim($groupCode));
@@ -94,6 +115,13 @@ class SystemConfigDefinitionService extends BaseService
         return $this->tabMapCache[$groupCode] ?? null;
     }
 
+    /**
+     * 使用当前值回填标签页规则。
+     *
+     * @param array $tab 标签页定义
+     * @param array $values 当前值映射
+     * @return array 回填后的规则列表
+     */
     public function hydrateRules(array $tab, array $values): array
     {
         $rules = [];
@@ -116,6 +144,13 @@ class SystemConfigDefinitionService extends BaseService
         return $rules;
     }
 
+    /**
+     * 从标签页规则中提取表单提交数据。
+     *
+     * @param array $tab 标签页定义
+     * @param array $values 当前值映射
+     * @return array 表单数据
+     */
     public function extractFormData(array $tab, array $values): array
     {
         $data = [];
@@ -135,6 +170,12 @@ class SystemConfigDefinitionService extends BaseService
         return $data;
     }
 
+    /**
+     * 生成必填字段校验消息。
+     *
+     * @param array $tab 标签页定义
+     * @return array 字段到错误消息的映射
+     */
     public function requiredFieldMessages(array $tab): array
     {
         $messages = [];
@@ -163,6 +204,13 @@ class SystemConfigDefinitionService extends BaseService
         return $messages;
     }
 
+    /**
+     * 标准化单个标签页定义。
+     *
+     * @param string $groupCode 分组代码
+     * @param array $definition 原始定义
+     * @return array|null 标准化后的标签页
+     */
     private function normalizeTab(string $groupCode, array $definition): ?array
     {
         $key = strtolower(trim((string) ($definition['key'] ?? $groupCode)));
@@ -191,7 +239,13 @@ class SystemConfigDefinitionService extends BaseService
         ];
     }
 
-    private function normalizeRule(mixed $rule): ?array
+    /**
+     * 标准化单个配置项定义。
+     *
+     * @param array|object|null $rule 原始规则
+     * @return array|null 标准化后的规则
+     */
+    private function normalizeRule(array|object|null $rule): ?array
     {
         if (!is_array($rule)) {
             return null;
@@ -235,8 +289,15 @@ class SystemConfigDefinitionService extends BaseService
         return $normalized;
     }
 
+    /**
+     * 判断是否为虚拟字段。
+     *
+     * @param string $field 字段名
+     * @return bool 是否为虚拟字段
+     */
     private function isVirtualField(string $field): bool
     {
         return str_starts_with($field, self::VIRTUAL_FIELD_PREFIX);
     }
 }
+

@@ -12,11 +12,16 @@ use support\Response;
  * 支付轮询组管理控制器。
  *
  * 负责轮询组的列表、详情、新增、修改和删除。
+ *
+ * @property PaymentPollGroupService $paymentPollGroupService 支付轮询分组服务
  */
 class PaymentPollGroupController extends BaseController
 {
     /**
-     * 构造函数，注入轮询组服务。
+     * 构造方法。
+     *
+     * @param PaymentPollGroupService $paymentPollGroupService 支付轮询分组服务
+     * @return void
      */
     public function __construct(
         protected PaymentPollGroupService $paymentPollGroupService
@@ -24,9 +29,10 @@ class PaymentPollGroupController extends BaseController
     }
 
     /**
-     * GET /admin/payment-poll-groups
-     *
      * 查询轮询组列表。
+     * 
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -42,9 +48,11 @@ class PaymentPollGroupController extends BaseController
     }
 
     /**
-     * GET /admin/payment-poll-groups/{id}
-     *
      * 查询轮询组详情。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 支付轮询分组ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -59,9 +67,10 @@ class PaymentPollGroupController extends BaseController
     }
 
     /**
-     * POST /admin/payment-poll-groups
-     *
      * 新增轮询组。
+     * 
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function store(Request $request): Response
     {
@@ -71,9 +80,11 @@ class PaymentPollGroupController extends BaseController
     }
 
     /**
-     * PUT /admin/payment-poll-groups/{id}
-     *
      * 修改轮询组。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 支付轮询分组ID
+     * @return Response 响应对象
      */
     public function update(Request $request, string $id): Response
     {
@@ -94,9 +105,11 @@ class PaymentPollGroupController extends BaseController
     }
 
     /**
-     * DELETE /admin/payment-poll-groups/{id}
-     *
      * 删除轮询组。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 支付轮询分组ID
+     * @return Response 响应对象
      */
     public function destroy(Request $request, string $id): Response
     {
@@ -111,9 +124,17 @@ class PaymentPollGroupController extends BaseController
 
     /**
      * 查询轮询组下拉选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function options(Request $request): Response
     {
         return $this->success($this->paymentPollGroupService->enabledOptions($request->all()));
     }
 }
+
+
+
+
+

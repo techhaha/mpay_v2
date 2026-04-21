@@ -16,9 +16,19 @@ use app\repository\account\ledger\MerchantAccountLedgerRepository;
  * 商户账户命令服务。
  *
  * 只负责账户创建、冻结、扣减、释放和入账等资金变更。
+ *
+ * @property MerchantAccountRepository $accountRepository 账户仓库
+ * @property MerchantAccountLedgerRepository $ledgerRepository 流水仓库
  */
 class MerchantAccountCommandService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param MerchantAccountRepository $accountRepository 账户仓库
+     * @param MerchantAccountLedgerRepository $ledgerRepository 流水仓库
+     * @return void
+     */
     public function __construct(
         protected MerchantAccountRepository $accountRepository,
         protected MerchantAccountLedgerRepository $ledgerRepository
@@ -27,6 +37,9 @@ class MerchantAccountCommandService extends BaseService
 
     /**
      * 获取或创建商户账户。
+     *
+     * @param int $merchantId 商户ID
+     * @return MerchantAccount 账户记录
      */
     public function ensureAccount(int $merchantId): MerchantAccount
     {
@@ -37,6 +50,10 @@ class MerchantAccountCommandService extends BaseService
 
     /**
      * 在当前事务中获取或创建商户账户。
+     *
+     * @param int $merchantId 商户ID
+     * @return MerchantAccount 账户记录
+     * @throws ValidationException
      */
     public function ensureAccountInCurrentTransaction(int $merchantId): MerchantAccount
     {
@@ -59,6 +76,17 @@ class MerchantAccountCommandService extends BaseService
         return $account;
     }
 
+    /**
+     * 冻结可用余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
     public function freezeAmount(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         return $this->transactionRetry(function () use ($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo) {
@@ -66,6 +94,19 @@ class MerchantAccountCommandService extends BaseService
         });
     }
 
+    /**
+     * 在当前事务中冻结可用余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     * @throws ValidationException
+     * @throws BalanceInsufficientException
+     */
     public function freezeAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         $this->assertPositiveAmount($amount);
@@ -108,6 +149,17 @@ class MerchantAccountCommandService extends BaseService
         ]);
     }
 
+    /**
+     * 扣减冻结余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
     public function deductFrozenAmount(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         return $this->transactionRetry(function () use ($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo) {
@@ -115,6 +167,18 @@ class MerchantAccountCommandService extends BaseService
         });
     }
 
+    /**
+     * 在当前事务中扣减冻结余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     * @throws ValidationException
+     */
     public function deductFrozenAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         $this->assertPositiveAmount($amount);
@@ -160,6 +224,17 @@ class MerchantAccountCommandService extends BaseService
         ]);
     }
 
+    /**
+     * 释放冻结余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
     public function releaseFrozenAmount(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         return $this->transactionRetry(function () use ($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo) {
@@ -167,6 +242,18 @@ class MerchantAccountCommandService extends BaseService
         });
     }
 
+    /**
+     * 在当前事务中释放冻结余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     * @throws ValidationException
+     */
     public function releaseFrozenAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         $this->assertPositiveAmount($amount);
@@ -213,6 +300,17 @@ class MerchantAccountCommandService extends BaseService
         ]);
     }
 
+    /**
+     * 增加可用余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
     public function creditAvailableAmount(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         return $this->transactionRetry(function () use ($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo) {
@@ -220,6 +318,18 @@ class MerchantAccountCommandService extends BaseService
         });
     }
 
+    /**
+     * 在当前事务中增加可用余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     * @throws ValidationException
+     */
     public function creditAvailableAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         $this->assertPositiveAmount($amount);
@@ -257,6 +367,17 @@ class MerchantAccountCommandService extends BaseService
         ]);
     }
 
+    /**
+     * 扣减可用余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
     public function debitAvailableAmount(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         return $this->transactionRetry(function () use ($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo) {
@@ -264,6 +385,19 @@ class MerchantAccountCommandService extends BaseService
         });
     }
 
+    /**
+     * 在当前事务中扣减可用余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     * @throws ValidationException
+     * @throws BalanceInsufficientException
+     */
     public function debitAvailableAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         $this->assertPositiveAmount($amount);
@@ -305,6 +439,12 @@ class MerchantAccountCommandService extends BaseService
         ]);
     }
 
+    /**
+     * 创建账户流水。
+     *
+     * @param array $data 流水数据
+     * @return MerchantAccountLedger 流水记录
+     */
     private function createLedger(array $data): MerchantAccountLedger
     {
         $data['ledger_no'] = $data['ledger_no'] ?? $this->generateNo('LG');
@@ -314,11 +454,24 @@ class MerchantAccountCommandService extends BaseService
         return $this->ledgerRepository->create($data);
     }
 
+    /**
+     * 按幂等键查询流水。
+     *
+     * @param string $idempotencyKey 幂等键
+     * @return MerchantAccountLedger|null 流水记录
+     */
     private function findLedgerByIdempotencyKey(string $idempotencyKey): ?MerchantAccountLedger
     {
         return $this->ledgerRepository->findByIdempotencyKey($idempotencyKey);
     }
 
+    /**
+     * 校验金额必须大于 0。
+     *
+     * @param int $amount 金额（分）
+     * @return void
+     * @throws ValidationException
+     */
     private function assertPositiveAmount(int $amount): void
     {
         if ($amount <= 0) {
@@ -326,6 +479,17 @@ class MerchantAccountCommandService extends BaseService
         }
     }
 
+    /**
+     * 校验幂等流水与当前请求一致。
+     *
+     * @param MerchantAccountLedger $ledger 流水
+     * @param int $bizType 业务类型
+     * @param string $bizNo 业务单号
+     * @param int $amount 金额（分）
+     * @param int $direction 流向
+     * @return void
+     * @throws ConflictException
+     */
     private function assertLedgerMatch(MerchantAccountLedger $ledger, int $bizType, string $bizNo, int $amount, int $direction): void
     {
         if ((int) $ledger->biz_type !== $bizType || (int) $ledger->amount !== $amount || (string) $ledger->biz_no !== $bizNo || (int) $ledger->direction !== $direction) {
@@ -337,6 +501,13 @@ class MerchantAccountCommandService extends BaseService
         }
     }
 
+    /**
+     * 归一化追踪号。
+     *
+     * @param string $traceNo 追踪号
+     * @param string $bizNo 业务单号
+     * @return string 追踪号
+     */
     private function normalizeTraceNo(string $traceNo, string $bizNo): string
     {
         $traceNo = trim($traceNo);
@@ -347,3 +518,8 @@ class MerchantAccountCommandService extends BaseService
         return $bizNo;
     }
 }
+
+
+
+
+

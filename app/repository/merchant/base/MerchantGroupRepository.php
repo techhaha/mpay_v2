@@ -7,11 +7,15 @@ use app\model\merchant\MerchantGroup;
 
 /**
  * 商户分组仓库。
+ *
+ * 封装商户分组启用列表和唯一性检查。
  */
 class MerchantGroupRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,9 @@ class MerchantGroupRepository extends BaseRepository
 
     /**
      * 获取所有启用的商户分组。
+     *
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, MerchantGroup> 启用分组列表
      */
     public function enabledList(array $columns = ['*'])
     {
@@ -31,6 +38,10 @@ class MerchantGroupRepository extends BaseRepository
 
     /**
      * 判断分组名称是否已存在。
+     *
+     * @param string $groupName 分组名称
+     * @param int $ignoreId 需要排除的记录ID
+     * @return bool 是否存在
      */
     public function existsByGroupName(string $groupName, int $ignoreId = 0): bool
     {
@@ -44,4 +55,8 @@ class MerchantGroupRepository extends BaseRepository
         return $query->exists();
     }
 }
+
+
+
+
 

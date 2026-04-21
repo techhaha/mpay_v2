@@ -24,9 +24,37 @@ use app\service\merchant\security\MerchantApiCredentialService;
  * 商户命令服务。
  *
  * 负责商户创建、更新、删除、密码和登录元数据这类写操作。
+ *
+ * @property MerchantRepository $merchantRepository 商户仓库
+ * @property MerchantGroupRepository $merchantGroupRepository 商户分组仓库
+ * @property MerchantQueryService $merchantQueryService 商户查询服务
+ * @property MerchantApiCredentialService $merchantApiCredentialService 商户 API 凭证服务
+ * @property MerchantAccountRepository $merchantAccountRepository 商户账户仓库
+ * @property MerchantApiCredentialRepository $merchantApiCredentialRepository 商户 API 凭证仓库
+ * @property PaymentChannelRepository $paymentChannelRepository 支付渠道仓库
+ * @property BizOrderRepository $bizOrderRepository 业务订单仓库
+ * @property RefundOrderRepository $refundOrderRepository 退款单仓库
+ * @property SettlementOrderRepository $settlementOrderRepository 结算订单仓库
+ * @property MerchantAccountService $merchantAccountService 商户账户服务
  */
 class MerchantCommandService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param MerchantRepository $merchantRepository 商户仓库
+     * @param MerchantGroupRepository $merchantGroupRepository 商户分组仓库
+     * @param MerchantQueryService $merchantQueryService 商户查询服务
+     * @param MerchantApiCredentialService $merchantApiCredentialService 商户 API 凭证服务
+     * @param MerchantAccountRepository $merchantAccountRepository 商户账户仓库
+     * @param MerchantApiCredentialRepository $merchantApiCredentialRepository 商户 API 凭证仓库
+     * @param PaymentChannelRepository $paymentChannelRepository 支付渠道仓库
+     * @param BizOrderRepository $bizOrderRepository 业务订单仓库
+     * @param RefundOrderRepository $refundOrderRepository 退款单仓库
+     * @param SettlementOrderRepository $settlementOrderRepository 结算订单仓库
+     * @param MerchantAccountService $merchantAccountService 商户账户服务
+     * @return void
+     */
     public function __construct(
         protected MerchantRepository $merchantRepository,
         protected MerchantGroupRepository $merchantGroupRepository,
@@ -42,6 +70,13 @@ class MerchantCommandService extends BaseService
     ) {
     }
 
+    /**
+     * 创建商户。
+     *
+     * @param array $data 商户数据
+     * @return Merchant 商户模型
+     * @throws ValidationException
+     */
     public function create(array $data): Merchant
     {
         return $this->transaction(function () use ($data) {
@@ -96,6 +131,13 @@ class MerchantCommandService extends BaseService
         });
     }
 
+    /**
+     * 更新商户。
+     *
+     * @param int $merchantId 商户ID
+     * @param array $data 商户数据
+     * @return Merchant|null 商户模型
+     */
     public function update(int $merchantId, array $data): ?Merchant
     {
         $merchant = $this->merchantRepository->find($merchantId);
@@ -132,6 +174,14 @@ class MerchantCommandService extends BaseService
         return $this->merchantRepository->find($merchantId);
     }
 
+    /**
+     * 删除商户命令
+     *
+     * @param int $merchantId 商户ID
+     * @return bool 是否删除成功
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
+     */
     public function delete(int $merchantId): bool
     {
         $merchant = $this->merchantRepository->find($merchantId);
@@ -160,6 +210,14 @@ class MerchantCommandService extends BaseService
         return $this->merchantRepository->deleteById($merchantId);
     }
 
+    /**
+     * 重置商户密码。
+     *
+     * @param int $merchantId 商户ID
+     * @param string $password 新密码
+     * @return Merchant 商户模型
+     * @throws ResourceNotFoundException
+     */
     public function resetPassword(int $merchantId, string $password): Merchant
     {
         $merchant = $this->merchantRepository->find($merchantId);
@@ -175,11 +233,25 @@ class MerchantCommandService extends BaseService
         return $this->merchantRepository->find($merchantId);
     }
 
+    /**
+     * 校验商户命令密码
+     *
+     * @param Merchant $merchant 商户
+     * @param string $password 密码
+     * @return bool 是否密码匹配
+     */
     public function verifyPassword(Merchant $merchant, string $password): bool
     {
         return $password !== '' && password_verify($password, (string) $merchant->password_hash);
     }
 
+    /**
+     * 更新商户命令登录信息
+     *
+     * @param int $merchantId 商户ID
+     * @param string $ip ip
+     * @return void
+     */
     public function touchLoginMeta(int $merchantId, string $ip = ''): void
     {
         $this->merchantRepository->updateById($merchantId, [
@@ -188,6 +260,13 @@ class MerchantCommandService extends BaseService
         ]);
     }
 
+    /**
+     * 生成或重置商户 API 凭证。
+     *
+     * @param int $merchantId 商户ID
+     * @return array 凭证数据
+     * @throws ResourceNotFoundException
+     */
     public function issueCredential(int $merchantId): array
     {
         $merchant = $this->merchantQueryService->findById($merchantId);
@@ -205,6 +284,14 @@ class MerchantCommandService extends BaseService
         ];
     }
 
+    /**
+     * 根据商户号查询已启用商户。
+     *
+     * @param string $merchantNo 商户号
+     * @return Merchant 商户模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
+     */
     public function findEnabledMerchantByNo(string $merchantNo): Merchant
     {
         $merchant = $this->merchantRepository->findByMerchantNo($merchantNo);
@@ -220,6 +307,14 @@ class MerchantCommandService extends BaseService
         return $merchant;
     }
 
+    /**
+     * 校验商户是否启用。
+     *
+     * @param int $merchantId 商户ID
+     * @return Merchant 商户模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
+     */
     public function ensureMerchantEnabled(int $merchantId): Merchant
     {
         $merchant = $this->merchantRepository->find($merchantId);
@@ -235,6 +330,14 @@ class MerchantCommandService extends BaseService
         return $merchant;
     }
 
+    /**
+     * 校验商户分组是否启用。
+     *
+     * @param int $groupId 分组ID
+     * @return MerchantGroup 商户分组模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
+     */
     public function ensureMerchantGroupEnabled(int $groupId): MerchantGroup
     {
         $group = $this->merchantGroupRepository->find($groupId);
@@ -250,6 +353,11 @@ class MerchantCommandService extends BaseService
         return $group;
     }
 
+    /**
+     * 生成商户No
+     *
+     * @return string 商户号
+     */
     private function generateMerchantNo(): string
     {
         do {
@@ -261,6 +369,8 @@ class MerchantCommandService extends BaseService
 
     /**
      * 生成商户初始临时密码。
+     *
+     * @return string 临时密码
      */
     private function generateTemporaryPassword(): string
     {

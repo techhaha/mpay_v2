@@ -10,11 +10,16 @@ use support\Response;
 
 /**
  * 商户账户流水控制器。
+ *
+ * @property MerchantAccountLedgerService $merchantAccountLedgerService 商户账户流水服务
  */
 class MerchantAccountLedgerController extends BaseController
 {
     /**
-     * 构造函数，注入账户流水服务。
+     * 构造方法。
+     *
+     * @param MerchantAccountLedgerService $merchantAccountLedgerService 商户账户流水服务
+     * @return void
      */
     public function __construct(
         protected MerchantAccountLedgerService $merchantAccountLedgerService
@@ -23,6 +28,9 @@ class MerchantAccountLedgerController extends BaseController
 
     /**
      * 查询账户流水列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -39,6 +47,10 @@ class MerchantAccountLedgerController extends BaseController
 
     /**
      * 查询账户流水详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户账户流水ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -52,3 +64,8 @@ class MerchantAccountLedgerController extends BaseController
         return $this->success($ledger);
     }
 }
+
+
+
+
+

@@ -7,10 +7,15 @@ use support\validation\Validator;
 /**
  * 支付回调参数校验器。
  *
- * 用于校验渠道回调和主动查单回传参数。
+ * 用于校验渠道回调和回调模拟入参。
  */
 class PayCallbackValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'pay_no' => 'required|string|min:1|max:64|exists:ma_pay_order,pay_no',
         'success' => 'required|boolean',
@@ -29,15 +34,20 @@ class PayCallbackValidator extends Validator
         'ext_json' => 'nullable|array',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'pay_no' => '支付单号',
-        'success' => '是否成功',
+        'success' => '支付是否成功',
         'channel_id' => '通道ID',
         'callback_type' => '回调类型',
         'request_data' => '原始回调数据',
         'verify_status' => '验签状态',
         'process_status' => '处理状态',
-        'process_result' => '处理结果',
+        'process_result' => '处理详情',
         'channel_trade_no' => '渠道交易号',
         'channel_order_no' => '渠道订单号',
         'fee_actual_amount' => '实际手续费',
@@ -47,7 +57,14 @@ class PayCallbackValidator extends Validator
         'ext_json' => '扩展信息',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'callback' => ['pay_no', 'success', 'channel_id', 'callback_type', 'request_data', 'verify_status', 'process_status', 'process_result', 'channel_trade_no', 'channel_order_no', 'fee_actual_amount', 'paid_at', 'channel_error_code', 'channel_error_msg', 'ext_json'],
     ];
 }
+
+

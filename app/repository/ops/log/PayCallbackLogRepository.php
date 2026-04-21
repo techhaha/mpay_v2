@@ -7,11 +7,15 @@ use app\model\admin\PayCallbackLog;
 
 /**
  * 支付回调日志仓库。
+ *
+ * 封装按支付单号查询回调日志列表。
  */
 class PayCallbackLogRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,10 @@ class PayCallbackLogRepository extends BaseRepository
 
     /**
      * 根据支付单号查询回调日志列表。
+     *
+     * @param string $payNo 支付单号
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PayCallbackLog> 回调日志列表
      */
     public function listByPayNo(string $payNo, array $columns = ['*'])
     {
@@ -29,5 +37,9 @@ class PayCallbackLogRepository extends BaseRepository
             ->get($columns);
     }
 }
+
+
+
+
 
 

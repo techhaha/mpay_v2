@@ -9,6 +9,11 @@ use support\validation\Validator;
  */
 class MerchantAccountLedgerValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'id' => 'required|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
@@ -20,6 +25,11 @@ class MerchantAccountLedgerValidator extends Validator
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'id' => '流水ID',
         'keyword' => '关键词',
@@ -31,8 +41,15 @@ class MerchantAccountLedgerValidator extends Validator
         'page_size' => '每页条数',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'index' => ['keyword', 'merchant_id', 'biz_type', 'event_type', 'direction', 'page', 'page_size'],
         'show' => ['id'],
     ];
 }
+
+

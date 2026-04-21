@@ -11,6 +11,11 @@ use support\validation\Validator;
  */
 class RefundCreateValidator extends Validator
 {
+    /**
+     * 校验规则
+     *
+     * @var array
+     */
     protected array $rules = [
         'pay_no' => 'required|string|min:1|max:64|exists:ma_pay_order,pay_no',
         'merchant_refund_no' => 'sometimes|string|min:1|max:64',
@@ -19,6 +24,11 @@ class RefundCreateValidator extends Validator
         'ext_json' => 'nullable|array',
     ];
 
+    /**
+     * 字段别名
+     *
+     * @var array
+     */
     protected array $attributes = [
         'pay_no' => '支付单号',
         'merchant_refund_no' => '商户退款单号',
@@ -27,7 +37,14 @@ class RefundCreateValidator extends Validator
         'ext_json' => '扩展信息',
     ];
 
+    /**
+     * 校验场景
+     *
+     * @var array
+     */
     protected array $scenes = [
         'store' => ['pay_no', 'merchant_refund_no', 'refund_amount', 'reason', 'ext_json'],
     ];
 }
+
+

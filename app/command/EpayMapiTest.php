@@ -28,13 +28,23 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use support\Request;
 
+/**
+ * ePay mapi 兼容层烟雾测试命令。
+ *
+ * 用于验证真实商户、路由、插件配置和 mapi 调用是否连通，并输出落库后的订单快照。
+ */
 #[AsCommand('epay:mapi', '运行 ePay mapi 兼容接口烟雾测试')]
 class EpayMapiTest extends Command
 {
+    /**
+     * 配置命令参数。
+     *
+     * @return void
+     */
     protected function configure(): void
     {
         $this
-            ->setDescription('自动读取真实商户、路由和插件配置，测试 ePay mapi 是否正常调用并返回结果。')
+            ->setDescription('自动读取真实商户、路由和插件配置，测试 ePay mapi 是否能正常调用并返回可用结果。')
             ->addOption('live', null, InputOption::VALUE_NONE, '使用真实数据库并发起实际 mapi 调用')
             ->addOption('merchant-id', null, InputOption::VALUE_OPTIONAL, '指定商户 ID')
             ->addOption('merchant-no', null, InputOption::VALUE_OPTIONAL, '指定商户号')
@@ -44,6 +54,13 @@ class EpayMapiTest extends Command
             ->addOption('out-trade-no', null, InputOption::VALUE_OPTIONAL, '商户订单号，默认自动生成');
     }
 
+    /**
+     * 执行 ePay mapi 烟雾测试。
+     *
+     * @param InputInterface $input 命令输入
+     * @param OutputInterface $output 输出对象
+     * @return int 命令退出码
+     */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $output->writeln('<info>epay mapi 烟雾测试</info>');
@@ -91,14 +108,15 @@ class EpayMapiTest extends Command
             $this->writeRouteSnapshot($output, $route);
 
             $payload = $this->buildPayload(
-                merchant: $merchant,
-                credential: $credential,
-                paymentType: $paymentType,
-                merchantOrderNo: $outTradeNo,
-                money: $money,
-                device: $device,
-                siteUrl: $siteUrl
+                $merchant,
+                $credential,
+                $paymentType,
+                $outTradeNo,
+                $money,
+                $device,
+                $siteUrl
             );
+            /** @var EpayController $controller */
             $controller = $this->resolve(EpayController::class);
             $response = $controller->mapi($this->buildRequest($payload));
             $responseData = $this->decodeResponse($response->rawBody());
@@ -115,6 +133,11 @@ class EpayMapiTest extends Command
         }
     }
 
+    /**
+     * 确保烟雾测试依赖可解析。
+     *
+     * @return void
+     */
     private function ensureDependencies(): void
     {
         $this->resolve(EpayController::class);
@@ -130,7 +153,13 @@ class EpayMapiTest extends Command
     }
 
     /**
-     * @return array{merchant:Merchant,credential:MerchantApiCredential,payment_type:PaymentType,route:array}
+     * 发现可用于测试的商户、凭证和路由上下文。
+     *
+     * @param int $merchantIdOption 商户 ID 选项
+     * @param string $merchantNoOption 商户编号选项
+     * @param string $typeCode 支付方式编码
+     * @return array 上下文数据
+     * @throws RuntimeException
      */
     private function discoverContext(int $merchantIdOption, string $merchantNoOption, string $typeCode): array
     {
@@ -144,7 +173,7 @@ class EpayMapiTest extends Command
         $merchant = $this->pickMerchant($merchantIdOption, $merchantNoOption);
         $credential = $this->findMerchantCredential((int) $merchant->id);
         if (!$credential) {
-            throw new RuntimeException('商户未开通有效接口凭证: ' . $merchant->merchant_no);
+            throw new RuntimeException('商户未开通有效 API 凭证: ' . $merchant->merchant_no);
         }
 
         $route = $this->buildRouteSnapshot((int) $merchant->group_id, (int) $paymentType->id);
@@ -160,6 +189,14 @@ class EpayMapiTest extends Command
         ];
     }
 
+    /**
+     * 挑选可用商户。
+     *
+     * @param int $merchantIdOption 商户 ID 选项
+     * @param string $merchantNoOption 商户编号选项
+     * @return Merchant 商户记录
+     * @throws RuntimeException
+     */
     private function pickMerchant(int $merchantIdOption, string $merchantNoOption): Merchant
     {
         /** @var MerchantRepository $merchantRepository */
@@ -195,6 +232,12 @@ class EpayMapiTest extends Command
         return $merchant;
     }
 
+    /**
+     * 查询商户凭证
+     *
+     * @param int $merchantId 商户ID
+     * @return MerchantApiCredential|null 商户 API 凭证
+     */
     private function findMerchantCredential(int $merchantId): ?MerchantApiCredential
     {
         /** @var MerchantApiCredentialRepository $repository */
@@ -208,7 +251,11 @@ class EpayMapiTest extends Command
     }
 
     /**
-     * @return array{bind:mixed,poll_group:PaymentPollGroup,candidates:array<int,array<string,mixed>>}|null
+     * 构建路由快照。
+     *
+     * @param int $merchantGroupId 商户分组ID
+     * @param int $payTypeId 支付类型ID
+     * @return array|null 路由快照
      */
     private function buildRouteSnapshot(int $merchantGroupId, int $payTypeId): ?array
     {
@@ -271,6 +318,18 @@ class EpayMapiTest extends Command
         ];
     }
 
+    /**
+     * 构建 ePay mapi 请求载荷。
+     *
+     * @param Merchant $merchant 商户
+     * @param MerchantApiCredential $credential 商户 API 凭证
+     * @param PaymentType $paymentType 支付类型
+     * @param string $merchantOrderNo 商户订单号
+     * @param string $money 金额
+     * @param string $device 设备类型
+     * @param string $siteUrl 站点地址
+     * @return array 请求载荷
+     */
     private function buildPayload(
         Merchant $merchant,
         MerchantApiCredential $credential,
@@ -299,6 +358,13 @@ class EpayMapiTest extends Command
         return $payload;
     }
 
+    /**
+     * 根据响应和订单快照判定测试结果。
+     *
+     * @param array $responseData 响应数据
+     * @param array $orderSnapshot 订单快照
+     * @return string 判定结果
+     */
     private function classifyAttempt(array $responseData, array $orderSnapshot): string
     {
         $responseCode = (int) ($responseData['code'] ?? 0);
@@ -312,6 +378,13 @@ class EpayMapiTest extends Command
         return ($payOrder && $bizOrder) ? 'pass' : 'fail';
     }
 
+    /**
+     * 输出路由快照。
+     *
+     * @param OutputInterface $output 输出对象
+     * @param array $route 路由快照
+     * @return void
+     */
     private function writeRouteSnapshot(OutputInterface $output, array $route): void
     {
         /** @var PaymentPollGroup $pollGroup */
@@ -343,6 +416,15 @@ class EpayMapiTest extends Command
         }
     }
 
+    /**
+     * 输出测试结果。
+     *
+     * @param OutputInterface $output 输出对象
+     * @param array $payload 请求载荷
+     * @param array $responseData 响应数据
+     * @param array $orderSnapshot 订单快照
+     * @return void
+     */
     private function writeAttempt(OutputInterface $output, array $payload, array $responseData, array $orderSnapshot): void
     {
         $status = $this->classifyAttempt($responseData, $orderSnapshot);
@@ -418,6 +500,12 @@ class EpayMapiTest extends Command
         }
     }
 
+    /**
+     * 归纳支付参数快照。
+     *
+     * @param array $snapshot 支付参数快照
+     * @return array 归纳结果
+     */
     private function summarizePayParamsSnapshot(array $snapshot): array
     {
         if ($snapshot === []) {
@@ -458,21 +546,45 @@ class EpayMapiTest extends Command
         return $summary;
     }
 
+    /**
+     * 获取路由模式名称。
+     *
+     * @param int $routeMode 路由模式
+     * @return string 路由模式名称
+     */
     private function routeModeLabel(int $routeMode): string
     {
         return RouteConstant::routeModeMap()[$routeMode] ?? '未知';
     }
 
+    /**
+     * 获取通道模式名称。
+     *
+     * @param int $channelMode 通道模式
+     * @return string 通道模式名称
+     */
     private function channelModeLabel(int $channelMode): string
     {
         return RouteConstant::channelModeMap()[$channelMode] ?? '未知';
     }
 
+    /**
+     * 获取订单状态名称。
+     *
+     * @param int $status 状态
+     * @return string 订单状态名称
+     */
     private function orderStatusLabel(int $status): string
     {
         return TradeConstant::orderStatusMap()[$status] ?? '未知';
     }
 
+    /**
+     * 生成商户订单号。
+     *
+     * @param string $base 基础订单号
+     * @return string 商户订单号
+     */
     private function buildMerchantOrderNo(string $base): string
     {
         $base = trim($base);
@@ -483,6 +595,13 @@ class EpayMapiTest extends Command
         return 'EPAY-MAPI-' . FormatHelper::timestamp(time(), 'YmdHis') . random_int(1000, 9999);
     }
 
+    /**
+     * 对载荷进行 MD5 签名。
+     *
+     * @param array $payload 请求载荷
+     * @param string $key 商户密钥
+     * @return string 签名结果
+     */
     private function signPayload(array $payload, string $key): string
     {
         $params = $payload;
@@ -502,6 +621,12 @@ class EpayMapiTest extends Command
         return md5(implode('&', $query) . $key);
     }
 
+    /**
+     * 构建模拟请求对象。
+     *
+     * @param array $payload 请求载荷
+     * @return Request 请求对象
+     */
     private function buildRequest(array $payload): Request
     {
         $body = http_build_query($payload, '', '&', PHP_QUERY_RFC1738);
@@ -523,6 +648,13 @@ class EpayMapiTest extends Command
         return new Request($rawRequest);
     }
 
+    /**
+     * 加载订单快照。
+     *
+     * @param int $merchantId 商户ID
+     * @param string $merchantOrderNo 商户订单号
+     * @return array 订单快照
+     */
     private function loadOrderSnapshot(int $merchantId, string $merchantOrderNo): array
     {
         /** @var BizOrderRepository $bizOrderRepository */
@@ -547,12 +679,24 @@ class EpayMapiTest extends Command
         ];
     }
 
+    /**
+     * 解析站点地址。
+     *
+     * @return string 站点地址
+     */
     private function resolveSiteUrl(): string
     {
         $siteUrl = trim((string) sys_config('site_url'));
         return $siteUrl !== '' ? rtrim($siteUrl, '/') : 'http://localhost:8787';
     }
 
+    /**
+     * 归一化金额字符串。
+     *
+     * @param string $money 金额
+     * @return string 金额字符串
+     * @throws RuntimeException
+     */
     private function normalizeMoney(string $money): string
     {
         $money = trim($money);
@@ -567,18 +711,36 @@ class EpayMapiTest extends Command
         return number_format((float) $money, 2, '.', '');
     }
 
+    /**
+     * 归一化设备类型。
+     *
+     * @param string $device 设备类型
+     * @return string 设备类型
+     */
     private function normalizeDevice(string $device): string
     {
         $device = strtolower(trim($device));
         return $device !== '' ? $device : 'pc';
     }
 
+    /**
+     * 解析响应体。
+     *
+     * @param string $body 响应体
+     * @return array 解析结果
+     */
     private function decodeResponse(string $body): array
     {
         $decoded = json_decode($body, true);
         return is_array($decoded) ? $decoded : ['raw' => $body];
     }
 
+    /**
+     * 将值转为字符串。
+     *
+     * @param mixed $value 可转为字符串的值
+     * @return string 可展示字符串
+     */
     private function stringifyValue(mixed $value): string
     {
         if ($value === null) {
@@ -598,6 +760,13 @@ class EpayMapiTest extends Command
         return (string) $value;
     }
 
+    /**
+     * 限制字符串长度。
+     *
+     * @param string $value 待截断文本
+     * @param int $length 最大长度
+     * @return string 截断后的字符串
+     */
     private function limitString(string $value, int $length): string
     {
         $value = trim($value);
@@ -608,16 +777,34 @@ class EpayMapiTest extends Command
         return strlen($value) <= $length ? $value : substr($value, 0, $length) . '...';
     }
 
+    /**
+     * 归一化空白字符。
+     *
+     * @param string $value 待归一化文本
+     * @return string 归一化结果
+     */
     private function normalizeWhitespace(string $value): string
     {
         return preg_replace('/\s+/', ' ', trim($value)) ?: '';
     }
 
+    /**
+     * 格式化 JSON。
+     *
+     * @param mixed $value 可编码为 JSON 的值
+     * @return string JSON 文本
+     */
     private function formatJson(mixed $value): string
     {
         return FormatHelper::json($value);
     }
 
+    /**
+     * 格式化异常文本。
+     *
+     * @param Throwable $e 异常
+     * @return string 文本结果
+     */
     private function formatThrowable(\Throwable $e): string
     {
         $data = method_exists($e, 'getData') ? $e->getData() : [];
@@ -626,18 +813,42 @@ class EpayMapiTest extends Command
         return $e::class . ': ' . $e->getMessage() . $suffix;
     }
 
+    /**
+     * 读取字符串选项。
+     *
+     * @param InputInterface $input 命令输入
+     * @param string $name 选项名称
+     * @param string $default 默认值
+     * @return string 选项值
+     */
     private function optionString(InputInterface $input, string $name, string $default = ''): string
     {
         $value = $input->getOption($name);
         return $value === null || $value === false ? $default : (is_string($value) ? $value : (string) $value);
     }
 
+    /**
+     * 读取整数选项。
+     *
+     * @param InputInterface $input 命令输入
+     * @param string $name 选项名称
+     * @param int $default 默认值
+     * @return int 选项值
+     */
     private function optionInt(InputInterface $input, string $name, int $default = 0): int
     {
         $value = $input->getOption($name);
         return is_numeric($value) ? (int) $value : $default;
     }
 
+    /**
+     * 读取布尔选项。
+     *
+     * @param InputInterface $input 命令输入
+     * @param string $name 选项名称
+     * @param bool $default 默认值
+     * @return bool 布尔值
+     */
     private function optionBool(InputInterface $input, string $name, bool $default = false): bool
     {
         $value = $input->getOption($name);
@@ -650,6 +861,13 @@ class EpayMapiTest extends Command
         return $filtered === null ? $default : $filtered;
     }
 
+    /**
+     * 从容器中解析指定类实例。
+     *
+     * @param string $class 类名
+     * @return object 对象实例
+     * @throws RuntimeException
+     */
     private function resolve(string $class): object
     {
         try {

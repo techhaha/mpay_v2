@@ -7,11 +7,15 @@ use app\model\payment\BizOrder;
 
 /**
  * 业务订单仓库。
+ *
+ * 封装业务单号、追踪号、商户订单号和加锁查询方法。
  */
 class BizOrderRepository extends BaseRepository
 {
     /**
-     * 构造函数，注入对应模型。
+     * 构造方法。
+     *
+     * @return void
      */
     public function __construct()
     {
@@ -20,6 +24,10 @@ class BizOrderRepository extends BaseRepository
 
     /**
      * 根据业务单号查询业务订单。
+     *
+     * @param string $bizNo 业务单号
+     * @param array $columns 字段列表
+     * @return BizOrder|null 业务订单记录
      */
     public function findByBizNo(string $bizNo, array $columns = ['*'])
     {
@@ -30,6 +38,10 @@ class BizOrderRepository extends BaseRepository
 
     /**
      * 根据追踪号查询业务订单。
+     *
+     * @param string $traceNo 追踪号
+     * @param array $columns 字段列表
+     * @return BizOrder|null 业务订单记录
      */
     public function findByTraceNo(string $traceNo, array $columns = ['*'])
     {
@@ -40,6 +52,11 @@ class BizOrderRepository extends BaseRepository
 
     /**
      * 根据商户 ID 和商户订单号查询业务订单。
+     *
+     * @param int $merchantId 商户ID
+     * @param string $merchantOrderNo 商户订单号
+     * @param array $columns 字段列表
+     * @return BizOrder|null 业务订单记录
      */
     public function findByMerchantAndOrderNo(int $merchantId, string $merchantOrderNo, array $columns = ['*'])
     {
@@ -51,6 +68,10 @@ class BizOrderRepository extends BaseRepository
 
     /**
      * 根据业务单号查询当前有效的业务订单。
+     *
+     * @param string $bizNo 业务单号
+     * @param array $columns 字段列表
+     * @return BizOrder|null 有效业务订单记录
      */
     public function findActiveByBizNo(string $bizNo, array $columns = ['*'])
     {
@@ -62,6 +83,10 @@ class BizOrderRepository extends BaseRepository
 
     /**
      * 根据业务单号加锁查询业务订单。
+     *
+     * @param string $bizNo 业务单号
+     * @param array $columns 字段列表
+     * @return BizOrder|null 业务订单记录
      */
     public function findForUpdateByBizNo(string $bizNo, array $columns = ['*'])
     {
@@ -73,6 +98,10 @@ class BizOrderRepository extends BaseRepository
 
     /**
      * 根据追踪号加锁查询业务订单。
+     *
+     * @param string $traceNo 追踪号
+     * @param array $columns 字段列表
+     * @return BizOrder|null 业务订单记录
      */
     public function findForUpdateByTraceNo(string $traceNo, array $columns = ['*'])
     {
@@ -84,6 +113,11 @@ class BizOrderRepository extends BaseRepository
 
     /**
      * 根据商户 ID 和商户订单号加锁查询业务订单。
+     *
+     * @param int $merchantId 商户ID
+     * @param string $merchantOrderNo 商户订单号
+     * @param array $columns 字段列表
+     * @return BizOrder|null 业务订单记录
      */
     public function findForUpdateByMerchantAndOrderNo(int $merchantId, string $merchantOrderNo, array $columns = ['*'])
     {
@@ -96,6 +130,9 @@ class BizOrderRepository extends BaseRepository
 
     /**
      * 统计商户下的业务订单数量。
+     *
+     * @param int $merchantId 商户ID
+     * @return int 整数结果
      */
     public function countByMerchantId(int $merchantId): int
     {
@@ -104,4 +141,8 @@ class BizOrderRepository extends BaseRepository
             ->count();
     }
 }
+
+
+
+
 

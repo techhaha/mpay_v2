@@ -12,11 +12,16 @@ use support\Response;
  * 管理员用户管理控制器。
  *
  * 负责管理员账号的列表、详情、新增、修改和删除。
+ *
+ * @property AdminUserService $adminUserService 管理用户服务
  */
 class AdminUserController extends BaseController
 {
     /**
-     * 构造函数，注入管理员用户服务。
+     * 构造方法。
+     *
+     * @param AdminUserService $adminUserService 管理用户服务
+     * @return void
      */
     public function __construct(
         protected AdminUserService $adminUserService
@@ -24,9 +29,10 @@ class AdminUserController extends BaseController
     }
 
     /**
-     * GET /adminapi/admin-users
-     *
      * 查询管理员用户列表。
+     * 
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -42,9 +48,11 @@ class AdminUserController extends BaseController
     }
 
     /**
-     * GET /adminapi/admin-users/{id}
-     *
      * 查询管理员用户详情。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 管理用户ID
+     * @return Response 响应对象
      */
     public function show(Request $request, string $id): Response
     {
@@ -59,9 +67,10 @@ class AdminUserController extends BaseController
     }
 
     /**
-     * POST /adminapi/admin-users
-     *
      * 新增管理员用户。
+     * 
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function store(Request $request): Response
     {
@@ -71,9 +80,11 @@ class AdminUserController extends BaseController
     }
 
     /**
-     * PUT /adminapi/admin-users/{id}
-     *
      * 修改管理员用户。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 管理用户ID
+     * @return Response 响应对象
      */
     public function update(Request $request, string $id): Response
     {
@@ -92,9 +103,11 @@ class AdminUserController extends BaseController
     }
 
     /**
-     * DELETE /adminapi/admin-users/{id}
-     *
      * 删除管理员用户。
+     * 
+     * @param Request $request 请求对象
+     * @param string $id 管理用户ID
+     * @return Response 响应对象
      */
     public function destroy(Request $request, string $id): Response
     {
@@ -120,3 +133,8 @@ class AdminUserController extends BaseController
         return $this->success(true);
     }
 }
+
+
+
+
+

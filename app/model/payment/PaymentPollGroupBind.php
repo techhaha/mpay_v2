@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class PaymentPollGroupBind extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_payment_poll_group_bind';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'merchant_group_id',
         'pay_type_id',
@@ -20,6 +30,11 @@ class PaymentPollGroupBind extends BaseModel
         'remark',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_group_id' => 'integer',
         'pay_type_id' => 'integer',
@@ -29,5 +44,7 @@ class PaymentPollGroupBind extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

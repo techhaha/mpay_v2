@@ -11,9 +11,17 @@ use support\Response;
 
 /**
  * 退款订单管理控制器。
+ *
+ * @property RefundService $refundService 退款服务
  */
 class RefundOrderController extends BaseController
 {
+    /**
+ * 构造方法。
+     *
+     * @param RefundService $refundService 退款服务
+     * @return void
+     */
     public function __construct(
         protected RefundService $refundService
     ) {
@@ -21,6 +29,9 @@ class RefundOrderController extends BaseController
 
     /**
      * 查询退款订单列表。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
      */
     public function index(Request $request): Response
     {
@@ -33,6 +44,10 @@ class RefundOrderController extends BaseController
 
     /**
      * 查询退款订单详情。
+     *
+     * @param Request $request 请求对象
+     * @param string $refundNo 退款单号
+     * @return Response 响应对象
      */
     public function show(Request $request, string $refundNo): Response
     {
@@ -41,6 +56,10 @@ class RefundOrderController extends BaseController
 
     /**
      * 重试退款。
+     *
+     * @param Request $request 请求对象
+     * @param string $refundNo 退款单号
+     * @return Response 响应对象
      */
     public function retry(Request $request, string $refundNo): Response
     {
@@ -53,4 +72,9 @@ class RefundOrderController extends BaseController
         return $this->success($this->refundService->retryRefund($refundNo, $data));
     }
 }
+
+
+
+
+
 

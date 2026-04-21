@@ -10,14 +10,25 @@ use app\repository\payment\config\PaymentTypeRepository;
 use app\repository\payment\trade\RefundOrderRepository;
 
 /**
- * 退款单查询服务。
+ * 退款单查询与展示拼装服务。
  *
- * 只负责退款列表、详情和数据查询，不承载退款状态推进逻辑。
+ * 负责退款列表、详情和展示辅助数据查询，不承载退款状态推进逻辑。
+ *
+ * @property RefundOrderRepository $refundOrderRepository 退款单仓库
+ * @property MerchantAccountLedgerRepository $merchantAccountLedgerRepository 商户账户流水仓库
+ * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+ * @property RefundReportService $refundReportService 退款报表服务
  */
 class RefundQueryService extends BaseService
 {
     /**
-     * 构造函数，注入对应依赖。
+     * 构造方法。
+     *
+     * @param RefundOrderRepository $refundOrderRepository 退款单仓库
+     * @param MerchantAccountLedgerRepository $merchantAccountLedgerRepository 商户账户流水仓库
+     * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+     * @param RefundReportService $refundReportService 退款报表服务
+     * @return void
      */
     public function __construct(
         protected RefundOrderRepository $refundOrderRepository,
@@ -30,11 +41,13 @@ class RefundQueryService extends BaseService
     /**
      * 分页查询退款订单列表。
      *
-     * @param array $filters 查询条件
+     * 返回列表、总数、分页信息和支付方式选项，供后台和商户后台直接复用。
+     *
+     * @param array $filters 筛选条件
      * @param int $page 页码
      * @param int $pageSize 每页条数
-     * @param int|null $merchantId 商户侧强制限定的商户 ID
-     * @return array{list:array,total:int,page:int,size:int,pay_types:array}
+     * @param int|null $merchantId 商户ID
+     * @return array{list: array<int, array<string, mixed>>, total: int, page: int, size: int, pay_types: array<int, array{label: string, value: int}>} 退款订单列表结构
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10, ?int $merchantId = null): array
     {
@@ -42,6 +55,7 @@ class RefundQueryService extends BaseService
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
         if ($keyword !== '') {
+            // 关键词同时命中退款单、支付单、业务单、商户和通道，方便后台按任一线索快速定位。
             $query->where(function ($builder) use ($keyword) {
                 $builder->where('ro.refund_no', 'like', '%' . $keyword . '%')
                     ->orWhere('ro.pay_no', 'like', '%' . $keyword . '%')
@@ -83,6 +97,7 @@ class RefundQueryService extends BaseService
             ->orderByDesc('ro.id')
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
 
+        // 列表页需要直接显示文案和金额格式，所以在查询层统一做一次格式化。
         $list = [];
         foreach ($paginator->items() as $item) {
             $list[] = $this->refundReportService->formatRefundOrderRow((array) $item);
@@ -100,9 +115,13 @@ class RefundQueryService extends BaseService
     /**
      * 查询退款订单详情。
      *
+     * 返回退款单、时间线和资金流水，供列表钻取和详情页展示。
+     *
      * @param string $refundNo 退款单号
-     * @param int|null $merchantId 商户侧强制限定的商户 ID
-     * @return array{refund_order:array,timeline:array,account_ledgers:array}
+     * @param int|null $merchantId 商户ID
+     * @return array{refund_order: array<string, mixed>, timeline: array<int, array<string, mixed>>, account_ledgers: array<int, array<string, mixed>>} 退款详情结构
+     * @throws ValidationException
+     * @throws ResourceNotFoundException
      */
     public function detail(string $refundNo, ?int $merchantId = null): array
     {
@@ -118,6 +137,7 @@ class RefundQueryService extends BaseService
         }
 
         $refundOrder = $this->refundReportService->formatRefundOrderRow((array) $row);
+        // 详情页把原始行再转成展示数组，便于前端直接渲染各类状态和金额字段。
         $timeline = $this->refundReportService->buildRefundTimeline($row);
         $accountLedgers = $this->loadRefundLedgers($row);
 
@@ -130,6 +150,11 @@ class RefundQueryService extends BaseService
 
     /**
      * 按退款单号查询退款单，可按商户限制。
+     *
+     * @param string $refundNo 退款单号
+     * @param int|null $merchantId 商户ID
+     * @return \app\model\payment\RefundOrder|null 退款单模型
+     * @throws ValidationException
      */
     public function findByRefundNo(string $refundNo, ?int $merchantId = null): ?\app\model\payment\RefundOrder
     {
@@ -157,9 +182,13 @@ class RefundQueryService extends BaseService
 
     /**
      * 构建退款订单基础查询，列表与详情共用。
+     *
+     * @param int|null $merchantId 商户ID
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
      */
     private function buildRefundOrderQuery(?int $merchantId = null)
     {
+        // 退款单详情需要同时展示支付、业务、商户和通道信息，所以一次性把相关表都 join 进来。
         $query = $this->refundOrderRepository->query()
             ->from('ma_refund_order as ro')
             ->leftJoin('ma_pay_order as po', 'po.pay_no', '=', 'ro.pay_no')
@@ -226,8 +255,13 @@ class RefundQueryService extends BaseService
 
     /**
      * 加载退款相关资金流水。
+     *
+     * 按追踪号、业务单号、退款单号依次回退查找，尽量把相关流水补齐。
+     *
+     * @param object|null $refundOrder 退款订单或查询行
+     * @return array<int, array<string, mixed>> 退款流水展示结构
      */
-    private function loadRefundLedgers(mixed $refundOrder): array
+    private function loadRefundLedgers(object|null $refundOrder): array
     {
         $traceNo = trim((string) ($refundOrder->trace_no ?? ''));
         $bizNo = trim((string) ($refundOrder->biz_no ?? ''));
@@ -239,10 +273,12 @@ class RefundQueryService extends BaseService
         }
 
         if (empty($ledgers) && $bizNo !== '') {
+            // 退款流水优先按追踪号查，查不到再回到业务单号兜底。
             $ledgers = $this->collectionToArray($this->merchantAccountLedgerRepository->listByBizNo($bizNo));
         }
 
         if (empty($ledgers) && $refundNo !== '') {
+            // 最后再用退款单号补查，尽量避免详情页缺少资金流水。
             $ledgers = $this->collectionToArray($this->merchantAccountLedgerRepository->listByBizNo($refundNo));
         }
 
@@ -256,6 +292,9 @@ class RefundQueryService extends BaseService
 
     /**
      * 将查询结果转换成普通数组。
+     *
+     * @param iterable $items 查询结果
+     * @return array<int, mixed> 查询结果列表
      */
     private function collectionToArray(iterable $items): array
     {
@@ -269,6 +308,8 @@ class RefundQueryService extends BaseService
 
     /**
      * 返回启用的支付方式选项，供筛选使用。
+     *
+     * @return array<int, array{label: string, value: int}> 支付方式选项
      */
     private function payTypeOptions(): array
     {

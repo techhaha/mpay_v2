@@ -23,9 +23,9 @@ Route::group('/merapi', function () {
         Route::put('/merchant/profile', [MerchantPortalController::class, 'updateProfile'])->name('merchantApiPortalProfileUpdate')->setParams(['real_name' => '更新商户资料']);
         Route::post('/merchant/change-password', [MerchantPortalController::class, 'changePassword'])->name('merchantApiPortalChangePassword')->setParams(['real_name' => '修改登录密码']);
         Route::get('/my-channels', [MerchantPortalController::class, 'myChannels'])->name('merchantApiPortalMyChannels')->setParams(['real_name' => '我的通道']);
-        Route::get('/route-preview', [MerchantPortalController::class, 'routePreview'])->name('merchantApiPortalRoutePreview')->setParams(['real_name' => '路由预览']);
-        Route::get('/api-credential', [MerchantPortalController::class, 'apiCredential'])->name('merchantApiPortalCredential')->setParams(['real_name' => '接口凭证']);
-        Route::post('/api-credential/issue-credential', [MerchantPortalController::class, 'issueCredential'])->name('merchantApiPortalIssueCredential')->setParams(['real_name' => '生成或重置接口凭证']);
+        Route::get('/route-preview', [MerchantPortalController::class, 'routePreview'])->name('merchantApiPortalRoutePreview')->setParams(['real_name' => '路由解析']);
+        Route::get('/api-credential', [MerchantPortalController::class, 'apiCredential'])->name('merchantApiPortalCredential')->setParams(['real_name' => '商户 API 凭证']);
+        Route::post('/api-credential/issue-credential', [MerchantPortalController::class, 'issueCredential'])->name('merchantApiPortalIssueCredential')->setParams(['real_name' => '生成或重置商户 API 凭证']);
         Route::get('/settlement-records', [MerchantPortalController::class, 'settlementRecords'])->name('merchantApiPortalSettlementRecords')->setParams(['real_name' => '清算记录']);
         Route::get('/settlement-records/{settleNo}', [MerchantPortalController::class, 'settlementRecordShow'])->name('merchantApiPortalSettlementRecordShow')->setParams(['real_name' => '清算记录详情']);
         Route::get('/withdrawable-balance', [MerchantPortalController::class, 'withdrawableBalance'])->name('merchantApiPortalWithdrawableBalance')->setParams(['real_name' => '可提现余额']);

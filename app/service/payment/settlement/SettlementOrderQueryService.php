@@ -13,11 +13,22 @@ use app\repository\payment\settlement\SettlementOrderRepository;
 
 /**
  * 清算订单查询服务。
+ *
+ * 负责清算订单的列表、详情、时间线和关联流水装配。
+ *
+ * @property SettlementOrderRepository $settlementOrderRepository 结算订单仓库
+ * @property SettlementItemRepository $settlementItemRepository 结算明细仓库
+ * @property MerchantAccountLedgerRepository $merchantAccountLedgerRepository 商户账户流水仓库
  */
 class SettlementOrderQueryService extends BaseService
 {
     /**
-     * 构造函数，注入清算订单仓库。
+     * 构造方法。
+     *
+     * @param SettlementOrderRepository $settlementOrderRepository 结算订单仓库
+     * @param SettlementItemRepository $settlementItemRepository 结算明细仓库
+     * @param MerchantAccountLedgerRepository $merchantAccountLedgerRepository 商户账户流水仓库
+     * @return void
      */
     public function __construct(
         protected SettlementOrderRepository $settlementOrderRepository,
@@ -28,6 +39,12 @@ class SettlementOrderQueryService extends BaseService
 
     /**
      * 分页查询清算订单。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @param int|null $merchantId 商户ID
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10, ?int $merchantId = null)
     {
@@ -35,6 +52,7 @@ class SettlementOrderQueryService extends BaseService
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
         if ($keyword !== '') {
+            // 关键词同时命中清算单、追踪号、商户和通道，方便按任一线索回查批次。
             $query->where(function ($builder) use ($keyword) {
                 $builder->where('s.settle_no', 'like', '%' . $keyword . '%')
                     ->orWhere('s.trace_no', 'like', '%' . $keyword . '%')
@@ -69,6 +87,7 @@ class SettlementOrderQueryService extends BaseService
             ->orderByDesc('s.id')
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
 
+        // 列表页需要直接展示文本字段，所以这里统一把每一行补成可渲染结构。
         $paginator->getCollection()->transform(function ($row) {
             return $this->decorateRow($row);
         });
@@ -78,6 +97,10 @@ class SettlementOrderQueryService extends BaseService
 
     /**
      * 按清算单号查询详情。
+     *
+     * @param string $settleNo 清算单号
+     * @param int|null $merchantId 商户ID
+     * @return SettlementOrder|null 清算订单模型
      */
     public function findBySettleNo(string $settleNo, ?int $merchantId = null): ?SettlementOrder
     {
@@ -90,6 +113,12 @@ class SettlementOrderQueryService extends BaseService
 
     /**
      * 查询清算订单详情。
+     *
+     * @param string $settleNo 清算单号
+     * @param int|null $merchantId 商户ID
+     * @return array{settlement_order: SettlementOrder, items: array, account_ledgers: \Illuminate\Support\Collection, timeline: array<int, array<string, mixed>>} 详情结构
+     * @throws ValidationException
+     * @throws ResourceNotFoundException
      */
     public function detail(string $settleNo, ?int $merchantId = null): array
     {
@@ -109,6 +138,7 @@ class SettlementOrderQueryService extends BaseService
             : collect();
 
         if ($accountLedgers->isEmpty()) {
+            // 清算流水优先按追踪号查，缺失时回退到清算单号兜底。
             $accountLedgers = $this->merchantAccountLedgerRepository->listByBizNo((string) $settlementOrder->settle_no);
         }
 
@@ -122,6 +152,9 @@ class SettlementOrderQueryService extends BaseService
 
     /**
      * 构建时间线。
+     *
+     * @param SettlementOrder|null $settlementOrder 结算订单
+     * @return array<int, array<string, mixed>> 清算时间线
      */
     public function buildTimeline(?SettlementOrder $settlementOrder): array
     {
@@ -129,6 +162,7 @@ class SettlementOrderQueryService extends BaseService
             return [];
         }
 
+        // 清算时间线只展示真正走到过的节点，未发生的步骤不占位。
         return array_values(array_filter([
             [
                 'title' => '生成清算单',
@@ -156,9 +190,13 @@ class SettlementOrderQueryService extends BaseService
 
     /**
      * 格式化单条记录。
+     *
+     * @param object $row 原始查询行
+     * @return object 格式化后的记录
      */
     private function decorateRow(object $row): object
     {
+        // 列表页直接要展示状态文案和金额文案，所以在查询层就把格式化字段补齐。
         $row->cycle_type_text = (string) (TradeConstant::settlementCycleMap()[(int) $row->cycle_type] ?? '未知');
         $row->status_text = (string) (TradeConstant::settlementStatusMap()[(int) $row->status] ?? '未知');
         $row->gross_amount_text = $this->formatAmount((int) $row->gross_amount);
@@ -178,6 +216,9 @@ class SettlementOrderQueryService extends BaseService
 
     /**
      * 统一构建查询。
+     *
+     * @param int|null $merchantId 商户ID
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
      */
     private function baseQuery(?int $merchantId = null)
     {

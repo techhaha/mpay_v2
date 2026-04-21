@@ -9,8 +9,18 @@ use app\common\base\BaseModel;
  */
 class FileRecord extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_file_asset';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'scene',
         'source_type',
@@ -30,6 +40,11 @@ class FileRecord extends BaseModel
         'remark',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'scene' => 'integer',
         'source_type' => 'integer',
@@ -41,3 +56,5 @@ class FileRecord extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+

@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class Merchant extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_merchant';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'merchant_no',
         'password_hash',
@@ -34,10 +44,20 @@ class Merchant extends BaseModel
         'remark',
     ];
 
+    /**
+     * 隐藏字段
+     *
+     * @var mixed
+     */
     protected $hidden = [
         'password_hash',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_type' => 'integer',
         'group_id' => 'integer',
@@ -49,3 +69,5 @@ class Merchant extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+

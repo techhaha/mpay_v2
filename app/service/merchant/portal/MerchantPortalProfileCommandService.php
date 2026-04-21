@@ -9,15 +9,32 @@ use app\repository\merchant\base\MerchantRepository;
 
 /**
  * 商户门户资料命令服务。
+ *
+ * @property MerchantPortalSupportService $supportService 支持服务
+ * @property MerchantRepository $merchantRepository 商户仓库
  */
 class MerchantPortalProfileCommandService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param MerchantPortalSupportService $supportService 支持服务
+     * @param MerchantRepository $merchantRepository 商户仓库
+     */
     public function __construct(
         protected MerchantPortalSupportService $supportService,
         protected MerchantRepository $merchantRepository
     ) {
     }
 
+    /**
+     * 更新商户门户资料。
+     *
+     * @param int $merchantId 商户ID
+     * @param array $data 资料数据
+     * @return array 更新后的资料数据
+     * @throws ResourceNotFoundException
+     */
     public function updateProfile(int $merchantId, array $data): array
     {
         $merchant = $this->merchantRepository->find($merchantId);
@@ -42,6 +59,15 @@ class MerchantPortalProfileCommandService extends BaseService
         ];
     }
 
+    /**
+     * 修改商户门户密码。
+     *
+     * @param int $merchantId 商户ID
+     * @param array $data 密码数据
+     * @return array 密码修改结果
+     * @throws ResourceNotFoundException
+     * @throws ValidationException
+     */
     public function changePassword(int $merchantId, array $data): array
     {
         $merchant = $this->merchantRepository->find($merchantId);
@@ -63,7 +89,8 @@ class MerchantPortalProfileCommandService extends BaseService
 
         return [
             'updated' => true,
-            'password_updated_at' => $this->supportService->formatDateTime($this->now()),
+            'password_updated_at' => $this->formatDateTime($this->now()),
         ];
     }
 }
+

@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class AdminUser extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_admin_user';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'username',
         'password_hash',
@@ -25,10 +35,20 @@ class AdminUser extends BaseModel
         'remark',
     ];
 
+    /**
+     * 隐藏字段
+     *
+     * @var mixed
+     */
     protected $hidden = [
         'password_hash',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'is_super' => 'integer',
         'status' => 'integer',
@@ -37,5 +57,7 @@ class AdminUser extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

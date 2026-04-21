@@ -11,9 +11,23 @@ use app\repository\payment\config\PaymentPollGroupRepository;
 
 /**
  * 轮询组通道编排服务。
+ *
+ * 负责维护轮询组内通道的顺序、权重、默认通道以及支付方式一致性。
+ *
+ * @property PaymentPollGroupChannelRepository $paymentPollGroupChannelRepository 支付轮询分组渠道仓库
+ * @property PaymentPollGroupRepository $paymentPollGroupRepository 支付轮询分组仓库
+ * @property PaymentChannelRepository $paymentChannelRepository 支付渠道仓库
  */
 class PaymentPollGroupChannelService extends BaseService
 {
+    /**
+     * 构造方法。
+     *
+     * @param PaymentPollGroupChannelRepository $paymentPollGroupChannelRepository 支付轮询分组渠道仓库
+     * @param PaymentPollGroupRepository $paymentPollGroupRepository 支付轮询分组仓库
+     * @param PaymentChannelRepository $paymentChannelRepository 支付渠道仓库
+     * @return void
+     */
     public function __construct(
         protected PaymentPollGroupChannelRepository $paymentPollGroupChannelRepository,
         protected PaymentPollGroupRepository $paymentPollGroupRepository,
@@ -23,6 +37,11 @@ class PaymentPollGroupChannelService extends BaseService
 
     /**
      * 分页查询轮询组通道编排。
+     *
+     * @param array $filters 筛选条件
+     * @param int $page 页码
+     * @param int $pageSize 每页条数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator 分页结果
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
@@ -79,11 +98,24 @@ class PaymentPollGroupChannelService extends BaseService
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
     }
 
+    /**
+     * 按 ID 查询轮询组通道编排。
+     *
+     * @param int $id 编排ID
+     * @return PaymentPollGroupChannel|null 编排模型
+     */
     public function findById(int $id): ?PaymentPollGroupChannel
     {
         return $this->paymentPollGroupChannelRepository->find($id);
     }
 
+    /**
+     * 创建轮询组通道编排。
+     *
+     * @param array $data 写入数据
+     * @return PaymentPollGroupChannel 新增后的编排模型
+     * @throws PaymentException
+     */
     public function create(array $data): PaymentPollGroupChannel
     {
         $this->assertPairUnique((int) $data['poll_group_id'], (int) $data['channel_id']);
@@ -91,6 +123,7 @@ class PaymentPollGroupChannelService extends BaseService
         $payload = $this->normalizePayload($data);
 
         return $this->transaction(function () use ($payload) {
+            // 一个轮询组只能有一个默认通道，新增默认项前先清理掉其他默认标记。
             if ((int) ($payload['is_default'] ?? 0) === 1) {
                 $this->paymentPollGroupChannelRepository->clearDefaultExcept((int) $payload['poll_group_id']);
             }
@@ -99,6 +132,14 @@ class PaymentPollGroupChannelService extends BaseService
         });
     }
 
+    /**
+     * 更新轮询组通道编排。
+     *
+     * @param int $id 编排ID
+     * @param array $data 写入数据
+     * @return PaymentPollGroupChannel|null 更新后的编排模型
+     * @throws PaymentException
+     */
     public function update(int $id, array $data): ?PaymentPollGroupChannel
     {
         $current = $this->paymentPollGroupChannelRepository->find($id);
@@ -114,6 +155,7 @@ class PaymentPollGroupChannelService extends BaseService
         $payload = $this->normalizePayload($data);
 
         return $this->transaction(function () use ($id, $payload) {
+            // 更新成默认通道时，同样先把本轮询组的其他默认项清空。
             if ((int) ($payload['is_default'] ?? 0) === 1) {
                 $this->paymentPollGroupChannelRepository->clearDefaultExcept((int) $payload['poll_group_id'], $id);
             }
@@ -126,17 +168,30 @@ class PaymentPollGroupChannelService extends BaseService
         });
     }
 
+    /**
+     * 删除轮询组通道编排。
+     *
+     * @param int $id 编排ID
+     * @return bool 是否删除成功
+     */
     public function delete(int $id): bool
     {
         return $this->paymentPollGroupChannelRepository->deleteById($id);
     }
 
+    /**
+     * 标准化编排写入数据。
+     *
+     * @param array $data 写入数据
+     * @return array<string, mixed> 标准化后的数据
+     */
     private function normalizePayload(array $data): array
     {
         return [
             'poll_group_id' => (int) $data['poll_group_id'],
             'channel_id' => (int) $data['channel_id'],
             'sort_no' => (int) ($data['sort_no'] ?? 0),
+            // 权重至少为 1，避免轮询时出现 0 权重通道导致随机分配失真。
             'weight' => max(1, (int) ($data['weight'] ?? 100)),
             'is_default' => (int) ($data['is_default'] ?? 0),
             'status' => (int) ($data['status'] ?? 1),
@@ -144,6 +199,15 @@ class PaymentPollGroupChannelService extends BaseService
         ];
     }
 
+    /**
+     * 校验轮询组与通道的组合唯一性。
+     *
+     * @param int $pollGroupId 轮询组ID
+     * @param int $channelId 通道ID
+     * @param int $ignoreId 排除的编排ID
+     * @return void
+     * @throws PaymentException
+     */
     private function assertPairUnique(int $pollGroupId, int $channelId, int $ignoreId = 0): void
     {
         $query = $this->paymentPollGroupChannelRepository->query()
@@ -162,6 +226,13 @@ class PaymentPollGroupChannelService extends BaseService
         }
     }
 
+    /**
+     * 校验通道支付方式与轮询组支付方式一致。
+     *
+     * @param array $data 写入数据
+     * @return void
+     * @throws PaymentException
+     */
     private function assertChannelMatchesPollGroup(array $data): void
     {
         $pollGroupId = (int) ($data['poll_group_id'] ?? 0);
@@ -174,6 +245,7 @@ class PaymentPollGroupChannelService extends BaseService
             return;
         }
 
+        // 轮询组和通道必须属于同一支付方式，否则排序再正确也会在运行时被路由规则拦下。
         if ((int) $pollGroup->pay_type_id !== (int) $channel->pay_type_id) {
             throw new PaymentException('轮询组与支付通道的支付方式不一致', 40231, [
                 'poll_group_id' => $pollGroupId,
@@ -182,3 +254,6 @@ class PaymentPollGroupChannelService extends BaseService
         }
     }
 }
+
+
+

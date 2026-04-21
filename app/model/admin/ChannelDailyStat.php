@@ -10,8 +10,18 @@ use app\common\base\BaseModel;
  */
 class ChannelDailyStat extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_channel_daily_stat';
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'merchant_id',
         'merchant_group_id',
@@ -27,6 +37,11 @@ class ChannelDailyStat extends BaseModel
         'health_score',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_id' => 'integer',
         'merchant_group_id' => 'integer',
@@ -44,5 +59,7 @@ class ChannelDailyStat extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
+
+
 
 

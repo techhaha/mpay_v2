@@ -10,10 +10,25 @@ use app\common\base\BaseModel;
  */
 class MerchantAccountLedger extends BaseModel
 {
+    /**
+     * 数据表名
+     *
+     * @var mixed
+     */
     protected $table = 'ma_merchant_account_ledger';
 
+    /**
+     * 是否自动维护时间戳
+     *
+     * @var mixed
+     */
     public $timestamps = false;
 
+    /**
+     * 可批量赋值字段
+     *
+     * @var mixed
+     */
     protected $fillable = [
         'ledger_no',
         'merchant_id',
@@ -32,6 +47,11 @@ class MerchantAccountLedger extends BaseModel
         'ext_json',
     ];
 
+    /**
+     * 字段类型转换配置
+     *
+     * @var mixed
+     */
     protected $casts = [
         'merchant_id' => 'integer',
         'biz_type' => 'integer',
@@ -46,5 +66,7 @@ class MerchantAccountLedger extends BaseModel
         'created_at' => 'datetime',
     ];
 }
+
+
 
 
