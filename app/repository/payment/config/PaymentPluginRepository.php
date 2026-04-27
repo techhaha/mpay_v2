@@ -49,8 +49,38 @@ class PaymentPluginRepository extends BaseRepository
             ->orderBy('code', 'asc')
             ->get($columns);
     }
-}
 
+    /**
+     * 获取商户端允许使用的支付插件。
+     *
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PaymentPlugin> 插件列表
+     */
+    public function merchantEnabledList(array $columns = ['*'])
+    {
+        return $this->model->newQuery()
+            ->where('status', 1)
+            ->where('allow_merchant', 1)
+            ->orderBy('code', 'asc')
+            ->get($columns);
+    }
+
+    /**
+     * 查询商户端允许使用的支付插件。
+     *
+     * @param string $code 插件编码
+     * @param array $columns 字段列表
+     * @return PaymentPlugin|null 插件记录
+     */
+    public function findMerchantAllowed(string $code, array $columns = ['*']): ?PaymentPlugin
+    {
+        return $this->model->newQuery()
+            ->whereKey($code)
+            ->where('status', 1)
+            ->where('allow_merchant', 1)
+            ->first($columns);
+    }
+}
 
 
 

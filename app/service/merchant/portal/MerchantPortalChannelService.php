@@ -8,6 +8,7 @@ use app\common\base\BaseService;
  * 商户门户通道服务。
  *
  * @property MerchantPortalChannelQueryService $queryService 查询服务
+ * @property MerchantPortalChannelCommandService $commandService 命令服务
  * @property MerchantPortalRoutePreviewService $routePreviewService 路由解析服务
  */
 class MerchantPortalChannelService extends BaseService
@@ -16,10 +17,12 @@ class MerchantPortalChannelService extends BaseService
      * 构造方法。
      *
      * @param MerchantPortalChannelQueryService $queryService 查询服务
+     * @param MerchantPortalChannelCommandService $commandService 命令服务
      * @param MerchantPortalRoutePreviewService $routePreviewService 路由解析服务
      */
     public function __construct(
         protected MerchantPortalChannelQueryService $queryService,
+        protected MerchantPortalChannelCommandService $commandService,
         protected MerchantPortalRoutePreviewService $routePreviewService
     ) {
     }
@@ -51,5 +54,54 @@ class MerchantPortalChannelService extends BaseService
     {
         return $this->routePreviewService->routePreview($merchantId, $payTypeId, $payAmount, $statDate);
     }
-}
 
+    public function createMeta(): array
+    {
+        return $this->commandService->createMeta();
+    }
+
+    public function pluginConfigs(array $filters, int $merchantId, int $page, int $pageSize): array
+    {
+        return $this->commandService->pluginConfigs($filters, $merchantId, $page, $pageSize);
+    }
+
+    public function createPluginConfig(int $merchantId, array $data)
+    {
+        return $this->commandService->createPluginConfig($merchantId, $data);
+    }
+
+    public function updatePluginConfig(int $merchantId, int $id, array $data)
+    {
+        return $this->commandService->updatePluginConfig($merchantId, $id, $data);
+    }
+
+    public function deletePluginConfig(int $merchantId, int $id): bool
+    {
+        return $this->commandService->deletePluginConfig($merchantId, $id);
+    }
+
+    public function pluginConfigOptions(int $merchantId, string $pluginCode = ''): array
+    {
+        return $this->commandService->pluginConfigOptions($merchantId, $pluginCode);
+    }
+
+    public function createChannel(int $merchantId, array $data)
+    {
+        return $this->commandService->createChannel($merchantId, $data);
+    }
+
+    public function updateChannel(int $merchantId, int $id, array $data)
+    {
+        return $this->commandService->updateChannel($merchantId, $id, $data);
+    }
+
+    public function deleteChannel(int $merchantId, int $id): bool
+    {
+        return $this->commandService->deleteChannel($merchantId, $id);
+    }
+
+    public function pluginSchema(string $pluginCode): array
+    {
+        return $this->commandService->pluginSchema($pluginCode);
+    }
+}

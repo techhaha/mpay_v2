@@ -8,6 +8,7 @@ use app\http\admin\controller\account\MerchantAccountController;
 use app\http\admin\controller\account\MerchantAccountLedgerController;
 use app\http\admin\controller\ops\ChannelDailyStatController;
 use app\http\admin\controller\ops\ChannelNotifyLogController;
+use app\http\admin\controller\ops\MerchantNotifyTaskController;
 use app\http\admin\controller\merchant\MerchantController;
 use app\http\admin\controller\merchant\MerchantApiCredentialController;
 use app\http\admin\controller\merchant\MerchantGroupController;
@@ -39,6 +40,7 @@ Route::group('/adminapi', function () {
     Route::group('', function () {
         Route::post('/logout', [AuthController::class, 'logout'])->name('adminApiAuthLogout')->setParams(['real_name' => '退出登录']);
         Route::get('/user/profile', [AuthController::class, 'profile'])->name('adminApiUserProfile')->setParams(['real_name' => '当前用户资料']);
+        Route::post('/user/change-password', [AuthController::class, 'changePassword'])->name('adminApiUserChangePassword')->setParams(['real_name' => '修改当前管理员密码']);
 
         Route::get('/merchants', [MerchantController::class, 'index'])->name('adminApiMerchantsIndex')->setParams(['real_name' => '商户列表']);
         Route::get('/merchants/options', [MerchantController::class, 'options'])->name('adminApiMerchantsOptions')->setParams(['real_name' => '商户选项']);
@@ -144,6 +146,7 @@ Route::group('/adminapi', function () {
         Route::delete('/file-asset/{id}', [FileRecordController::class, 'destroy'])->name('adminApiFileRecordDestroy')->setParams(['real_name' => '删除文件']);
 
         Route::get('/pay-orders', [PayOrderController::class, 'index'])->name('adminApiPayOrdersIndex')->setParams(['real_name' => '支付订单列表']);
+        Route::get('/pay-orders/{payNo}', [PayOrderController::class, 'show'])->name('adminApiPayOrdersShow')->setParams(['real_name' => '支付订单详情']);
         Route::get('/refund-orders', [RefundOrderController::class, 'index'])->name('adminApiRefundOrdersIndex')->setParams(['real_name' => '退款订单列表']);
         Route::get('/refund-orders/{refundNo}', [RefundOrderController::class, 'show'])->name('adminApiRefundOrdersShow')->setParams(['real_name' => '退款订单详情']);
         Route::post('/refund-orders/{refundNo}/retry', [RefundOrderController::class, 'retry'])->name('adminApiRefundOrdersRetry')->setParams(['real_name' => '退款重试']);
@@ -156,6 +159,10 @@ Route::group('/adminapi', function () {
 
         Route::get('/pay-callback-logs', [PayCallbackLogController::class, 'index'])->name('adminApiPayCallbackLogsIndex')->setParams(['real_name' => '支付回调日志列表']);
         Route::get('/pay-callback-logs/{id}', [PayCallbackLogController::class, 'show'])->name('adminApiPayCallbackLogsShow')->setParams(['real_name' => '支付回调日志详情']);
+
+        Route::get('/merchant-notify-tasks', [MerchantNotifyTaskController::class, 'index'])->name('adminApiMerchantNotifyTasksIndex')->setParams(['real_name' => '商户通知任务列表']);
+        Route::get('/merchant-notify-tasks/{notifyNo}', [MerchantNotifyTaskController::class, 'show'])->name('adminApiMerchantNotifyTasksShow')->setParams(['real_name' => '商户通知任务详情']);
+        Route::post('/merchant-notify-tasks/{notifyNo}/retry', [MerchantNotifyTaskController::class, 'retry'])->name('adminApiMerchantNotifyTasksRetry')->setParams(['real_name' => '商户通知任务重试']);
 
         Route::get('/merchant-accounts', [MerchantAccountController::class, 'index'])->name('adminApiMerchantAccountsIndex')->setParams(['real_name' => '资金账户列表']);
         Route::get('/merchant-accounts/summary', [MerchantAccountController::class, 'summary'])->name('adminApiMerchantAccountsSummary')->setParams(['real_name' => '资金账户总览']);

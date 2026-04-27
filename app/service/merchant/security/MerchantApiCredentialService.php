@@ -5,6 +5,7 @@ namespace app\service\merchant\security;
 use app\common\base\BaseService;
 use app\common\constant\AuthConstant;
 use app\common\constant\CommonConstant;
+use app\common\util\RsaKeyPairGenerator;
 use app\exception\ResourceNotFoundException;
 use app\exception\ValidationException;
 use app\model\merchant\Merchant;
@@ -13,9 +14,9 @@ use app\repository\merchant\credential\MerchantApiCredentialRepository;
 use app\repository\merchant\base\MerchantRepository;
 
 /**
- * 商户对外接口凭证与签名校验服务。
+ * 商户对外接口凭证服务。
  *
- * 负责商户外部接口签名校验、接口凭证发放和最近使用时间更新。
+ * 负责接口凭证发放、查询和最近使用时间更新。
  *
  * @property MerchantRepository $merchantRepository 商户仓库
  * @property MerchantApiCredentialRepository $merchantApiCredentialRepository 商户 API 凭证仓库
@@ -51,82 +52,7 @@ class MerchantApiCredentialService extends BaseService
     }
 
     /**
-     * 校验外部支付接口的 MD5 签名。
-     *
-     * 会先校验商户和接口凭证是否存在，再按签名规则计算并比对请求签名。
-     *
-     * @param array $payload 请求载荷
-     * @return array{merchant: Merchant, credential: MerchantApiCredential} 校验通过后的商户和凭证数据
-     * @throws ValidationException
-     * @throws ResourceNotFoundException
-     */
-    public function verifyMd5Sign(array $payload): array
-    {
-        $merchantId = (int) ($payload['pid'] ?? $payload['merchant_id'] ?? 0);
-        $sign = trim((string) ($payload['sign'] ?? ''));
-        $signType = strtoupper((string) ($payload['sign_type'] ?? 'MD5'));
-        $providedKey = trim((string) ($payload['key'] ?? ''));
-
-        if ($merchantId <= 0 || $sign === '') {
-            throw new ValidationException('pid/sign 参数缺失');
-        }
-
-        if ($signType !== 'MD5') {
-            throw new ValidationException('仅支持 MD5 签名');
-        }
-
-        /** @var Merchant|null $merchant */
-        $merchant = $this->merchantRepository->find($merchantId);
-        if (!$merchant || (int) $merchant->status !== CommonConstant::STATUS_ENABLED) {
-            throw new ResourceNotFoundException('商户不存在', ['merchant_id' => $merchantId]);
-        }
-
-        /** @var MerchantApiCredential|null $credential */
-        $credential = $this->merchantApiCredentialRepository->findByMerchantId($merchantId);
-        if (!$credential || (int) $credential->status !== AuthConstant::LOGIN_STATUS_ENABLED) {
-            throw new ValidationException('商户 API 凭证未开通');
-        }
-
-        if ($providedKey !== '' && !hash_equals((string) $credential->api_key, $providedKey)) {
-            throw new ValidationException('商户 API 凭证错误');
-        }
-
-        // 签名字段本身不参与原文拼接，只保留业务参数。
-        $params = $payload;
-        unset($params['sign'], $params['sign_type'], $params['key']);
-        // 过滤空值并按键名排序，保证不同参数顺序下得到同一签名串。
-        foreach ($params as $paramKey => $paramValue) {
-            if ($paramValue === '' || $paramValue === null) {
-                unset($params[$paramKey]);
-            }
-        }
-        ksort($params);
-
-        $key = (string) $credential->api_key;
-        $query = [];
-        // 旧版 ePay 采用 `a=1&b=2` 再拼接 key 的方式验签，这里保持兼容。
-        foreach ($params as $paramKey => $paramValue) {
-            $query[] = $paramKey . '=' . $paramValue;
-        }
-        $base = implode('&', $query) . $key;
-        $expected = md5($base);
-
-        // 使用常量时间比较，避免签名对比被时序差异放大。
-        if (!hash_equals(strtolower($expected), strtolower($sign))) {
-            throw new ValidationException('签名验证失败');
-        }
-
-        $credential->last_used_at = $this->now();
-        $credential->save();
-
-        return [
-            'merchant' => $merchant,
-            'credential' => $credential,
-        ];
-    }
-
-    /**
-     * 为商户生成并保存一份新的接口凭证。
+     * 为商户生成并保存一份新的 V1 接口凭证。
      *
      * 返回值是明文接口凭证值，只会在调用时完整出现一次，后续仅保存脱敏展示。
      *
@@ -136,23 +62,76 @@ class MerchantApiCredentialService extends BaseService
      */
     public function issueCredential(int $merchantId): string
     {
+        $result = $this->issueCredentialBundle($merchantId, [
+            'rotate_v1' => true,
+            'rotate_v2' => false,
+        ]);
+
+        return (string) ($result['credential_value'] ?? '');
+    }
+
+    /**
+     * 为商户生成一组接口凭证。
+     *
+     * 该方法可同时重置 V1 API Key 和 V2 RSA 密钥对，适合管理后台的自动生成场景。
+     * 生成后的私钥只在返回结果里出现一次，不会落库。
+     *
+     * @param int $merchantId 商户ID
+     * @param array<string, mixed> $options 生成选项
+     * @return array<string, mixed> 凭证数据和生成结果
+     * @throws ResourceNotFoundException
+     * @throws ValidationException
+     */
+    public function issueCredentialBundle(int $merchantId, array $options = []): array
+    {
         $merchant = $this->merchantRepository->find($merchantId);
         if (!$merchant) {
             throw new ResourceNotFoundException('商户不存在', ['merchant_id' => $merchantId]);
         }
 
-        $credentialValue = $this->generateCredentialValue();
-        $this->merchantApiCredentialRepository->updateOrCreate(
+        $current = $this->merchantApiCredentialRepository->findByMerchantId($merchantId);
+        $rotateV1 = array_key_exists('rotate_v1', $options) ? (bool) $options['rotate_v1'] : true;
+        $rotateV2 = array_key_exists('rotate_v2', $options) ? (bool) $options['rotate_v2'] : true;
+        if (!$rotateV1 && !$rotateV2) {
+            throw new ValidationException('请至少选择一种要生成的凭证类型');
+        }
+
+        $signType = (int) ($options['sign_type'] ?? ($current?->sign_type ?? AuthConstant::API_SIGN_TYPE_MD5));
+        $status = (int) ($options['status'] ?? ($current?->status ?? AuthConstant::CREDENTIAL_STATUS_ENABLED));
+        $credentialValue = $rotateV1 ? $this->generateCredentialValue() : trim((string) ($current?->api_key ?? ''));
+        $merchantPrivateKey = '';
+        $merchantPublicKey = trim((string) ($current?->merchant_public_key ?? ''));
+
+        if ($rotateV2) {
+            $pair = RsaKeyPairGenerator::generate();
+            $merchantPrivateKey = $pair['private_key'];
+            $merchantPublicKey = $pair['public_key'];
+        }
+
+        $credential = $this->merchantApiCredentialRepository->updateOrCreate(
             ['merchant_id' => $merchantId],
             [
                 'merchant_id' => $merchantId,
-                'sign_type' => AuthConstant::API_SIGN_TYPE_MD5,
+                'sign_type' => $signType,
+                'status' => $status,
                 'api_key' => $credentialValue,
-                'status' => AuthConstant::LOGIN_STATUS_ENABLED,
+                'merchant_public_key' => $merchantPublicKey,
             ]
         );
 
-        return $credentialValue;
+        return [
+            'merchant' => $merchant,
+            'credential' => $credential,
+            'credential_value' => $credentialValue,
+            'merchant_private_key' => $merchantPrivateKey,
+            'generated' => [
+                'rotate_v1' => $rotateV1,
+                'rotate_v2' => $rotateV2,
+                'api_key' => $rotateV1 ? $credentialValue : '',
+                'merchant_private_key' => $merchantPrivateKey,
+                'merchant_public_key' => $merchantPublicKey,
+            ],
+        ];
     }
 
     /**
@@ -201,6 +180,12 @@ class MerchantApiCredentialService extends BaseService
             if ($updated) {
                 return $updated;
             }
+        }
+
+        $apiKey = trim((string) ($data['api_key'] ?? ''));
+        $merchantPublicKey = trim((string) ($data['merchant_public_key'] ?? ''));
+        if ($apiKey === '' && $merchantPublicKey === '') {
+            throw new ValidationException('请至少填写 V1 API Key 或 V2 商户 RSA 公钥');
         }
 
         return $this->merchantApiCredentialRepository->create($this->normalizePayload($data, false));
@@ -264,7 +249,7 @@ class MerchantApiCredentialService extends BaseService
 
         /** @var MerchantApiCredential|null $credential */
         $credential = $this->merchantApiCredentialRepository->findByMerchantId($merchantId);
-        if (!$credential || (int) $credential->status !== AuthConstant::LOGIN_STATUS_ENABLED) {
+        if (!$credential || (int) $credential->status !== AuthConstant::CREDENTIAL_STATUS_ENABLED) {
             throw new ValidationException('商户 API 凭证未开通');
         }
 
@@ -288,24 +273,33 @@ class MerchantApiCredentialService extends BaseService
      * @param array $data 凭证数据
      * @param bool $isUpdate 是否更新
      * @param MerchantApiCredential|null $current 当前凭证
+     * 更新场景下，空字符串视为“不修改”，避免手动配置时误清空已有密钥。
+     * `sign_type` 在当前阶段只作为展示/默认接入说明，不再作为 V1/V2 互斥开关。
+     *
      * @return array{merchant_id: int, sign_type: int, status: int, api_key?: string} 标准化后的写入数据
      */
     private function normalizePayload(array $data, bool $isUpdate, ?MerchantApiCredential $current = null): array
     {
         // 更新场景下以现有记录的 merchant_id 为准，避免把凭证误挂到别的商户。
         $merchantId = (int) ($current?->merchant_id ?? ($data['merchant_id'] ?? 0));
+        $currentSignType = (int) ($current?->sign_type ?? AuthConstant::API_SIGN_TYPE_MD5);
+        $currentStatus = (int) ($current?->status ?? AuthConstant::CREDENTIAL_STATUS_ENABLED);
         $payload = [
             'merchant_id' => $merchantId,
-            'sign_type' => (int) ($data['sign_type'] ?? AuthConstant::API_SIGN_TYPE_MD5),
-            'status' => (int) ($data['status'] ?? AuthConstant::LOGIN_STATUS_ENABLED),
+            'sign_type' => (int) ($data['sign_type'] ?? $currentSignType),
+            'status' => (int) ($data['status'] ?? $currentStatus),
         ];
 
         $apiKey = trim((string) ($data['api_key'] ?? ''));
         if ($apiKey !== '') {
             $payload['api_key'] = $apiKey;
-        } elseif (!$isUpdate) {
-            // 新增凭证时如果前端没有传入明文 key，就自动补一份随机值。
-            $payload['api_key'] = $this->generateCredentialValue();
+        }
+
+        if (array_key_exists('merchant_public_key', $data)) {
+            $merchantPublicKey = trim((string) ($data['merchant_public_key'] ?? ''));
+            if ($merchantPublicKey !== '' || !$isUpdate) {
+                $payload['merchant_public_key'] = $merchantPublicKey;
+            }
         }
 
         return $payload;

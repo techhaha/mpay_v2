@@ -55,6 +55,7 @@ class ChannelNotifyLog extends BaseModel
     protected $casts = [
         'channel_id' => 'integer',
         'notify_type' => 'integer',
+        'raw_payload' => 'array',
         'verify_status' => 'integer',
         'process_status' => 'integer',
         'retry_count' => 'integer',
@@ -63,6 +64,5 @@ class ChannelNotifyLog extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
-
 
 

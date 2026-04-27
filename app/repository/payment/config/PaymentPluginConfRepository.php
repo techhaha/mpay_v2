@@ -32,12 +32,28 @@ class PaymentPluginConfRepository extends BaseRepository
     public function findByPluginCode(string $pluginCode, array $columns = ['*'])
     {
         return $this->model->newQuery()
+            ->where('merchant_id', 0)
             ->where('plugin_code', $pluginCode)
             ->orderByDesc('id')
             ->first($columns);
     }
-}
 
+    /**
+     * 查询当前商户可访问的插件配置。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $id 配置ID
+     * @param array $columns 字段列表
+     * @return PaymentPluginConf|null 插件配置记录
+     */
+    public function findByMerchantAndId(int $merchantId, int $id, array $columns = ['*'])
+    {
+        return $this->model->newQuery()
+            ->where('merchant_id', $merchantId)
+            ->whereKey($id)
+            ->first($columns);
+    }
+}
 
 
 

@@ -19,6 +19,8 @@ class AuthValidator extends Validator
     protected array $rules = [
         'username' => 'required|string|min:1|max:32',
         'password' => 'required|string|min:6|max:100',
+        'current_password' => 'required|string|min:6|max:100',
+        'password_confirm' => 'required|string|min:6|max:100|same:password',
     ];
 
     /**
@@ -29,6 +31,8 @@ class AuthValidator extends Validator
     protected array $attributes = [
         'username' => '用户名',
         'password' => '密码',
+        'current_password' => '旧密码',
+        'password_confirm' => '确认密码',
     ];
 
     /**
@@ -38,6 +42,7 @@ class AuthValidator extends Validator
      */
     protected array $scenes = [
         'login' => ['username', 'password'],
+        'changePassword' => ['current_password', 'password', 'password_confirm'],
     ];
 }
 

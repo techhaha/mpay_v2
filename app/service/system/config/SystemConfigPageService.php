@@ -3,6 +3,7 @@
 namespace app\service\system\config;
 
 use app\common\base\BaseService;
+use app\common\constant\EventConstant;
 use app\exception\ValidationException;
 use app\repository\system\config\SystemConfigRepository;
 use Webman\Event\Event;
@@ -147,7 +148,7 @@ class SystemConfigPageService extends BaseService
             }
         });
 
-        Event::emit('system.config.changed', [
+        Event::dispatch(EventConstant::SYSTEM_CONFIG_CHANGED, [
             'group_code' => (string) $tab['key'],
         ]);
 
@@ -213,5 +214,3 @@ class SystemConfigPageService extends BaseService
         return (string) $value;
     }
 }
-
-

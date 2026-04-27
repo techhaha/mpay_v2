@@ -29,6 +29,26 @@ class MerchantPortalValidator extends Validator
         'pay_type_id' => 'required|integer|min:1',
         'pay_amount' => 'required|integer|min:1',
         'stat_date' => 'sometimes|date',
+        'id' => 'sometimes|integer|min:1',
+        'keyword' => 'sometimes|string|max:128',
+        'plugin_code' => 'sometimes|string|alpha_dash|min:2|max:32',
+        'config' => 'nullable|array',
+        'settlement_cycle_type' => 'sometimes|integer|in:0,1,2,3,4',
+        'settlement_cutoff_time' => 'nullable|date_format:H:i:s',
+        'name' => 'sometimes|string|min:2|max:128',
+        'api_config_id' => 'sometimes|integer|min:1',
+        'daily_limit_amount' => 'nullable|integer|min:0',
+        'daily_limit_count' => 'nullable|integer|min:0',
+        'min_amount' => 'nullable|integer|min:0',
+        'max_amount' => 'nullable|integer|min:0',
+        'remark' => 'nullable|string|max:500',
+        'status' => 'sometimes|integer|in:0,1',
+        'rotate_v1' => 'sometimes|integer|in:0,1',
+        'rotate_v2' => 'sometimes|integer|in:0,1',
+        'sign_type' => 'sometimes|integer|in:0,1',
+        'sort_no' => 'nullable|integer|min:0',
+        'page' => 'sometimes|integer|min:1',
+        'page_size' => 'sometimes|integer|min:1|max:100',
     ];
 
     /**
@@ -51,6 +71,26 @@ class MerchantPortalValidator extends Validator
         'pay_type_id' => '支付方式',
         'pay_amount' => '支付金额',
         'stat_date' => '统计日期',
+        'id' => '记录ID',
+        'keyword' => '关键字',
+        'plugin_code' => '支付插件',
+        'config' => '插件配置',
+        'settlement_cycle_type' => '结算周期',
+        'settlement_cutoff_time' => '结算截止时间',
+        'name' => '通道名称',
+        'api_config_id' => '插件配置',
+        'daily_limit_amount' => '单日限额',
+        'daily_limit_count' => '单日限笔',
+        'min_amount' => '单笔最小金额',
+        'max_amount' => '单笔最大金额',
+        'remark' => '备注',
+        'status' => '状态',
+        'rotate_v1' => 'V1 凭证',
+        'rotate_v2' => 'V2 凭证',
+        'sign_type' => '签名类型',
+        'sort_no' => '排序',
+        'page' => '页码',
+        'page_size' => '每页条数',
     ];
 
     /**
@@ -71,7 +111,47 @@ class MerchantPortalValidator extends Validator
         ],
         'passwordUpdate' => ['current_password', 'password', 'password_confirm'],
         'routePreview' => ['pay_type_id', 'pay_amount', 'stat_date'],
+        'pluginConfigIndex' => ['keyword', 'plugin_code', 'page', 'page_size'],
+        'pluginConfigStore' => ['plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
+        'pluginConfigUpdate' => ['id', 'plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
+        'pluginConfigDestroy' => ['id'],
+        'channelStore' => ['name', 'pay_type_id', 'plugin_code', 'api_config_id', 'daily_limit_amount', 'daily_limit_count', 'min_amount', 'max_amount', 'remark', 'status', 'sort_no'],
+        'channelUpdate' => ['id', 'name', 'pay_type_id', 'plugin_code', 'api_config_id', 'daily_limit_amount', 'daily_limit_count', 'min_amount', 'max_amount', 'remark', 'status', 'sort_no'],
+        'channelDestroy' => ['id'],
+        'issueCredential' => ['rotate_v1', 'rotate_v2', 'sign_type', 'status'],
     ];
+
+    public function rules(): array
+    {
+        $rules = parent::rules();
+
+        return match ($this->scene()) {
+            'pluginConfigStore' => array_merge($rules, [
+                'plugin_code' => 'required|string|alpha_dash|min:2|max:32',
+            ]),
+            'pluginConfigUpdate' => array_merge($rules, [
+                'id' => 'required|integer|min:1',
+                'plugin_code' => 'required|string|alpha_dash|min:2|max:32',
+            ]),
+            'pluginConfigDestroy', 'channelDestroy' => array_merge($rules, [
+                'id' => 'required|integer|min:1',
+            ]),
+            'channelStore' => array_merge($rules, [
+                'name' => 'required|string|min:2|max:128',
+                'pay_type_id' => 'required|integer|min:1',
+                'plugin_code' => 'required|string|alpha_dash|min:2|max:32',
+                'api_config_id' => 'required|integer|min:1',
+                'status' => 'required|integer|in:0,1',
+            ]),
+            'channelUpdate' => array_merge($rules, [
+                'id' => 'required|integer|min:1',
+                'name' => 'required|string|min:2|max:128',
+                'pay_type_id' => 'required|integer|min:1',
+                'plugin_code' => 'required|string|alpha_dash|min:2|max:32',
+                'api_config_id' => 'required|integer|min:1',
+                'status' => 'required|integer|in:0,1',
+            ]),
+            default => $rules,
+        };
+    }
 }
-
-

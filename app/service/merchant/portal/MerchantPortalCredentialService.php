@@ -39,11 +39,11 @@ class MerchantPortalCredentialService extends BaseService
      * 生成或重置商户 API 凭证。
      *
      * @param int $merchantId 商户ID
+     * @param array $options 生成选项
      * @return array 凭证数据
      */
-    public function issueCredential(int $merchantId): array
+    public function issueCredential(int $merchantId, array $options = []): array
     {
-        return $this->commandService->issueCredential($merchantId);
+        return $this->commandService->issueCredential($merchantId, $options);
     }
 }
-

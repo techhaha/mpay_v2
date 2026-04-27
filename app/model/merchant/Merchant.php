@@ -37,6 +37,9 @@ class Merchant extends BaseModel
         'settlement_account_no',
         'settlement_bank_name',
         'settlement_bank_branch',
+        'pay_status',
+        'settle_status',
+        'settle_type',
         'status',
         'last_login_at',
         'last_login_ip',
@@ -62,6 +65,9 @@ class Merchant extends BaseModel
         'merchant_type' => 'integer',
         'group_id' => 'integer',
         'risk_level' => 'integer',
+        'pay_status' => 'integer',
+        'settle_status' => 'integer',
+        'settle_type' => 'integer',
         'status' => 'integer',
         'last_login_at' => 'datetime',
         'password_updated_at' => 'datetime',
@@ -69,5 +75,4 @@ class Merchant extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
-
 

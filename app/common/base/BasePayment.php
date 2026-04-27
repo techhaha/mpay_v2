@@ -18,7 +18,7 @@ use support\Log;
  *
  * 生命周期：
  * - 服务层会在每次动作前调用 `init($channelConfig)` 注入该通道配置。
- * - 子类可在 `init()` 中配置第三方 SDK（例如 yansongda/pay）或读取必填参数。
+ * - 子类可在 `init()` 中配置第三方 SDK 或读取必填参数。
  *
  * 约定：
  * - 这里的 `$channelConfig` 来源通常是 `ma_payment_plugin_conf.config`，并附带通道维度上下文。
@@ -191,7 +191,11 @@ abstract class BasePayment implements PayPluginInterface
             return $this->httpClient->request($method, $url, $options);
         } catch (GuzzleException $e) {
             Log::error(sprintf('[BasePayment] HTTP 请求失败: %s %s, error=%s', $method, $url, $e->getMessage()));
-            throw new PaymentException('渠道请求失败：' . $e->getMessage(), 402, ['method' => $method, 'url' => $url]);
+            throw new PaymentException('渠道请求失败', 402, [
+                'method' => $method,
+                'url' => $url,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 }

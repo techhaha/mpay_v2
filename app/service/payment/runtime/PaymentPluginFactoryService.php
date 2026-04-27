@@ -3,6 +3,7 @@
 namespace app\service\payment\runtime;
 
 use app\common\base\BaseService;
+use app\common\constant\CommonConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\exception\PaymentException;
@@ -243,7 +244,7 @@ class PaymentPluginFactoryService extends BaseService
             throw new PaymentException('支付插件不存在', 40401, ['plugin_code' => $pluginCode]);
         }
 
-        if (!$allowDisabled && (int) $plugin->status !== 1) {
+        if (!$allowDisabled && (int) $plugin->status !== CommonConstant::STATUS_ENABLED) {
             throw new PaymentException('支付插件已禁用', 40214, ['plugin_code' => $pluginCode]);
         }
 

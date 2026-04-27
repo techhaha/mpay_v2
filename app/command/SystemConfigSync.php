@@ -5,7 +5,6 @@ namespace app\command;
 use app\repository\system\config\SystemConfigRepository;
 use app\service\system\config\SystemConfigDefinitionService;
 use app\service\system\config\SystemConfigRuntimeService;
-use RuntimeException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -57,7 +56,7 @@ class SystemConfigSync extends Command
                     }
 
                     $configKey = strtolower(trim((string) ($rule['field'] ?? '')));
-                    if ($configKey === '') {
+                    if ($configKey === '' || str_starts_with($configKey, '__')) {
                         continue;
                     }
 
@@ -85,6 +84,4 @@ class SystemConfigSync extends Command
         }
     }
 }
-
-
 

@@ -71,6 +71,17 @@ class PayOrderService extends BaseService
     }
 
     /**
+     * 预创建收银台业务单。
+     *
+     * @param array $input 收银台数据
+     * @return array 发起结果
+     */
+    public function prepareCashierBizOrder(array $input): array
+    {
+        return $this->attemptService->prepareCashierBizOrder($input);
+    }
+
+    /**
      * 标记支付成功。
      *
      * @param string $payNo 支付单号
@@ -189,6 +200,5 @@ class PayOrderService extends BaseService
         return $this->callbackService->handlePluginCallback($payNo, $request);
     }
 }
-
 
 

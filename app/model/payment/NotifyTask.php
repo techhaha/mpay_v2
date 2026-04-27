@@ -24,6 +24,8 @@ class NotifyTask extends BaseModel
      */
     protected $fillable = [
         'notify_no',
+        'event_type',
+        'ref_no',
         'merchant_id',
         'merchant_group_id',
         'biz_no',
@@ -53,8 +55,11 @@ class NotifyTask extends BaseModel
      * @var mixed
      */
     protected $casts = [
+        'event_type' => 'string',
+        'ref_no' => 'string',
         'merchant_id' => 'integer',
         'merchant_group_id' => 'integer',
+        'notify_data' => 'array',
         'status' => 'integer',
         'retry_count' => 'integer',
         'next_retry_at' => 'datetime',
@@ -63,7 +68,5 @@ class NotifyTask extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
-
-
 
 

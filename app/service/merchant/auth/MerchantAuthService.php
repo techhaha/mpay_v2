@@ -3,6 +3,7 @@
 namespace app\service\merchant\auth;
 
 use app\common\base\BaseService;
+use app\common\constant\AuthConstant;
 use app\common\constant\CommonConstant;
 use app\common\util\JwtTokenManager;
 use app\exception\ValidationException;
@@ -50,7 +51,7 @@ class MerchantAuthService extends BaseService
         $merchant = $this->merchantPortalSupportService->merchantSummary($merchantId);
         $credential = $merchantId > 0 ? $this->merchantApiCredentialRepository->findByMerchantId($merchantId) : null;
 
-        $isCredentialEnabled = (int) ($credential->status ?? 0) === 1;
+        $isCredentialEnabled = (int) ($credential->status ?? 0) === AuthConstant::CREDENTIAL_STATUS_ENABLED;
         $user = [
             'id' => $merchantId,
             'deptId' => (string) ($merchant['merchant_group_id'] ?? 0),
@@ -104,7 +105,7 @@ class MerchantAuthService extends BaseService
      */
     public function authenticateToken(string $token, string $ip = '', string $userAgent = ''): ?array
     {
-        $result = $this->jwtTokenManager->verify('merchant', $token, $ip, $userAgent);
+        $result = $this->jwtTokenManager->verify(AuthConstant::GUARD_MERCHANT, $token, $ip, $userAgent);
         if ($result === null) {
             return null;
         }
@@ -172,7 +173,7 @@ class MerchantAuthService extends BaseService
      */
     public function revokeToken(string $token): bool
     {
-        return $this->jwtTokenManager->revoke('merchant', $token);
+        return $this->jwtTokenManager->revoke(AuthConstant::GUARD_MERCHANT, $token);
     }
 
     /**
@@ -195,7 +196,7 @@ class MerchantAuthService extends BaseService
 
         $credential = $this->merchantApiCredentialRepository->findByMerchantId($merchantId);
 
-        $issued = $this->jwtTokenManager->issue('merchant', [
+        $issued = $this->jwtTokenManager->issue(AuthConstant::GUARD_MERCHANT, [
             'sub' => (string) $merchantId,
             'merchant_id' => (int) $merchant->id,
             'merchant_no' => (string) $merchant->merchant_no,

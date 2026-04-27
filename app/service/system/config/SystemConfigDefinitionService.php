@@ -3,7 +3,7 @@
 namespace app\service\system\config;
 
 use app\common\base\BaseService;
-use RuntimeException;
+use app\exception\ConflictException;
 
 /**
  * 系统配置定义解析服务。
@@ -32,7 +32,7 @@ class SystemConfigDefinitionService extends BaseService
      * 获取全部系统配置标签页。
      *
      * @return array 标签页列表
-     * @throws RuntimeException
+     * @throws ConflictException
      */
     public function tabs(): array
     {
@@ -57,7 +57,9 @@ class SystemConfigDefinitionService extends BaseService
 
             $key = $tab['key'];
             if (isset($seenKeys[$key])) {
-                throw new RuntimeException(sprintf('系统配置标签 key 重复：%s', $key));
+                throw new ConflictException(sprintf('系统配置标签 key 重复：%s', $key), [
+                    'key' => $key,
+                ]);
             }
 
             foreach ($tab['rules'] as $rule) {
@@ -67,7 +69,9 @@ class SystemConfigDefinitionService extends BaseService
                 }
 
                 if (isset($seenFields[$field])) {
-                    throw new RuntimeException(sprintf('系统配置项 key 重复：%s', $field));
+                    throw new ConflictException(sprintf('系统配置项 key 重复：%s', $field), [
+                        'field' => $field,
+                    ]);
                 }
 
                 $seenFields[$field] = true;
@@ -300,4 +304,3 @@ class SystemConfigDefinitionService extends BaseService
         return str_starts_with($field, self::VIRTUAL_FIELD_PREFIX);
     }
 }
-

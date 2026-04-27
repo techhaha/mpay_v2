@@ -2,6 +2,7 @@
 
 namespace app\http\mer\middleware;
 
+use app\exception\UnauthorizedException;
 use app\service\merchant\auth\MerchantAuthService;
 use support\Context;
 use Webman\Http\Request;
@@ -34,6 +35,7 @@ class MerchantAuthMiddleware implements MiddlewareInterface
      * @param Request $request 请求对象
      * @param callable $handler handler
      * @return Response 响应对象
+     * @throws UnauthorizedException
      */
     public function process(Request $request, callable $handler): Response
     {
@@ -42,11 +44,7 @@ class MerchantAuthMiddleware implements MiddlewareInterface
 
         if ($token === '') {
             if ((int) env('AUTH_MIDDLEWARE_STRICT', 1) === 1) {
-                return json([
-                    'code' => 401,
-                    'msg' => 'merchant unauthorized',
-                    'data' => null,
-                ]);
+                throw new UnauthorizedException('商户未授权');
             }
         } else {
             $result = $this->merchantAuthService->authenticateToken(
@@ -55,11 +53,7 @@ class MerchantAuthMiddleware implements MiddlewareInterface
                 $request->header('user-agent', '')
             );
             if (!$result) {
-                return json([
-                    'code' => 401,
-                    'msg' => 'merchant unauthorized',
-                    'data' => null,
-                ]);
+                throw new UnauthorizedException('商户未授权');
             }
 
             Context::set('auth.merchant_id', (int) $result['merchant']->id);

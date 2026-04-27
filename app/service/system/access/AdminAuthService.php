@@ -43,7 +43,7 @@ class AdminAuthService extends BaseService
      */
     public function authenticateToken(string $token, string $ip = '', string $userAgent = ''): ?AdminUser
     {
-        $result = $this->jwtTokenManager->verify('admin', $token, $ip, $userAgent);
+        $result = $this->jwtTokenManager->verify(AuthConstant::GUARD_ADMIN, $token, $ip, $userAgent);
         if ($result === null) {
             return null;
         }
@@ -98,7 +98,7 @@ class AdminAuthService extends BaseService
      */
     public function revokeToken(string $token): bool
     {
-        return $this->jwtTokenManager->revoke('admin', $token);
+        return $this->jwtTokenManager->revoke(AuthConstant::GUARD_ADMIN, $token);
     }
 
     /**
@@ -119,7 +119,7 @@ class AdminAuthService extends BaseService
             throw new ValidationException('管理员不存在');
         }
 
-        $issued = $this->jwtTokenManager->issue('admin', [
+        $issued = $this->jwtTokenManager->issue(AuthConstant::GUARD_ADMIN, [
             'sub' => (string) $adminId,
             'admin_id' => $adminId,
             'username' => (string) $admin->username,
@@ -140,7 +140,6 @@ class AdminAuthService extends BaseService
         ];
     }
 }
-
 
 
 

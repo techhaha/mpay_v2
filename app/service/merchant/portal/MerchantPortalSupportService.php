@@ -127,7 +127,31 @@ class MerchantPortalSupportService extends BaseService
      */
     public function enabledPayTypeOptions(): array
     {
-        return $this->paymentTypeService->enabledOptions();
+        return array_values(array_filter(
+            $this->paymentTypeService->enabledOptions(),
+            static function (array $option): bool {
+                $label = trim((string) ($option['label'] ?? ''));
+                $value = trim((string) ($option['value'] ?? ''));
+
+                return $label !== '' && $label !== $value;
+            }
+        ));
+    }
+
+    /**
+     * 商户开放接口对接信息。
+     *
+     * @param array $merchant 商户摘要
+     * @return array<string, mixed> 对接信息
+     */
+    public function apiIntegrationInfo(array $merchant): array
+    {
+        $baseUrl = rtrim((string) sys_config('site_url', ''), '/');
+
+        return [
+            'base_url' => $baseUrl,
+            'merchant_id' => (int) ($merchant['merchant_id'] ?? $merchant['id'] ?? 0),
+        ];
     }
 
     /**

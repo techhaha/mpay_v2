@@ -34,9 +34,11 @@ class PayCallbackLog extends BaseModel
         'channel_id',
         'callback_type',
         'request_data',
+        'request_hash',
         'verify_status',
         'process_status',
         'process_result',
+        'created_at',
     ];
 
     /**
@@ -57,11 +59,12 @@ class PayCallbackLog extends BaseModel
     protected $casts = [
         'channel_id' => 'integer',
         'callback_type' => 'integer',
+        'request_data' => 'array',
+        'request_hash' => 'string',
         'verify_status' => 'integer',
         'process_status' => 'integer',
+        'process_result' => 'array',
         'created_at' => 'datetime',
     ];
 }
-
-
 

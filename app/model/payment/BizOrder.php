@@ -6,7 +6,7 @@ use app\common\base\BaseModel;
 
 /**
  * 业务订单模型。
- * 表示商户业务侧原始订单，支付单和退款单都从这里展开。
+ * 表示商户业务侧原始订单，只保留业务事实与收银台恢复所需字段。
  */
 class BizOrder extends BaseModel
 {
@@ -26,11 +26,13 @@ class BizOrder extends BaseModel
         'biz_no',
         'trace_no',
         'merchant_id',
-        'merchant_group_id',
-        'poll_group_id',
         'merchant_order_no',
         'subject',
         'body',
+        'notify_url',
+        'return_url',
+        'client_ip',
+        'device',
         'order_amount',
         'paid_amount',
         'refund_amount',
@@ -52,8 +54,10 @@ class BizOrder extends BaseModel
      */
     protected $casts = [
         'merchant_id' => 'integer',
-        'merchant_group_id' => 'integer',
-        'poll_group_id' => 'integer',
+        'notify_url' => 'string',
+        'return_url' => 'string',
+        'client_ip' => 'string',
+        'device' => 'string',
         'order_amount' => 'integer',
         'paid_amount' => 'integer',
         'refund_amount' => 'integer',
@@ -69,7 +73,4 @@ class BizOrder extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
-
-
-
 

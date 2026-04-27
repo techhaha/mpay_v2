@@ -6,6 +6,7 @@ namespace app\common\payment;
 
 use app\common\base\BasePayment;
 use app\common\constant\FileConstant;
+use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\util\FormatHelper;
@@ -324,6 +325,11 @@ class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginIn
         $extra = isset($order['extra']) && is_array($order['extra']) ? $order['extra'] : [];
         if ($extra !== []) {
             $context = array_merge($context, $extra);
+            foreach (['merchant', 'payment', 'source'] as $section) {
+                if (isset($extra[$section]) && is_array($extra[$section])) {
+                    $context = array_merge($context, $extra[$section]);
+                }
+            }
         }
 
         $param = $this->normalizeParamBag($context['param'] ?? null);
@@ -459,7 +465,7 @@ class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginIn
         } catch (PaymentException $e) {
             throw $e;
         } catch (\Throwable $e) {
-            throw new PaymentException('支付宝下单失败：' . $e->getMessage(), 402, ['order_id' => $orderId]);
+            throw new PaymentException('支付宝下单失败', 402, ['order_id' => $orderId, 'error' => $e->getMessage()]);
         }
     }
 
@@ -477,7 +483,7 @@ class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginIn
             'pay_product' => self::PRODUCT_WEB,
             'pay_action' => $this->productAction(self::PRODUCT_WEB),
             'pay_params'    => [
-                'type' => 'form',
+                'type' => 'html',
                 'method' => 'POST',
                 'action' => '',
                 'html' => $body,
@@ -507,7 +513,7 @@ class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginIn
             'pay_product' => self::PRODUCT_H5,
             'pay_action' => $this->productAction(self::PRODUCT_H5),
             'pay_params'    => [
-                'type' => 'form',
+                'type' => 'html',
                 'method' => 'POST',
                 'action' => '',
                 'html' => $body,
@@ -733,8 +739,8 @@ class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginIn
             $tradeNo = (string) $this->extractCollectionValue($result, ['trade_no', 'order_id', 'out_biz_no'], '');
             $totalAmount = (string) $this->extractCollectionValue($result, ['total_amount', 'trans_amount', 'amount'], '0');
             $status = match ($action) {
-                'transfer' => in_array($tradeStatus, ['SUCCESS', 'PAY_SUCCESS', 'SUCCESSFUL'], true) ? 'success' : $tradeStatus,
-                default => in_array($tradeStatus, ['TRADE_SUCCESS', 'TRADE_FINISHED'], true) ? 'success' : $tradeStatus,
+                'transfer' => in_array($tradeStatus, ['SUCCESS', 'PAY_SUCCESS', 'SUCCESSFUL'], true) ? PaymentPluginStatusConstant::SUCCESS : $tradeStatus,
+                default => in_array($tradeStatus, ['TRADE_SUCCESS', 'TRADE_FINISHED'], true) ? PaymentPluginStatusConstant::SUCCESS : $tradeStatus,
             };
 
             return [
@@ -745,7 +751,7 @@ class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginIn
                 'pay_amount'    => (int) round(((float) $totalAmount) * 100),
             ];
         } catch (\Throwable $e) {
-            throw new PaymentException('支付宝查询失败：' . $e->getMessage(), 402);
+            throw new PaymentException('支付宝查询失败', 402, ['order_id' => $outTradeNo, 'error' => $e->getMessage()]);
         }
     }
 
@@ -774,7 +780,7 @@ class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginIn
             Pay::alipay()->close($closeParams);
             return ['success' => true, 'msg' => '关闭成功', 'pay_product' => $product, 'pay_action' => $action];
         } catch (\Throwable $e) {
-            throw new PaymentException('支付宝关单失败：' . $e->getMessage(), 402);
+            throw new PaymentException('支付宝关单失败', 402, ['order_id' => $outTradeNo, 'error' => $e->getMessage()]);
         }
     }
 
@@ -823,11 +829,11 @@ class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginIn
                     'msg' => '退款成功',
                 ];
             }
-            throw new PaymentException($subMsg ?: '退款失败', 402);
+            throw new PaymentException('退款失败', 402, ['order_id' => $outTradeNo, 'sub_msg' => $subMsg]);
         } catch (PaymentException $e) {
             throw $e;
         } catch (\Throwable $e) {
-            throw new PaymentException('支付宝退款失败：' . $e->getMessage(), 402);
+            throw new PaymentException('支付宝退款失败', 402, ['order_id' => $outTradeNo, 'error' => $e->getMessage()]);
         }
     }
 
@@ -852,22 +858,26 @@ class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginIn
             $paidAt      = (string) $result->get('gmt_payment', '');
 
             if (!in_array($tradeStatus, ['TRADE_SUCCESS', 'TRADE_FINISHED'], true)) {
-                throw new PaymentException('回调状态异常：' . $tradeStatus, 402);
+                throw new PaymentException('回调状态异常', 402, ['trade_status' => $tradeStatus]);
             }
 
             return [
-                'success'       => true,
-                'status'        => 'success',
-                'pay_order_id'  => $outTradeNo,
-                'chan_order_no' => $outTradeNo,
-                'chan_trade_no' => $tradeNo,
-                'amount'        => (int) round(((float) $totalAmount) * 100),
-                'paid_at'       => $paidAt !== '' ? (FormatHelper::timestamp((int) strtotime($paidAt)) ?: null) : null,
+                'status' => PaymentPluginStatusConstant::SUCCESS,
+                'message' => '支付成功',
+                'channel_order_no' => $outTradeNo,
+                'channel_trade_no' => $tradeNo,
+                'channel_status' => $tradeStatus,
+                'paid_at' => $paidAt !== '' ? (FormatHelper::timestamp((int) strtotime($paidAt)) ?: null) : null,
+                'fee_actual_amount' => null,
+                'ext_json' => [
+                    'channel_pay_amount' => (int) round(((float) $totalAmount) * 100),
+                    'channel_response' => $result->all(),
+                ],
             ];
         } catch (PaymentException $e) {
             throw $e;
         } catch (\Throwable $e) {
-            throw new PaymentException('支付宝回调验签失败：' . $e->getMessage(), 402);
+            throw new PaymentException('支付宝回调验签失败', 402, ['error' => $e->getMessage()]);
         }
     }
 
@@ -891,6 +901,3 @@ class AlipayPayment extends BasePayment implements PaymentInterface, PayPluginIn
         return 'fail';
     }
 }
-
-
-

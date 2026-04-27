@@ -3,6 +3,7 @@
 namespace app\http\admin\controller\merchant;
 
 use app\common\base\BaseController;
+use app\http\admin\validation\MerchantApiCredentialValidator;
 use app\http\admin\validation\MerchantValidator;
 use app\service\merchant\MerchantService;
 use support\Request;
@@ -136,8 +137,9 @@ class MerchantController extends BaseController
     public function issueCredential(Request $request, string $id): Response
     {
         $merchantId = (int) $id;
+        $data = $this->validated($request->all(), MerchantApiCredentialValidator::class, 'issueCredential');
 
-        return $this->success($this->merchantService->issueCredential($merchantId));
+        return $this->success($this->merchantService->issueCredential($merchantId, $data));
     }
 
     /**

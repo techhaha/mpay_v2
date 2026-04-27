@@ -3,6 +3,7 @@
 namespace app\service\payment\config;
 
 use app\common\base\BaseService;
+use app\common\constant\CommonConstant;
 use app\exception\ValidationException;
 use app\model\payment\PaymentType;
 use app\repository\payment\config\PaymentTypeRepository;
@@ -87,7 +88,9 @@ class PaymentTypeService extends BaseService
     }
 
     /**
-     * 解析启用中的支付方式，优先按编码匹配，未命中则取首个启用项。
+     * 解析启用中的支付方式。
+     *
+     * 仅在显式传入编码且命中启用项时返回，未命中直接抛错，不再提供默认回退。
      *
      * @param string $code 支付方式编码
      * @return PaymentType 支付方式模型
@@ -98,18 +101,12 @@ class PaymentTypeService extends BaseService
         $code = trim($code);
         if ($code !== '') {
             $paymentType = $this->paymentTypeRepository->findByCode($code);
-            if ($paymentType && (int) $paymentType->status === 1) {
+            if ($paymentType && (int) $paymentType->status === CommonConstant::STATUS_ENABLED) {
                 return $paymentType;
             }
         }
 
-        // 没有传编码或编码不可用时，直接回退到系统当前首个启用支付方式。
-        $paymentType = $this->paymentTypeRepository->enabledList()->first();
-        if (!$paymentType) {
-            throw new ValidationException('未配置可用支付方式');
-        }
-
-        return $paymentType;
+        throw new ValidationException('未配置可用支付方式');
     }
 
     /**
@@ -184,5 +181,3 @@ class PaymentTypeService extends BaseService
         return $this->paymentTypeRepository->deleteById($id);
     }
 }
-
-

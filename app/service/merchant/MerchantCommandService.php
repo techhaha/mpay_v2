@@ -263,24 +263,28 @@ class MerchantCommandService extends BaseService
     /**
      * 生成或重置商户 API 凭证。
      *
+     * 支持分别重置 V1 API Key 和 V2 RSA 密钥对。
+     *
      * @param int $merchantId 商户ID
+     * @param array<string, mixed> $options 生成选项
      * @return array 凭证数据
      * @throws ResourceNotFoundException
      */
-    public function issueCredential(int $merchantId): array
+    public function issueCredential(int $merchantId, array $options = []): array
     {
         $merchant = $this->merchantQueryService->findById($merchantId);
         if (!$merchant) {
             throw new ResourceNotFoundException('商户不存在', ['merchant_id' => $merchantId]);
         }
 
-        $credentialValue = $this->merchantApiCredentialService->issueCredential($merchantId);
-        $credential = $this->merchantApiCredentialService->findByMerchantId($merchantId);
+        $result = $this->merchantApiCredentialService->issueCredentialBundle($merchantId, $options);
 
         return [
             'merchant' => $merchant,
-            'credential_value' => $credentialValue,
-            'credential' => $credential,
+            'credential_value' => $result['credential_value'] ?? '',
+            'merchant_private_key' => $result['merchant_private_key'] ?? '',
+            'credential' => $result['credential'] ?? null,
+            'generated' => $result['generated'] ?? [],
         ];
     }
 
@@ -325,6 +329,24 @@ class MerchantCommandService extends BaseService
 
         if ((int) $merchant->status !== CommonConstant::STATUS_ENABLED) {
             throw new BusinessStateException('商户已禁用', ['merchant_id' => $merchantId]);
+        }
+
+        return $merchant;
+    }
+
+    /**
+     * 校验商户是否允许发起支付。
+     *
+     * @param int $merchantId 商户ID
+     * @return Merchant 商户模型
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
+     */
+    public function ensureMerchantPayEnabled(int $merchantId): Merchant
+    {
+        $merchant = $this->ensureMerchantEnabled($merchantId);
+        if ((int) ($merchant->pay_status ?? 1) !== CommonConstant::STATUS_ENABLED) {
+            throw new BusinessStateException('商户支付已关闭', ['merchant_id' => $merchantId]);
         }
 
         return $merchant;

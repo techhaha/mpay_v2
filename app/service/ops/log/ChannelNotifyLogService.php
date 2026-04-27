@@ -48,8 +48,8 @@ class ChannelNotifyLogService extends BaseService
                     ->orWhere('n.channel_request_no', 'like', '%' . $keyword . '%')
                     ->orWhere('n.channel_trade_no', 'like', '%' . $keyword . '%')
                     ->orWhere('n.last_error', 'like', '%' . $keyword . '%')
-                    ->orWhere('p.merchant_order_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('p.subject', 'like', '%' . $keyword . '%')
+                    ->orWhere('bo.merchant_order_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('bo.subject', 'like', '%' . $keyword . '%')
                     ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
                     ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
                     ->orWhere('m.merchant_short_name', 'like', '%' . $keyword . '%')
@@ -107,7 +107,7 @@ class ChannelNotifyLogService extends BaseService
             ->where('n.id', $id)
             ->first();
 
-        return $row ?: null;
+        return $row ? $this->decorateRow($row) : null;
     }
 
     /**
@@ -139,6 +139,7 @@ class ChannelNotifyLogService extends BaseService
         return $this->channelNotifyLogRepository->query()
             ->from('ma_channel_notify_log as n')
             ->leftJoin('ma_pay_order as p', 'p.pay_no', '=', 'n.pay_no')
+            ->leftJoin('ma_biz_order as bo', 'bo.biz_no', '=', 'n.biz_no')
             ->leftJoin('ma_merchant as m', 'm.id', '=', 'p.merchant_id')
             ->leftJoin('ma_merchant_group as g', 'g.id', '=', 'm.group_id')
             ->leftJoin('ma_payment_channel as c', 'c.id', '=', 'n.channel_id')
@@ -160,8 +161,8 @@ class ChannelNotifyLogService extends BaseService
                 'n.created_at',
                 'n.updated_at',
                 'p.merchant_id',
-                'p.merchant_order_no',
-                'p.subject',
+                'bo.merchant_order_no',
+                'bo.subject',
             ])
             ->selectRaw("COALESCE(m.merchant_no, '') AS merchant_no")
             ->selectRaw("COALESCE(m.merchant_name, '') AS merchant_name")
@@ -172,6 +173,4 @@ class ChannelNotifyLogService extends BaseService
     }
 
 }
-
-
 

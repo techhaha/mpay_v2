@@ -43,8 +43,8 @@ class PayCallbackLogService extends BaseService
         if ($keyword !== '') {
             $query->where(function ($builder) use ($keyword) {
                 $builder->where('l.pay_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('p.merchant_order_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('p.subject', 'like', '%' . $keyword . '%')
+                    ->orWhere('bo.merchant_order_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('bo.subject', 'like', '%' . $keyword . '%')
                     ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
                     ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
                     ->orWhere('m.merchant_short_name', 'like', '%' . $keyword . '%')
@@ -102,7 +102,7 @@ class PayCallbackLogService extends BaseService
             ->where('l.id', $id)
             ->first();
 
-        return $row ?: null;
+        return $row ? $this->decorateRow($row) : null;
     }
 
     /**
@@ -133,6 +133,7 @@ class PayCallbackLogService extends BaseService
         return $this->payCallbackLogRepository->query()
             ->from('ma_pay_callback_log as l')
             ->leftJoin('ma_pay_order as p', 'p.pay_no', '=', 'l.pay_no')
+            ->leftJoin('ma_biz_order as bo', 'bo.biz_no', '=', 'p.biz_no')
             ->leftJoin('ma_merchant as m', 'm.id', '=', 'p.merchant_id')
             ->leftJoin('ma_merchant_group as g', 'g.id', '=', 'm.group_id')
             ->leftJoin('ma_payment_channel as c', 'c.id', '=', 'l.channel_id')
@@ -142,13 +143,14 @@ class PayCallbackLogService extends BaseService
                 'l.channel_id',
                 'l.callback_type',
                 'l.request_data',
+                'l.request_hash',
                 'l.verify_status',
                 'l.process_status',
                 'l.process_result',
                 'l.created_at',
                 'p.merchant_id',
-                'p.merchant_order_no',
-                'p.subject',
+                'bo.merchant_order_no',
+                'bo.subject',
             ])
             ->selectRaw("COALESCE(m.merchant_no, '') AS merchant_no")
             ->selectRaw("COALESCE(m.merchant_name, '') AS merchant_name")
@@ -159,6 +161,4 @@ class PayCallbackLogService extends BaseService
     }
 
 }
-
-
 

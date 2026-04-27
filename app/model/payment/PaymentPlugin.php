@@ -53,6 +53,7 @@ class PaymentPlugin extends BaseModel
         'version',
         'author',
         'link',
+        'allow_merchant',
         'status',
         'remark',
     ];
@@ -66,12 +67,12 @@ class PaymentPlugin extends BaseModel
         'config_schema' => 'array',
         'pay_types' => 'array',
         'transfer_types' => 'array',
+        'allow_merchant' => 'integer',
         'status' => 'integer',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
 }
-
 
 
 

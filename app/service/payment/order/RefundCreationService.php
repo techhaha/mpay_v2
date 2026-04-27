@@ -9,7 +9,9 @@ use app\exception\BusinessStateException;
 use app\exception\ConflictException;
 use app\exception\ResourceNotFoundException;
 use app\exception\ValidationException;
+use app\model\payment\BizOrder;
 use app\model\payment\RefundOrder;
+use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\repository\payment\trade\RefundOrderRepository;
 
@@ -32,6 +34,7 @@ class RefundCreationService extends BaseService
      */
     public function __construct(
         protected PayOrderRepository $payOrderRepository,
+        protected BizOrderRepository $bizOrderRepository,
         protected RefundOrderRepository $refundOrderRepository
     ) {
     }
@@ -39,7 +42,7 @@ class RefundCreationService extends BaseService
     /**
      * 创建退款单。
      *
-     * 当前仅支持整单全额退款，且同一支付单只能创建一张退款单。
+     * 当前支持整单或部分退款，同一支付单可创建多张退款单。
      *
      * @param array $input 退款参数
      * @return RefundOrder 退款单记录
@@ -70,12 +73,27 @@ class RefundCreationService extends BaseService
             ]);
         }
 
+        /** @var BizOrder|null $bizOrder */
+        $bizOrder = $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
+        if (!$bizOrder) {
+            throw new ResourceNotFoundException('业务单不存在', ['biz_no' => (string) $payOrder->biz_no]);
+        }
+
         $refundAmount = array_key_exists('refund_amount', $input)
             ? (int) $input['refund_amount']
             : (int) $payOrder->pay_amount;
+        if ($refundAmount <= 0) {
+            throw new ValidationException('退款金额不合法');
+        }
 
-        if ($refundAmount !== (int) $payOrder->pay_amount) {
-            throw new BusinessStateException('当前仅支持整单全额退款');
+        $alreadyRefunded = (int) $bizOrder->refund_amount;
+        $remainingRefundable = max(0, (int) $bizOrder->order_amount - $alreadyRefunded);
+        if ($refundAmount > $remainingRefundable) {
+            throw new BusinessStateException('退款金额超过可退余额', [
+                'pay_no' => $payNo,
+                'refund_amount' => $refundAmount,
+                'remaining' => $remainingRefundable,
+            ]);
         }
 
         // 业务系统若传了商户退款单号，就优先按商户幂等键查重。
@@ -97,25 +115,13 @@ class RefundCreationService extends BaseService
             }
         }
 
-        // 没有商户退款单号时，用支付单号兜底，避免同一支付单重复创建退款单。
-        /** @var RefundOrder|null $existingByPayNo */
-        $existingByPayNo = $this->refundOrderRepository->findByPayNo($payNo);
-        if ($existingByPayNo) {
-            if ($merchantRefundNo !== '' && (string) $existingByPayNo->merchant_refund_no !== $merchantRefundNo) {
-                throw new ConflictException('重复退款', ['pay_no' => $payNo]);
-            }
-
-            return $existingByPayNo;
-        }
-
         $traceNo = (string) ($payOrder->trace_no ?: $payOrder->biz_no);
 
-        // 退款单落库时同步追踪号、渠道单号和反向手续费，方便后续退款推进与对账。
-        /** @var int $feeReverseAmount */
-        $feeReverseAmount = ((int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_COLLECT)
-            ? (int) $payOrder->fee_actual_amount
-            : 0;
-        // 代收场景下，退款需要把实际手续费作为反向金额记录下来，后续成功态才能正确冲正余额。
+        $feeReverseAmount = 0;
+        if ((int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_COLLECT && (int) $payOrder->pay_amount > 0) {
+            $feeReverseAmount = (int) floor(((int) $payOrder->fee_actual_amount) * $refundAmount / max(1, (int) $payOrder->pay_amount));
+        }
+
         return $this->refundOrderRepository->create([
             'refund_no' => $this->generateNo('RFD'),
             'merchant_id' => (int) $payOrder->merchant_id,
@@ -134,9 +140,7 @@ class RefundCreationService extends BaseService
             'processing_at' => null,
             'retry_count' => 0,
             'last_error' => '',
-            'ext_json' => array_merge($input['ext_json'] ?? [], [
-                'trace_no' => $traceNo,
-            ]),
+            'ext_json' => (array) ($input['ext_json'] ?? []),
         ]);
     }
 }

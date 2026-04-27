@@ -3,6 +3,7 @@
 namespace app\service\payment\order;
 
 use app\common\base\BaseService;
+use app\common\constant\EventConstant;
 use app\common\constant\RouteConstant;
 use app\common\constant\TradeConstant;
 use app\exception\BusinessStateException;
@@ -12,6 +13,7 @@ use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\repository\payment\trade\RefundOrderRepository;
 use app\service\account\funds\MerchantAccountService;
+use Webman\Event\Event;
 
 /**
  * 退款单生命周期服务。
@@ -151,9 +153,17 @@ class RefundLifecycleService extends BaseService
      */
     public function markRefundSuccess(string $refundNo, array $input = []): RefundOrder
     {
-        return $this->transactionRetry(function () use ($refundNo, $input) {
-            return $this->markRefundSuccessInCurrentTransaction($refundNo, $input);
+        $shouldDispatchEvent = false;
+
+        $refundOrder = $this->transactionRetry(function () use ($refundNo, $input, &$shouldDispatchEvent) {
+            return $this->markRefundSuccessInCurrentTransaction($refundNo, $input, $shouldDispatchEvent);
         });
+
+        if ($shouldDispatchEvent) {
+            $this->dispatchRefundOrderEvent(EventConstant::REFUND_ORDER_SUCCEEDED, $refundOrder);
+        }
+
+        return $refundOrder;
     }
 
     /**
@@ -165,7 +175,7 @@ class RefundLifecycleService extends BaseService
      * @throws ResourceNotFoundException
      * @throws BusinessStateException
      */
-    public function markRefundSuccessInCurrentTransaction(string $refundNo, array $input = []): RefundOrder
+    public function markRefundSuccessInCurrentTransaction(string $refundNo, array $input = [], bool &$shouldDispatchEvent = false): RefundOrder
     {
         $refundOrder = $this->refundOrderRepository->findForUpdateByRefundNo($refundNo);
         if (!$refundOrder) {
@@ -196,25 +206,23 @@ class RefundLifecycleService extends BaseService
 
         $traceNo = (string) ($refundOrder->trace_no ?: $refundOrder->biz_no);
         if ((int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_COLLECT) {
-            // 平台代收退款在已结算时，需要同步冲减商户可提现余额，口径按实收净额处理。
-            $reverseAmount = max(0, (int) $payOrder->pay_amount - (int) $payOrder->fee_actual_amount);
-            if ((int) $payOrder->settlement_status === TradeConstant::SETTLEMENT_STATUS_SETTLED && $reverseAmount > 0) {
-                $this->merchantAccountService->debitAvailableAmountInCurrentTransaction(
-                    (int) $refundOrder->merchant_id,
-                    $reverseAmount,
-                    (string) $refundOrder->refund_no,
-                    'REFUND_REVERSE:' . (string) $refundOrder->refund_no,
-                    [
-                        'pay_no' => (string) $refundOrder->pay_no,
-                        'remark' => '平台代收退款冲减',
-                    ],
-                    $traceNo
-                );
+            if ((int) $payOrder->settlement_status === TradeConstant::SETTLEMENT_STATUS_SETTLED) {
+                // 平台代收退款在已结算时，需要同步冲减商户可提现余额，口径按本次退款净额处理。
+                $reverseAmount = max(0, (int) $refundOrder->refund_amount - (int) $refundOrder->fee_reverse_amount);
+                if ($reverseAmount > 0) {
+                    $this->merchantAccountService->debitAvailableAmountInCurrentTransaction(
+                        (int) $refundOrder->merchant_id,
+                        $reverseAmount,
+                        (string) $refundOrder->refund_no,
+                        'REFUND_REVERSE:' . (string) $refundOrder->refund_no,
+                        [
+                            'pay_no' => (string) $refundOrder->pay_no,
+                            'remark' => '平台代收退款冲减',
+                        ],
+                        $traceNo
+                    );
+                }
             }
-
-            // 已结算的代收单被退款后，状态要回写成 reversed，表示结算已被抵消。
-            $payOrder->settlement_status = TradeConstant::SETTLEMENT_STATUS_REVERSED;
-            $payOrder->save();
         }
 
         // 退款成功后，退款单和业务单都要同步收口到成功态。
@@ -227,13 +235,18 @@ class RefundLifecycleService extends BaseService
 
         $bizOrder = $this->bizOrderRepository->findForUpdateByBizNo((string) $refundOrder->biz_no);
         if ($bizOrder) {
-            // 业务单的退款金额直接收口到原支付金额，避免后续展示和统计再做推导。
-            $bizOrder->refund_amount = (int) $bizOrder->order_amount;
+            // 业务单的退款金额按累计值收口，支持多笔部分退款。
+            $bizOrder->refund_amount = min(
+                (int) $bizOrder->order_amount,
+                (int) $bizOrder->refund_amount + (int) $refundOrder->refund_amount
+            );
             if (empty($bizOrder->trace_no)) {
                 $bizOrder->trace_no = $traceNo;
             }
             $bizOrder->save();
         }
+
+        $shouldDispatchEvent = true;
 
         return $refundOrder->refresh();
     }
@@ -247,9 +260,17 @@ class RefundLifecycleService extends BaseService
      */
     public function markRefundFailed(string $refundNo, array $input = []): RefundOrder
     {
-        return $this->transactionRetry(function () use ($refundNo, $input) {
-            return $this->markRefundFailedInCurrentTransaction($refundNo, $input);
+        $shouldDispatchEvent = false;
+
+        $refundOrder = $this->transactionRetry(function () use ($refundNo, $input, &$shouldDispatchEvent) {
+            return $this->markRefundFailedInCurrentTransaction($refundNo, $input, $shouldDispatchEvent);
         });
+
+        if ($shouldDispatchEvent) {
+            $this->dispatchRefundOrderEvent(EventConstant::REFUND_ORDER_FAILED, $refundOrder);
+        }
+
+        return $refundOrder;
     }
 
     /**
@@ -261,7 +282,7 @@ class RefundLifecycleService extends BaseService
      * @throws ResourceNotFoundException
      * @throws BusinessStateException
      */
-    public function markRefundFailedInCurrentTransaction(string $refundNo, array $input = []): RefundOrder
+    public function markRefundFailedInCurrentTransaction(string $refundNo, array $input = [], bool &$shouldDispatchEvent = false): RefundOrder
     {
         $refundOrder = $this->refundOrderRepository->findForUpdateByRefundNo($refundNo);
         if (!$refundOrder) {
@@ -297,7 +318,25 @@ class RefundLifecycleService extends BaseService
         }
         $refundOrder->ext_json = array_merge($extJson, $input['ext_json'] ?? []);
         $refundOrder->save();
+        $shouldDispatchEvent = true;
 
         return $refundOrder->refresh();
+    }
+
+    /**
+     * 发送退款单事件。
+     *
+     * @param string $eventName 事件名称
+     * @param RefundOrder $refundOrder 退款单
+     * @return void
+     */
+    private function dispatchRefundOrderEvent(string $eventName, RefundOrder $refundOrder): void
+    {
+        Event::dispatch($eventName, [
+            'refund_no' => (string) $refundOrder->refund_no,
+            'pay_no' => (string) $refundOrder->pay_no,
+            'biz_no' => (string) $refundOrder->biz_no,
+            'refund_order' => $refundOrder,
+        ]);
     }
 }

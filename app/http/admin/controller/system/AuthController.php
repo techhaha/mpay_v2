@@ -86,6 +86,24 @@ class AuthController extends BaseController
             (string) $this->requestAttribute($request, 'auth.admin_username', '')
         ));
     }
+
+    /**
+     * 修改当前登录管理员密码。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function changePassword(Request $request): Response
+    {
+        $adminId = $this->currentAdminId($request);
+        if ($adminId <= 0) {
+            return $this->fail('未获取到当前管理员信息', 401);
+        }
+
+        $data = $this->validated($request->all(), AuthValidator::class, 'changePassword');
+
+        return $this->success($this->adminUserService->changePassword($adminId, $data));
+    }
 }
 
 

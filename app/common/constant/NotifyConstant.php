@@ -7,22 +7,74 @@ namespace app\common\constant;
  */
 final class NotifyConstant
 {
+    /**
+     * 商户通知事件：支付成功。
+     */
+    public const EVENT_PAY_SUCCESS = 'PAY_SUCCESS';
+    /**
+     * 商户通知事件：退款成功。
+     */
+    public const EVENT_REFUND_SUCCESS = 'REFUND_SUCCESS';
+    /**
+     * 商户通知事件：清算完成。
+     */
+    public const EVENT_SETTLEMENT_SUCCESS = 'SETTLEMENT_SUCCESS';
+
+    /**
+     * 异步通知类型。
+     */
     public const NOTIFY_TYPE_ASYNC = 0;
+    /**
+     * 查单通知类型。
+     */
     public const NOTIFY_TYPE_QUERY = 1;
 
+    /**
+     * 异步回调类型。
+     */
     public const CALLBACK_TYPE_ASYNC = 0;
+    /**
+     * 同步回调类型。
+     */
     public const CALLBACK_TYPE_SYNC = 1;
 
+    /**
+     * 验证状态：未知。
+     */
     public const VERIFY_STATUS_UNKNOWN = 0;
+    /**
+     * 验证状态：成功。
+     */
     public const VERIFY_STATUS_SUCCESS = 1;
+    /**
+     * 验证状态：失败。
+     */
     public const VERIFY_STATUS_FAILED = 2;
 
+    /**
+     * 处理状态：待处理。
+     */
     public const PROCESS_STATUS_PENDING = 0;
+    /**
+     * 处理状态：成功。
+     */
     public const PROCESS_STATUS_SUCCESS = 1;
+    /**
+     * 处理状态：失败。
+     */
     public const PROCESS_STATUS_FAILED = 2;
 
+    /**
+     * 任务状态：待通知。
+     */
     public const TASK_STATUS_PENDING = 0;
+    /**
+     * 任务状态：成功。
+     */
     public const TASK_STATUS_SUCCESS = 1;
+    /**
+     * 任务状态：失败。
+     */
     public const TASK_STATUS_FAILED = 2;
 
     /**
@@ -92,8 +144,20 @@ final class NotifyConstant
             self::TASK_STATUS_FAILED => '失败',
         ];
     }
+
+    /**
+     * 获取商户通知事件映射。
+     *
+     * @return array<string, string> 商户通知事件名称表
+     */
+    public static function eventTypeMap(): array
+    {
+        return [
+            self::EVENT_PAY_SUCCESS => '支付成功',
+            self::EVENT_REFUND_SUCCESS => '退款成功',
+            self::EVENT_SETTLEMENT_SUCCESS => '清算完成',
+        ];
+    }
 }
-
-
 
 

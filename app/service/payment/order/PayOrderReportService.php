@@ -3,6 +3,7 @@
 namespace app\service\payment\order;
 
 use app\common\base\BaseService;
+use app\common\constant\LedgerConstant;
 use app\common\constant\NotifyConstant;
 use app\common\constant\RouteConstant;
 use app\common\constant\TradeConstant;
@@ -72,36 +73,61 @@ class PayOrderReportService extends BaseService
     public function buildPayTimeline(PayOrder $payOrder): array
     {
         $extJson = (array) ($payOrder->ext_json ?? []);
+        $lifecycle = (array) ($extJson['lifecycle'] ?? []);
 
         // 只保留真实发生过的节点，未触发的状态直接过滤掉，避免时间线里出现空占位。
         return array_values(array_filter([
             [
                 'status' => 'created',
+                'label' => '支付单创建',
                 'at' => $this->formatDateTime($payOrder->request_at ?? $payOrder->created_at ?? null, '—'),
             ],
             $payOrder->paid_at ? [
                 'status' => 'success',
+                'label' => '支付成功',
                 'at' => $this->formatDateTime($payOrder->paid_at, '—'),
             ] : null,
             $payOrder->closed_at ? [
                 'status' => 'closed',
+                'label' => '支付关闭',
                 'at' => $this->formatDateTime($payOrder->closed_at, '—'),
                 // 关闭原因优先取扩展信息里的记录，便于展示人工关单或自动关单原因。
-                'reason' => (string) ($extJson['close_reason'] ?? ''),
+                'reason' => (string) ($lifecycle['close_reason'] ?? ''),
             ] : null,
             $payOrder->failed_at ? [
                 'status' => 'failed',
+                'label' => '支付失败',
                 'at' => $this->formatDateTime($payOrder->failed_at, '—'),
                 // 失败原因先看渠道返回，再回落到扩展信息里保存的统一原因字段。
                 'reason' => (string) ($payOrder->channel_error_msg ?: ($extJson['reason'] ?? '')),
             ] : null,
             $payOrder->timeout_at ? [
                 'status' => 'timeout',
+                'label' => '支付超时',
                 'at' => $this->formatDateTime($payOrder->timeout_at, '—'),
-                'reason' => (string) ($extJson['timeout_reason'] ?? ''),
+                'reason' => (string) ($lifecycle['timeout_reason'] ?? ''),
             ] : null,
         ]));
     }
+
+    /**
+     * 格式化支付相关资金流水。
+     *
+     * @param array<string, mixed> $row 原始流水数据
+     * @return array<string, mixed>
+     */
+    public function formatLedgerRow(array $row): array
+    {
+        $row['biz_type_text'] = $this->textFromMap((int) ($row['biz_type'] ?? -1), LedgerConstant::bizTypeMap());
+        $row['event_type_text'] = $this->textFromMap((int) ($row['event_type'] ?? -1), LedgerConstant::eventTypeMap());
+        $row['direction_text'] = $this->textFromMap((int) ($row['direction'] ?? -1), LedgerConstant::directionMap());
+        $row['amount_text'] = $this->formatAmount((int) ($row['amount'] ?? 0));
+        $row['available_before_text'] = $this->formatAmount((int) ($row['available_before'] ?? 0));
+        $row['available_after_text'] = $this->formatAmount((int) ($row['available_after'] ?? 0));
+        $row['frozen_before_text'] = $this->formatAmount((int) ($row['frozen_before'] ?? 0));
+        $row['frozen_after_text'] = $this->formatAmount((int) ($row['frozen_after'] ?? 0));
+        $row['created_at_text'] = $this->formatDateTime($row['created_at'] ?? null, '—');
+
+        return $row;
+    }
 }
-
-

@@ -35,7 +35,19 @@ class PaymentRouteService extends BaseService
     {
         return $this->resolverService->resolveByMerchantGroup($merchantGroupId, $payTypeId, $payAmount, $context);
     }
-}
 
+    /**
+     * 预览商户可用支付方式。
+     *
+     * @param int $merchantGroupId 商户分组ID
+     * @param int $payAmount 支付金额（分）
+     * @param array $context 路由上下文
+     * @return array<int, array<string, mixed>> 可用支付方式列表
+     */
+    public function previewAvailablePayTypes(int $merchantGroupId, int $payAmount, array $context = []): array
+    {
+        return $this->resolverService->previewAvailablePayTypes($merchantGroupId, $payAmount, $context);
+    }
+}
 
 

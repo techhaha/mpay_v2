@@ -199,11 +199,12 @@ class MerchantService extends BaseService
      * 生成或重置商户 API 凭证。
      *
      * @param int $merchantId 商户ID
+     * @param array<string, mixed> $options 生成选项
      * @return array 凭证数据
      */
-    public function issueCredential(int $merchantId): array
+    public function issueCredential(int $merchantId, array $options = []): array
     {
-        return $this->commandService->issueCredential($merchantId);
+        return $this->commandService->issueCredential($merchantId, $options);
     }
 
     /**
@@ -240,6 +241,17 @@ class MerchantService extends BaseService
     }
 
     /**
+     * 校验商户是否允许发起支付。
+     *
+     * @param int $merchantId 商户ID
+     * @return Merchant 商户模型
+     */
+    public function ensureMerchantPayEnabled(int $merchantId): Merchant
+    {
+        return $this->commandService->ensureMerchantPayEnabled($merchantId);
+    }
+
+    /**
      * 校验商户分组是否启用。
      *
      * @param int $groupId 分组ID
@@ -261,5 +273,3 @@ class MerchantService extends BaseService
         return $this->queryService->findPolicy($merchantId);
     }
 }
-
-

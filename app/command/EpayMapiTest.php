@@ -2,10 +2,12 @@
 
 namespace app\command;
 
+use app\common\constant\AuthConstant;
+use app\common\constant\CommonConstant;
 use app\common\constant\RouteConstant;
 use app\common\constant\TradeConstant;
 use app\common\util\FormatHelper;
-use app\http\api\controller\adapter\EpayController;
+use app\http\api\controller\epay\EpayV1Controller;
 use app\model\merchant\Merchant;
 use app\model\merchant\MerchantApiCredential;
 use app\model\payment\PaymentChannel;
@@ -20,7 +22,7 @@ use app\repository\payment\config\PaymentPollGroupRepository;
 use app\repository\payment\config\PaymentTypeRepository;
 use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
-use RuntimeException;
+use app\exception\CommandException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -46,11 +48,15 @@ class EpayMapiTest extends Command
         $this
             ->setDescription('自动读取真实商户、路由和插件配置，测试 ePay mapi 是否能正常调用并返回可用结果。')
             ->addOption('live', null, InputOption::VALUE_NONE, '使用真实数据库并发起实际 mapi 调用')
+            ->addOption('skip-api', null, InputOption::VALUE_NONE, '跳过 mapi 成功后的 V1 api.php 查询接口校验')
             ->addOption('merchant-id', null, InputOption::VALUE_OPTIONAL, '指定商户 ID')
             ->addOption('merchant-no', null, InputOption::VALUE_OPTIONAL, '指定商户号')
             ->addOption('type', null, InputOption::VALUE_OPTIONAL, '支付方式编码，默认 alipay', 'alipay')
             ->addOption('money', null, InputOption::VALUE_OPTIONAL, '支付金额，单位元，默认 1.00', '1.00')
             ->addOption('device', null, InputOption::VALUE_OPTIONAL, '设备类型，默认 pc', 'pc')
+            ->addOption('refund-trade-no', null, InputOption::VALUE_OPTIONAL, '指定需要退款的 V1 平台订单号')
+            ->addOption('refund-out-trade-no', null, InputOption::VALUE_OPTIONAL, '指定需要退款的商户订单号')
+            ->addOption('refund-money', null, InputOption::VALUE_OPTIONAL, '退款金额，单位元')
             ->addOption('out-trade-no', null, InputOption::VALUE_OPTIONAL, '商户订单号，默认自动生成');
     }
 
@@ -116,8 +122,8 @@ class EpayMapiTest extends Command
                 $device,
                 $siteUrl
             );
-            /** @var EpayController $controller */
-            $controller = $this->resolve(EpayController::class);
+            /** @var EpayV1Controller $controller */
+            $controller = $this->resolve(EpayV1Controller::class);
             $response = $controller->mapi($this->buildRequest($payload));
             $responseData = $this->decodeResponse($response->rawBody());
             $orderSnapshot = $this->loadOrderSnapshot((int) $merchant->id, $outTradeNo);
@@ -125,7 +131,29 @@ class EpayMapiTest extends Command
             $this->writeAttempt($output, $payload, $responseData, $orderSnapshot);
 
             $status = $this->classifyAttempt($responseData, $orderSnapshot);
-            return $status === 'pass' ? self::SUCCESS : self::FAILURE;
+            if ($status !== 'pass') {
+                return self::FAILURE;
+            }
+
+            if ($this->optionBool($input, 'skip-api', false)) {
+                return self::SUCCESS;
+            }
+
+            $apiPassed = $this->runCompatibleApiChecks(
+                $output,
+                $merchant,
+                $credential,
+                $outTradeNo,
+                (string) ($responseData['trade_no'] ?? '')
+            );
+
+            if (!$apiPassed) {
+                return self::FAILURE;
+            }
+
+            $refundPassed = $this->runOptionalRefundCheck($input, $output, $merchant, $credential);
+
+            return $refundPassed ? self::SUCCESS : self::FAILURE;
         } catch (\Throwable $e) {
             $output->writeln('<error>[失败]</error> ' . $this->formatThrowable($e));
 
@@ -140,7 +168,7 @@ class EpayMapiTest extends Command
      */
     private function ensureDependencies(): void
     {
-        $this->resolve(EpayController::class);
+        $this->resolve(EpayV1Controller::class);
         $this->resolve(MerchantRepository::class);
         $this->resolve(MerchantApiCredentialRepository::class);
         $this->resolve(PaymentTypeRepository::class);
@@ -159,26 +187,26 @@ class EpayMapiTest extends Command
      * @param string $merchantNoOption 商户编号选项
      * @param string $typeCode 支付方式编码
      * @return array 上下文数据
-     * @throws RuntimeException
+     * @throws CommandException
      */
     private function discoverContext(int $merchantIdOption, string $merchantNoOption, string $typeCode): array
     {
         /** @var PaymentTypeRepository $paymentTypeRepository */
         $paymentTypeRepository = $this->resolve(PaymentTypeRepository::class);
         $paymentType = $paymentTypeRepository->findByCode($typeCode);
-        if (!$paymentType || (int) $paymentType->status !== 1) {
-            throw new RuntimeException('未找到可用的支付方式: ' . $typeCode);
+        if (!$paymentType || (int) $paymentType->status !== CommonConstant::STATUS_ENABLED) {
+            throw new CommandException('未找到可用的支付方式: ' . $typeCode);
         }
 
         $merchant = $this->pickMerchant($merchantIdOption, $merchantNoOption);
         $credential = $this->findMerchantCredential((int) $merchant->id);
         if (!$credential) {
-            throw new RuntimeException('商户未开通有效 API 凭证: ' . $merchant->merchant_no);
+            throw new CommandException('商户未开通有效 API 凭证: ' . $merchant->merchant_no);
         }
 
         $route = $this->buildRouteSnapshot((int) $merchant->group_id, (int) $paymentType->id);
         if ($route === null) {
-            throw new RuntimeException('商户未配置可用路由: ' . $merchant->merchant_no);
+            throw new CommandException('商户未配置可用路由: ' . $merchant->merchant_no);
         }
 
         return [
@@ -195,7 +223,7 @@ class EpayMapiTest extends Command
      * @param int $merchantIdOption 商户 ID 选项
      * @param string $merchantNoOption 商户编号选项
      * @return Merchant 商户记录
-     * @throws RuntimeException
+     * @throws CommandException
      */
     private function pickMerchant(int $merchantIdOption, string $merchantNoOption): Merchant
     {
@@ -204,12 +232,12 @@ class EpayMapiTest extends Command
 
         if ($merchantIdOption > 0) {
             $merchant = $merchantRepository->find($merchantIdOption);
-            if (!$merchant || (int) $merchant->status !== 1) {
-                throw new RuntimeException('指定商户不存在或未启用: ' . $merchantIdOption);
+            if (!$merchant || (int) $merchant->status !== CommonConstant::STATUS_ENABLED) {
+                throw new CommandException('指定商户不存在或未启用: ' . $merchantIdOption);
             }
 
             if ($merchantNoOption !== '' && (string) $merchant->merchant_no !== $merchantNoOption) {
-                throw new RuntimeException('merchant-id 和 merchant-no 不匹配。');
+                throw new CommandException('商户ID与商户号不匹配。');
             }
 
             return $merchant;
@@ -217,8 +245,8 @@ class EpayMapiTest extends Command
 
         if ($merchantNoOption !== '') {
             $merchant = $merchantRepository->findByMerchantNo($merchantNoOption);
-            if (!$merchant || (int) $merchant->status !== 1) {
-                throw new RuntimeException('指定商户不存在或未启用: ' . $merchantNoOption);
+            if (!$merchant || (int) $merchant->status !== CommonConstant::STATUS_ENABLED) {
+                throw new CommandException('指定商户不存在或未启用: ' . $merchantNoOption);
             }
 
             return $merchant;
@@ -226,7 +254,7 @@ class EpayMapiTest extends Command
 
         $merchant = $merchantRepository->enabledList(['id', 'merchant_no', 'merchant_name', 'group_id', 'status'])->first();
         if (!$merchant) {
-            throw new RuntimeException('未找到启用中的真实商户。');
+            throw new CommandException('未找到启用中的真实商户。');
         }
 
         return $merchant;
@@ -243,7 +271,7 @@ class EpayMapiTest extends Command
         /** @var MerchantApiCredentialRepository $repository */
         $repository = $this->resolve(MerchantApiCredentialRepository::class);
         $credential = $repository->findByMerchantId($merchantId);
-        if (!$credential || (int) $credential->status !== 1) {
+        if (!$credential || (int) $credential->status !== AuthConstant::CREDENTIAL_STATUS_ENABLED) {
             return null;
         }
 
@@ -274,7 +302,7 @@ class EpayMapiTest extends Command
         }
 
         $pollGroup = $pollGroupRepository->find((int) $bind->poll_group_id);
-        if (!$pollGroup || (int) $pollGroup->status !== 1) {
+        if (!$pollGroup || (int) $pollGroup->status !== CommonConstant::STATUS_ENABLED) {
             return null;
         }
 
@@ -351,7 +379,7 @@ class EpayMapiTest extends Command
             'money' => $money,
             'clientip' => '127.0.0.1',
             'device' => $device,
-            'sign_type' => 'MD5',
+            'sign_type' => AuthConstant::API_SIGN_NAME_MD5,
         ];
         $payload['sign'] = $this->signPayload($payload, (string) $credential->api_key);
 
@@ -452,7 +480,7 @@ class EpayMapiTest extends Command
             (string) ($responseData['code'] ?? ''),
             (string) ($responseData['msg'] ?? '')
         ));
-        foreach (['trade_no', 'payurl', 'origin_payurl', 'qrcode', 'urlscheme'] as $key) {
+        foreach (['trade_no', 'payurl', 'qrcode', 'urlscheme'] as $key) {
             if (!isset($responseData[$key]) || $responseData[$key] === '') {
                 continue;
             }
@@ -493,7 +521,8 @@ class EpayMapiTest extends Command
         ));
 
         $extJson = (array) ($payOrder['ext_json'] ?? []);
-        $summary = $this->summarizePayParamsSnapshot((array) ($extJson['pay_params_snapshot'] ?? []));
+        $presentation = (array) ($extJson['presentation'] ?? []);
+        $summary = $this->summarizePayParamsSnapshot((array) ($presentation['params_snapshot'] ?? []));
         if ($summary !== []) {
             $output->writeln('  插件返回:');
             $output->writeln('    ' . $this->formatJson($summary));
@@ -534,7 +563,6 @@ class EpayMapiTest extends Command
                 break;
             case 'url':
                 $summary['payurl'] = $this->stringifyValue($snapshot['payurl'] ?? '');
-                $summary['origin_payurl'] = $this->stringifyValue($snapshot['origin_payurl'] ?? '');
                 break;
             default:
                 if (isset($snapshot['raw']) && is_array($snapshot['raw'])) {
@@ -627,16 +655,17 @@ class EpayMapiTest extends Command
      * @param array $payload 请求载荷
      * @return Request 请求对象
      */
-    private function buildRequest(array $payload): Request
+    private function buildRequest(array $payload, string $path = '/mapi.php'): Request
     {
         $body = http_build_query($payload, '', '&', PHP_QUERY_RFC1738);
         $siteUrl = $this->resolveSiteUrl();
         $host = parse_url($siteUrl, PHP_URL_HOST) ?: 'localhost';
         $port = parse_url($siteUrl, PHP_URL_PORT);
         $hostHeader = $port ? sprintf('%s:%s', $host, $port) : $host;
+        $path = '/' . ltrim($path, '/');
 
         $rawRequest = implode("\r\n", [
-            'POST /mapi.php HTTP/1.1',
+            'POST ' . $path . ' HTTP/1.1',
             'Host: ' . $hostHeader,
             'Content-Type: application/x-www-form-urlencoded; charset=UTF-8',
             'Content-Length: ' . strlen($body),
@@ -680,6 +709,182 @@ class EpayMapiTest extends Command
     }
 
     /**
+     * 在 mapi 成功后继续校验 V1 api.php 查询接口。
+     *
+     * @param OutputInterface $output 输出对象
+     * @param Merchant $merchant 商户
+     * @param MerchantApiCredential $credential 商户 API 凭证
+     * @param string $merchantOrderNo 商户订单号
+     * @param string $tradeNo 平台订单号
+     * @return bool 是否全部通过
+     */
+    private function runCompatibleApiChecks(
+        OutputInterface $output,
+        Merchant $merchant,
+        MerchantApiCredential $credential,
+        string $merchantOrderNo,
+        string $tradeNo
+    ): bool {
+        $checks = [
+            'query' => [
+                'payload' => [
+                    'act' => 'query',
+                    'pid' => (int) $merchant->id,
+                    'key' => (string) $credential->api_key,
+                ],
+                'assert' => function (array $responseData) use ($merchant, $credential): bool {
+                    return (int) ($responseData['code'] ?? 0) === 1
+                        && (int) ($responseData['pid'] ?? 0) === (int) $merchant->id
+                        && (string) ($responseData['key'] ?? '') === (string) $credential->api_key;
+                },
+            ],
+            'order(out_trade_no)' => [
+                'payload' => [
+                    'act' => 'order',
+                    'pid' => (int) $merchant->id,
+                    'key' => (string) $credential->api_key,
+                    'out_trade_no' => $merchantOrderNo,
+                ],
+                'assert' => function (array $responseData) use ($merchantOrderNo): bool {
+                    return (int) ($responseData['code'] ?? 0) === 1
+                        && (string) ($responseData['out_trade_no'] ?? '') === $merchantOrderNo;
+                },
+            ],
+            'orders' => [
+                'payload' => [
+                    'act' => 'orders',
+                    'pid' => (int) $merchant->id,
+                    'key' => (string) $credential->api_key,
+                    'limit' => 5,
+                    'page' => 1,
+                ],
+                'assert' => static function (array $responseData): bool {
+                    return (int) ($responseData['code'] ?? 0) === 1 && is_array($responseData['data'] ?? null);
+                },
+            ],
+        ];
+
+        if ($tradeNo !== '') {
+            $checks['order(trade_no)'] = [
+                'payload' => [
+                    'act' => 'order',
+                    'pid' => (int) $merchant->id,
+                    'key' => (string) $credential->api_key,
+                    'trade_no' => $tradeNo,
+                ],
+                'assert' => function (array $responseData) use ($tradeNo): bool {
+                    return (int) ($responseData['code'] ?? 0) === 1
+                        && (string) ($responseData['trade_no'] ?? '') === $tradeNo;
+                },
+            ];
+        }
+
+        $allPassed = true;
+        foreach ($checks as $name => $check) {
+            $responseData = $this->callCompatibleApi($check['payload']);
+            $passed = (bool) ($check['assert'])($responseData);
+            $allPassed = $allPassed && $passed;
+            $this->writeCompatibleApiAttempt($output, $name, $responseData, $passed);
+        }
+
+        return $allPassed;
+    }
+
+    /**
+     * 根据命令行参数决定是否追加 V1 退款接口校验。
+     *
+     * @param InputInterface $input 命令输入
+     * @param OutputInterface $output 输出对象
+     * @param Merchant $merchant 商户
+     * @param MerchantApiCredential $credential 商户 API 凭证
+     * @return bool 是否通过
+     * @throws CommandException
+     */
+    private function runOptionalRefundCheck(
+        InputInterface $input,
+        OutputInterface $output,
+        Merchant $merchant,
+        MerchantApiCredential $credential
+    ): bool {
+        $tradeNo = trim($this->optionString($input, 'refund-trade-no', ''));
+        $merchantOrderNo = trim($this->optionString($input, 'refund-out-trade-no', ''));
+        if ($tradeNo === '' && $merchantOrderNo === '') {
+            return true;
+        }
+
+        $payload = [
+            'act' => 'refund',
+            'pid' => (int) $merchant->id,
+            'key' => (string) $credential->api_key,
+            'money' => $this->normalizeMoney($this->optionString($input, 'refund-money', '1.00')),
+        ];
+        if ($tradeNo !== '') {
+            $payload['trade_no'] = $tradeNo;
+        }
+        if ($merchantOrderNo !== '') {
+            $payload['out_trade_no'] = $merchantOrderNo;
+        }
+
+        $responseData = $this->callCompatibleApi($payload);
+        $passed = (int) ($responseData['code'] ?? 0) === 1;
+        $this->writeCompatibleApiAttempt($output, 'refund', $responseData, $passed);
+
+        return $passed;
+    }
+
+    /**
+     * 调用 V1 api.php 接口。
+     *
+     * @param array $payload 请求载荷
+     * @return array 响应数据
+     */
+    private function callCompatibleApi(array $payload): array
+    {
+        /** @var EpayV1Controller $controller */
+        $controller = $this->resolve(EpayV1Controller::class);
+        $response = $controller->api($this->buildRequest($payload, '/api.php'));
+
+        return $this->decodeResponse($response->rawBody());
+    }
+
+    /**
+     * 输出 V1 api.php 接口校验结果。
+     *
+     * @param OutputInterface $output 输出对象
+     * @param string $name 检查名称
+     * @param array $responseData 响应数据
+     * @param bool $passed 是否通过
+     * @return void
+     */
+    private function writeCompatibleApiAttempt(
+        OutputInterface $output,
+        string $name,
+        array $responseData,
+        bool $passed
+    ): void {
+        $label = $passed ? '<info>[通过]</info>' : '<error>[失败]</error>';
+        $output->writeln(sprintf(
+            '%s api(%s) - code=%s msg=%s',
+            $label,
+            $name,
+            (string) ($responseData['code'] ?? ''),
+            (string) ($responseData['msg'] ?? '')
+        ));
+
+        foreach (['pid', 'trade_no', 'out_trade_no', 'orders', 'order_today', 'order_lastday'] as $key) {
+            if (!array_key_exists($key, $responseData)) {
+                continue;
+            }
+
+            $output->writeln(sprintf('  返回: %s=%s', $key, $this->stringifyValue($responseData[$key])));
+        }
+
+        if (isset($responseData['data']) && is_array($responseData['data'])) {
+            $output->writeln(sprintf('  数据条数: %d', count($responseData['data'])));
+        }
+    }
+
+    /**
      * 解析站点地址。
      *
      * @return string 站点地址
@@ -695,7 +900,7 @@ class EpayMapiTest extends Command
      *
      * @param string $money 金额
      * @return string 金额字符串
-     * @throws RuntimeException
+     * @throws CommandException
      */
     private function normalizeMoney(string $money): string
     {
@@ -705,7 +910,7 @@ class EpayMapiTest extends Command
         }
 
         if (!preg_match('/^\d+(?:\.\d{1,2})?$/', $money)) {
-            throw new RuntimeException('money 参数不合法: ' . $money);
+            throw new CommandException('money 参数不合法: ' . $money);
         }
 
         return number_format((float) $money, 2, '.', '');
@@ -809,8 +1014,7 @@ class EpayMapiTest extends Command
     {
         $data = method_exists($e, 'getData') ? $e->getData() : [];
         $suffix = is_array($data) && $data !== [] ? ' ' . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : '';
-
-        return $e::class . ': ' . $e->getMessage() . $suffix;
+        return $e::class . '：' . $e->getMessage() . $suffix;
     }
 
     /**
@@ -866,18 +1070,18 @@ class EpayMapiTest extends Command
      *
      * @param string $class 类名
      * @return object 对象实例
-     * @throws RuntimeException
+     * @throws CommandException
      */
     private function resolve(string $class): object
     {
         try {
             $instance = container_make($class, []);
         } catch (\Throwable $e) {
-            throw new RuntimeException("无法解析 {$class}: " . $e->getMessage(), 0, $e);
+            throw new CommandException("无法解析 {$class}。", 0, $e);
         }
 
         if (!is_object($instance)) {
-            throw new RuntimeException("解析后的 {$class} 不是对象。");
+            throw new CommandException("解析后的 {$class} 不是对象。");
         }
 
         return $instance;

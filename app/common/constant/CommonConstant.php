@@ -18,12 +18,12 @@ final class CommonConstant
     public const STATUS_ENABLED = 1;
 
     /**
-     * 否。
+     * 否，通常用于布尔类字段的数值表示。
      */
     public const NO = 0;
 
     /**
-     * 是。
+     * 是，通常用于布尔类字段的数值表示。
      */
     public const YES = 1;
 
@@ -53,7 +53,6 @@ final class CommonConstant
         ];
     }
 }
-
 
 
 

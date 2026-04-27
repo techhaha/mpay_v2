@@ -46,6 +46,7 @@ class PaymentPluginConfService extends BaseService
             ->leftJoin('ma_payment_plugin as p', 'c.plugin_code', '=', 'p.code')
             ->select([
                 'c.id',
+                'c.merchant_id',
                 'c.plugin_code',
                 'c.config',
                 'c.settlement_cycle_type',
@@ -69,6 +70,11 @@ class PaymentPluginConfService extends BaseService
         $pluginCode = trim((string) ($filters['plugin_code'] ?? ''));
         if ($pluginCode !== '') {
             $query->where('c.plugin_code', $pluginCode);
+        }
+
+        $merchantId = trim((string) ($filters['merchant_id'] ?? ''));
+        if ($merchantId !== '') {
+            $query->where('c.merchant_id', (int) $merchantId);
         }
 
         return $query
@@ -249,6 +255,7 @@ class PaymentPluginConfService extends BaseService
     {
         return [
             'plugin_code' => trim((string) ($data['plugin_code'] ?? '')),
+            'merchant_id' => max(0, (int) ($data['merchant_id'] ?? 0)),
             // 配置内容统一按数组保存，外部传入非数组时直接回退为空数组。
             'config' => is_array($data['config'] ?? null) ? $data['config'] : [],
             // 默认结算周期按日配置，截止时间默认按当天 23:59:59 收口。

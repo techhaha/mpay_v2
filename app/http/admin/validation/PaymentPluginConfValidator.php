@@ -19,6 +19,7 @@ class PaymentPluginConfValidator extends Validator
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
+        'merchant_id' => 'sometimes|integer|min:0',
         'plugin_code' => 'sometimes|string|alpha_dash|min:2|max:32',
         'config' => 'nullable|array',
         'settlement_cycle_type' => 'sometimes|integer|in:0,1,2,3,4',
@@ -37,6 +38,7 @@ class PaymentPluginConfValidator extends Validator
     protected array $attributes = [
         'id' => '配置ID',
         'keyword' => '关键字',
+        'merchant_id' => '所属商户',
         'plugin_code' => '插件编码',
         'config' => '插件配置',
         'settlement_cycle_type' => '结算周期',
@@ -53,9 +55,9 @@ class PaymentPluginConfValidator extends Validator
      * @var array
      */
     protected array $scenes = [
-        'index' => ['keyword', 'plugin_code', 'page', 'page_size'],
-        'store' => ['plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
-        'update' => ['id', 'plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
+        'index' => ['keyword', 'merchant_id', 'plugin_code', 'page', 'page_size'],
+        'store' => ['merchant_id', 'plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
+        'update' => ['id', 'merchant_id', 'plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
         'show' => ['id'],
         'destroy' => ['id'],
         'options' => ['plugin_code'],
@@ -86,5 +88,4 @@ class PaymentPluginConfValidator extends Validator
         };
     }
 }
-
 

@@ -4,12 +4,14 @@ namespace app\service\payment\order;
 
 use app\common\base\BaseService;
 use app\common\constant\CommonConstant;
+use app\common\constant\NotifyConstant;
 use app\exception\ResourceNotFoundException;
 use app\exception\ValidationException;
 use app\model\payment\PayOrder;
 use app\model\payment\PaymentType;
 use app\repository\account\ledger\MerchantAccountLedgerRepository;
 use app\repository\payment\config\PaymentTypeRepository;
+use app\repository\payment\notify\NotifyTaskRepository;
 use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 
@@ -22,6 +24,7 @@ use app\repository\payment\trade\PayOrderRepository;
  * @property BizOrderRepository $bizOrderRepository 业务订单仓库
  * @property MerchantAccountLedgerRepository $merchantAccountLedgerRepository 商户账户流水仓库
  * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+ * @property NotifyTaskRepository $notifyTaskRepository 通知任务仓库
  * @property PayOrderReportService $payOrderReportService 支付单报表服务
  */
 class PayOrderQueryService extends BaseService
@@ -33,6 +36,7 @@ class PayOrderQueryService extends BaseService
      * @param BizOrderRepository $bizOrderRepository 业务订单仓库
      * @param MerchantAccountLedgerRepository $merchantAccountLedgerRepository 商户账户流水仓库
      * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+     * @param NotifyTaskRepository $notifyTaskRepository 通知任务仓库
      * @param PayOrderReportService $payOrderReportService 支付单报表服务
      * @return void
      */
@@ -41,6 +45,7 @@ class PayOrderQueryService extends BaseService
         protected BizOrderRepository $bizOrderRepository,
         protected MerchantAccountLedgerRepository $merchantAccountLedgerRepository,
         protected PaymentTypeRepository $paymentTypeRepository,
+        protected NotifyTaskRepository $notifyTaskRepository,
         protected PayOrderReportService $payOrderReportService
     ) {
     }
@@ -58,6 +63,148 @@ class PayOrderQueryService extends BaseService
      * @return array{list: array<int, array<string, mixed>>, total: int, page: int, size: int, pay_types: array<int, array{label: string, value: int}>} 支付订单列表结构
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10, ?int $merchantId = null): array
+    {
+        $query = $this->buildPayOrderQuery($merchantId);
+
+        $keyword = trim((string) ($filters['keyword'] ?? ''));
+        if ($keyword !== '') {
+            // 关键词同时命中支付单、业务单、商户、通道和支付方式，方便后台一把搜全链路。
+            $query->where(function ($builder) use ($keyword) {
+                $builder->where('po.pay_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('po.biz_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('po.trace_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('po.channel_request_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('po.channel_order_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('po.channel_trade_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('bo.merchant_order_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('bo.subject', 'like', '%' . $keyword . '%')
+                    ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
+                    ->orWhere('m.merchant_short_name', 'like', '%' . $keyword . '%')
+                    ->orWhere('g.group_name', 'like', '%' . $keyword . '%')
+                    ->orWhere('c.name', 'like', '%' . $keyword . '%')
+                    ->orWhere('t.name', 'like', '%' . $keyword . '%');
+            });
+        }
+
+        if (($merchantFilter = (int) ($filters['merchant_id'] ?? 0)) > 0) {
+            $query->where('po.merchant_id', $merchantFilter);
+        }
+
+        if (($payTypeId = (int) ($filters['pay_type_id'] ?? 0)) > 0) {
+            $query->where('po.pay_type_id', $payTypeId);
+        }
+
+        if (array_key_exists('status', $filters) && $filters['status'] !== '') {
+            $query->where('po.status', (int) $filters['status']);
+        }
+
+        if (array_key_exists('channel_mode', $filters) && $filters['channel_mode'] !== '') {
+            $query->where('po.channel_mode', (int) $filters['channel_mode']);
+        }
+
+        if (array_key_exists('callback_status', $filters) && $filters['callback_status'] !== '') {
+            $query->where('po.callback_status', (int) $filters['callback_status']);
+        }
+
+        $paginator = $query
+            ->orderByDesc('po.id')
+            ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
+
+        $list = [];
+        foreach ($paginator->items() as $item) {
+            $list[] = $this->payOrderReportService->formatPayOrderRow($this->rowToArray($item));
+        }
+
+        return [
+            'list' => $list,
+            'total' => $paginator->total(),
+            'page' => $paginator->currentPage(),
+            'size' => $paginator->perPage(),
+            'pay_types' => $this->payTypeOptions(),
+        ];
+    }
+
+    /**
+     * 查询支付订单详情。
+     *
+     * 返回支付单、业务单、时间线和资金流水，供管理后台与商户后台共用。
+     *
+     * @param string $payNo 支付单号
+     * @param int|null $merchantId 商户ID
+     * @return array{pay_order: PayOrder, biz_order: \app\model\payment\BizOrder|null, pay_order_view: array<string, mixed>|null, timeline: array<int, array<string, mixed>>, account_ledgers: iterable, account_ledgers_view: array<int, array<string, mixed>>, notify_tasks: array<int, array<string, mixed>>} 支付详情结构
+     * @throws ValidationException
+     * @throws ResourceNotFoundException
+     */
+    public function detail(string $payNo, ?int $merchantId = null): array
+    {
+        $payNo = trim($payNo);
+        if ($payNo === '') {
+            throw new ValidationException('pay_no 不能为空');
+        }
+
+        $payOrder = $this->payOrderRepository->findByPayNo($payNo);
+        if (!$payOrder) {
+            throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
+        }
+
+        if ($merchantId !== null && $merchantId > 0 && (int) $payOrder->merchant_id !== $merchantId) {
+            // 商户后台只允许看自己的单，归属不匹配时直接按不存在处理。
+            throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
+        }
+
+        $bizOrder = $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
+        $detailRow = $this->buildPayOrderQuery($merchantId)
+            ->where('po.pay_no', $payNo)
+            ->first();
+        $timeline = $this->payOrderReportService->buildPayTimeline($payOrder);
+        $accountLedgers = $this->loadPayLedgers($payOrder);
+        $accountLedgerRows = [];
+        foreach ($accountLedgers as $ledger) {
+            $accountLedgerRows[] = $this->payOrderReportService->formatLedgerRow($this->rowToArray($ledger));
+        }
+
+        return [
+            'pay_order' => $payOrder,
+            'biz_order' => $bizOrder,
+            'pay_order_view' => $detailRow ? $this->payOrderReportService->formatPayOrderRow($this->rowToArray($detailRow)) : null,
+            'timeline' => $timeline,
+            'account_ledgers' => $accountLedgers,
+            'account_ledgers_view' => $accountLedgerRows,
+            'notify_tasks' => $this->loadNotifyTasks($payNo),
+        ];
+    }
+
+    /**
+     * 加载支付相关资金流水。
+     *
+     * 优先按追踪号查询，追踪号为空时回退到业务单号，避免漏掉关联流水。
+     *
+     * @param PayOrder $payOrder 支付订单
+     * @return \Illuminate\Support\Collection 支付相关资金流水集合
+     */
+    private function loadPayLedgers(PayOrder $payOrder)
+    {
+        $traceNo = trim((string) ($payOrder->trace_no ?: $payOrder->biz_no));
+        $ledgers = $traceNo !== ''
+            ? $this->merchantAccountLedgerRepository->listByTraceNo($traceNo)
+            : collect();
+
+        if ($ledgers->isEmpty()) {
+            // 追踪号没有命中时，回到业务单号继续兜底，避免早期单据漏掉资金流水。
+            $ledgers = $this->merchantAccountLedgerRepository->listByBizNo((string) $payOrder->biz_no);
+        }
+
+        return $ledgers;
+    }
+
+    /**
+     * 查询支付单详情展示行，供列表与详情复用。
+     *
+     * @param int|null $merchantId 商户ID
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    private function buildPayOrderQuery(?int $merchantId = null)
     {
         $query = $this->payOrderRepository->query()
             ->from('ma_pay_order as po')
@@ -134,126 +281,38 @@ class PayOrderQueryService extends BaseService
             $query->where('po.merchant_id', $merchantId);
         }
 
-        $keyword = trim((string) ($filters['keyword'] ?? ''));
-        if ($keyword !== '') {
-            // 关键词同时命中支付单、业务单、商户、通道和支付方式，方便后台一把搜全链路。
-            $query->where(function ($builder) use ($keyword) {
-                $builder->where('po.pay_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('po.biz_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('po.trace_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('po.channel_request_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('po.channel_order_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('po.channel_trade_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('bo.merchant_order_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('bo.subject', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_short_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('g.group_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('c.name', 'like', '%' . $keyword . '%')
-                    ->orWhere('t.name', 'like', '%' . $keyword . '%');
-            });
-        }
-
-        if (($merchantFilter = (int) ($filters['merchant_id'] ?? 0)) > 0) {
-            $query->where('po.merchant_id', $merchantFilter);
-        }
-
-        if (($payTypeId = (int) ($filters['pay_type_id'] ?? 0)) > 0) {
-            $query->where('po.pay_type_id', $payTypeId);
-        }
-
-        if (array_key_exists('status', $filters) && $filters['status'] !== '') {
-            $query->where('po.status', (int) $filters['status']);
-        }
-
-        if (array_key_exists('channel_mode', $filters) && $filters['channel_mode'] !== '') {
-            $query->where('po.channel_mode', (int) $filters['channel_mode']);
-        }
-
-        if (array_key_exists('callback_status', $filters) && $filters['callback_status'] !== '') {
-            $query->where('po.callback_status', (int) $filters['callback_status']);
-        }
-
-        $paginator = $query
-            ->orderByDesc('po.id')
-            ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
-
-        $list = [];
-        foreach ($paginator->items() as $item) {
-            $list[] = $this->payOrderReportService->formatPayOrderRow((array) $item);
-        }
-
-        return [
-            'list' => $list,
-            'total' => $paginator->total(),
-            'page' => $paginator->currentPage(),
-            'size' => $paginator->perPage(),
-            'pay_types' => $this->payTypeOptions(),
-        ];
+        return $query;
     }
 
     /**
-     * 查询支付订单详情。
-     *
-     * 返回支付单、业务单、时间线和资金流水，供管理后台与商户后台共用。
+     * 加载并格式化通知任务列表。
      *
      * @param string $payNo 支付单号
-     * @param int|null $merchantId 商户ID
-     * @return array{pay_order: PayOrder, biz_order: \app\model\payment\BizOrder|null, timeline: array<int, array<string, mixed>>, account_ledgers: \Illuminate\Support\Collection} 支付详情结构
-     * @throws ValidationException
-     * @throws ResourceNotFoundException
+     * @return array<int, array<string, mixed>>
      */
-    public function detail(string $payNo, ?int $merchantId = null): array
+    private function loadNotifyTasks(string $payNo): array
     {
-        $payNo = trim($payNo);
-        if ($payNo === '') {
-            throw new ValidationException('pay_no 不能为空');
+        $rows = [];
+        foreach ($this->notifyTaskRepository->listByPayNo($payNo) as $task) {
+            $rows[] = [
+                'notify_no' => (string) $task->notify_no,
+                'event_type' => (string) ($task->event_type ?? ''),
+                'event_type_text' => (string) (NotifyConstant::eventTypeMap()[(string) ($task->event_type ?? '')] ?? ($task->event_type ?? '')),
+                'ref_no' => (string) ($task->ref_no ?? ''),
+                'notify_url' => (string) $task->notify_url,
+                'status' => (int) $task->status,
+                'status_text' => (string) (NotifyConstant::taskStatusMap()[(int) $task->status] ?? '未知'),
+                'retry_count' => (int) $task->retry_count,
+                'last_notify_at_text' => $this->formatDateTime($task->last_notify_at, '—'),
+                'next_retry_at_text' => $this->formatDateTime($task->next_retry_at, '—'),
+                'last_response' => (string) ($task->last_response ?? ''),
+                'notify_data' => (array) ($task->notify_data ?? []),
+                'created_at_text' => $this->formatDateTime($task->created_at, '—'),
+                'updated_at_text' => $this->formatDateTime($task->updated_at, '—'),
+            ];
         }
 
-        $payOrder = $this->payOrderRepository->findByPayNo($payNo);
-        if (!$payOrder) {
-            throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
-        }
-
-        if ($merchantId !== null && $merchantId > 0 && (int) $payOrder->merchant_id !== $merchantId) {
-            // 商户后台只允许看自己的单，归属不匹配时直接按不存在处理。
-            throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
-        }
-
-        $bizOrder = $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
-        $timeline = $this->payOrderReportService->buildPayTimeline($payOrder);
-        $accountLedgers = $this->loadPayLedgers($payOrder);
-
-        return [
-            'pay_order' => $payOrder,
-            'biz_order' => $bizOrder,
-            'timeline' => $timeline,
-            'account_ledgers' => $accountLedgers,
-        ];
-    }
-
-    /**
-     * 加载支付相关资金流水。
-     *
-     * 优先按追踪号查询，追踪号为空时回退到业务单号，避免漏掉关联流水。
-     *
-     * @param PayOrder $payOrder 支付订单
-     * @return \Illuminate\Support\Collection 支付相关资金流水集合
-     */
-    private function loadPayLedgers(PayOrder $payOrder)
-    {
-        $traceNo = trim((string) ($payOrder->trace_no ?: $payOrder->biz_no));
-        $ledgers = $traceNo !== ''
-            ? $this->merchantAccountLedgerRepository->listByTraceNo($traceNo)
-            : collect();
-
-        if ($ledgers->isEmpty()) {
-            // 追踪号没有命中时，回到业务单号继续兜底，避免早期单据漏掉资金流水。
-            $ledgers = $this->merchantAccountLedgerRepository->listByBizNo((string) $payOrder->biz_no);
-        }
-
-        return $ledgers;
+        return $rows;
     }
 
     /**
@@ -276,6 +335,29 @@ class PayOrderQueryService extends BaseService
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * 将查询结果统一转换为纯数组，避免直接强转模型对象时把内部属性泄漏出去。
+     *
+     * @param mixed $row 查询结果行
+     * @return array<string, mixed>
+     */
+    private function rowToArray(mixed $row): array
+    {
+        if (is_array($row)) {
+            return $row;
+        }
+
+        if (is_object($row) && method_exists($row, 'toArray')) {
+            /** @var array<string, mixed> $data */
+            $data = $row->toArray();
+            return $data;
+        }
+
+        /** @var array<string, mixed> $data */
+        $data = (array) $row;
+        return $data;
     }
 
 }

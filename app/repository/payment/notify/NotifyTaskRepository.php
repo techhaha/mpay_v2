@@ -37,6 +37,37 @@ class NotifyTaskRepository extends BaseRepository
     }
 
     /**
+     * 根据通知事件和引用单号查询通知任务。
+     *
+     * @param string $eventType 通知事件类型
+     * @param string $refNo 事件引用单号
+     * @param array $columns 字段列表
+     * @return NotifyTask|null 通知任务记录
+     */
+    public function findByEventRef(string $eventType, string $refNo, array $columns = ['*'])
+    {
+        return $this->model->newQuery()
+            ->where('event_type', $eventType)
+            ->where('ref_no', $refNo)
+            ->first($columns);
+    }
+
+    /**
+     * 查询指定支付单的通知任务列表。
+     *
+     * @param string $payNo 支付单号
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, NotifyTask> 通知任务列表
+     */
+    public function listByPayNo(string $payNo, array $columns = ['*'])
+    {
+        return $this->model->newQuery()
+            ->where('pay_no', $payNo)
+            ->orderByDesc('id')
+            ->get($columns);
+    }
+
+    /**
      * 查询可重试的通知任务列表。
      *
      * @param int $status 状态
@@ -47,13 +78,12 @@ class NotifyTaskRepository extends BaseRepository
     {
         return $this->model->newQuery()
             ->where('status', $status)
+            ->whereNotNull('next_retry_at')
+            ->where('next_retry_at', '<=', date('Y-m-d H:i:s'))
             ->orderBy('next_retry_at')
             ->get($columns);
     }
 }
-
-
-
 
 
 

@@ -95,7 +95,7 @@ class MerchantPortalRoutePreviewService extends BaseService
             ));
         } catch (Throwable $e) {
             // 解析异常只影响路由结果，不影响基础信息展示，因此这里只回填失败原因。
-            $response['reason'] = $e->getMessage() !== '' ? $e->getMessage() : '路由解析失败';
+            $response['reason'] = $e->getMessage();
         }
 
         return $response;

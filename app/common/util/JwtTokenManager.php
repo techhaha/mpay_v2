@@ -6,6 +6,8 @@ use Firebase\JWT\ExpiredException;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Firebase\JWT\SignatureInvalidException;
+use app\common\constant\AuthConstant;
+use app\exception\AuthConfigException;
 use support\Redis;
 use Throwable;
 
@@ -29,6 +31,7 @@ class JwtTokenManager
      * @param array<string, mixed> $sessionData 会话数据
      * @param int|null $ttlSeconds 过期秒数
      * @return array{token:string,expires_in:int,jti:string,claims:array<string, mixed>,session:array<string, mixed>} 签发结果
+     * @throws AuthConfigException
      */
     public function issue(string $guard, array $claims, array $sessionData, ?int $ttlSeconds = null): array
     {
@@ -47,7 +50,7 @@ class JwtTokenManager
             'guard' => $guard,
         ], $claims);
 
-        $token = JWT::encode($payload, (string) $guardConfig['secret'], 'HS256');
+        $token = JWT::encode($payload, (string) $guardConfig['secret'], AuthConstant::JWT_ALGORITHM_HS256);
 
         $session = array_merge($sessionData, [
             'guard' => $guard,
@@ -80,6 +83,7 @@ class JwtTokenManager
      * @param string $ip 最近访问 IP
      * @param string $userAgent 用户Agent
      * @return array{claims:array<string, mixed>,session:array<string, mixed>}|null 验证结果
+     * @throws AuthConfigException
      */
     public function verify(string $guard, string $token, string $ip = '', string $userAgent = ''): ?array
     {
@@ -126,6 +130,7 @@ class JwtTokenManager
      * @param string $guard 登录域
      * @param string $token JWT 字符串
      * @return bool 是否已撤销
+     * @throws AuthConfigException
      */
     public function revoke(string $guard, string $token): bool
     {
@@ -150,6 +155,7 @@ class JwtTokenManager
      * @param string $guard 登录域
      * @param string $jti 会话标识
      * @return bool 是否已撤销
+     * @throws AuthConfigException
      */
     public function revokeByJti(string $guard, string $jti): bool
     {
@@ -168,6 +174,7 @@ class JwtTokenManager
      * @param string $guard 登录域
      * @param string $jti 会话标识
      * @return array<string, mixed>|null 会话数据
+     * @throws AuthConfigException
      */
     public function session(string $guard, string $jti): ?array
     {
@@ -188,6 +195,7 @@ class JwtTokenManager
      * @param string $guard 登录域
      * @param string $token JWT 字符串
      * @return array<string, mixed>|null JWT 载荷
+     * @throws AuthConfigException
      */
     protected function decode(string $guard, string $token): ?array
     {
@@ -196,7 +204,7 @@ class JwtTokenManager
 
         try {
             JWT::$leeway = (int) config('auth.leeway', 30);
-            $payload = JWT::decode($token, new Key((string) $guardConfig['secret'], 'HS256'));
+            $payload = JWT::decode($token, new Key((string) $guardConfig['secret'], AuthConstant::JWT_ALGORITHM_HS256));
         } catch (ExpiredException|SignatureInvalidException|Throwable) {
             return null;
         }
@@ -221,6 +229,7 @@ class JwtTokenManager
      * @param array<string, mixed> $session 会话数据
      * @param int $ttlSeconds 过期秒数
      * @return void
+     * @throws AuthConfigException
      */
     protected function storeSession(string $guard, string $jti, array $session, int $ttlSeconds): void
     {
@@ -239,6 +248,7 @@ class JwtTokenManager
      * @param string $guard 登录域
      * @param string $jti 会话标识
      * @return string Redis 会话键
+     * @throws AuthConfigException
      */
     protected function sessionKey(string $guard, string $jti): string
     {
@@ -250,13 +260,15 @@ class JwtTokenManager
      *
      * @param string $guard 登录域
      * @return array<string, mixed> 认证配置
-     * @throws \InvalidArgumentException
+     * @throws AuthConfigException
      */
     protected function guardConfig(string $guard): array
     {
         $guards = (array) config('auth.guards', []);
         if (!isset($guards[$guard])) {
-            throw new \InvalidArgumentException("Unknown auth guard: {$guard}");
+            throw new AuthConfigException("未知认证域：{$guard}", [
+                'guard' => $guard,
+            ]);
         }
 
         return $guards[$guard];
@@ -268,7 +280,7 @@ class JwtTokenManager
      * @param string $guard 登录域
      * @param string $secret 密钥
      * @return void
-     * @throws RuntimeException
+     * @throws AuthConfigException
      */
     protected function assertHmacSecretLength(string $guard, string $secret): void
     {
@@ -277,17 +289,19 @@ class JwtTokenManager
         }
 
         $envNames = match ($guard) {
-            'admin' => 'AUTH_ADMIN_JWT_SECRET or AUTH_JWT_SECRET',
-            'merchant' => 'AUTH_MERCHANT_JWT_SECRET or AUTH_JWT_SECRET',
-            default => 'the configured JWT secret',
+            AuthConstant::GUARD_ADMIN => 'AUTH_ADMIN_JWT_SECRET 或 AUTH_JWT_SECRET',
+            AuthConstant::GUARD_MERCHANT => 'AUTH_MERCHANT_JWT_SECRET 或 AUTH_JWT_SECRET',
+            default => '当前配置的 JWT 密钥',
         };
 
-        throw new \RuntimeException(sprintf(
-            'JWT secret for guard "%s" is too short for HS256. Please set %s to at least 32 ASCII characters.',
+        throw new AuthConfigException(sprintf(
+            '认证域 "%s" 的 JWT 密钥长度不足，HS256 至少需要 32 个 ASCII 字符，请将 %s 配置为至少 32 个字符。',
             $guard,
             $envNames
-        ));
+        ), [
+            'guard' => $guard,
+            'env_names' => $envNames,
+            'secret_length' => strlen($secret),
+        ]);
     }
 }
-
-

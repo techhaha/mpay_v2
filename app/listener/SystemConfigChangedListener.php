@@ -3,6 +3,7 @@
 namespace app\listener;
 
 use app\service\system\config\SystemConfigRuntimeService;
+use support\Log;
 
 /**
  * 系统配置变更监听器。
@@ -31,10 +32,18 @@ class SystemConfigChangedListener
      */
     public function refreshRuntimeCache(array $payload = [], string $eventName = ''): void
     {
-        $this->systemConfigRuntimeService->refresh();
+        try {
+            $this->systemConfigRuntimeService->refresh();
+        } catch (\Throwable $e) {
+            Log::warning(sprintf(
+                '[SystemConfigChangedListener] 系统配置运行时缓存刷新失败 event=%s group_code=%s error=%s',
+                $eventName,
+                (string) ($payload['group_code'] ?? ''),
+                $e->getMessage()
+            ));
+        }
     }
 }
-
 
 
 

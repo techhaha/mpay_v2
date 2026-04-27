@@ -23,6 +23,7 @@ class PaymentPluginConf extends BaseModel
      * @var mixed
      */
     protected $fillable = [
+        'merchant_id',
         'plugin_code',
         'config',
         'settlement_cycle_type',
@@ -36,13 +37,13 @@ class PaymentPluginConf extends BaseModel
      * @var mixed
      */
     protected $casts = [
+        'merchant_id' => 'integer',
         'config' => 'array',
         'settlement_cycle_type' => 'integer',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
 }
-
 
 
 

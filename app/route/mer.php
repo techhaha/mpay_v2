@@ -7,6 +7,7 @@ use app\http\mer\controller\merchant\MerchantPortalController;
 use app\http\mer\controller\trade\RefundOrderController;
 use app\http\mer\controller\trade\PayOrderController;
 use app\http\mer\controller\system\SystemController;
+use app\http\mer\controller\file\FileRecordController;
 use app\http\mer\middleware\MerchantAuthMiddleware;
 
 Route::any('/mer[/{path:.+}]', function () {
@@ -23,6 +24,19 @@ Route::group('/merapi', function () {
         Route::put('/merchant/profile', [MerchantPortalController::class, 'updateProfile'])->name('merchantApiPortalProfileUpdate')->setParams(['real_name' => '更新商户资料']);
         Route::post('/merchant/change-password', [MerchantPortalController::class, 'changePassword'])->name('merchantApiPortalChangePassword')->setParams(['real_name' => '修改登录密码']);
         Route::get('/my-channels', [MerchantPortalController::class, 'myChannels'])->name('merchantApiPortalMyChannels')->setParams(['real_name' => '我的通道']);
+        Route::get('/my-channels/create-meta', [MerchantPortalController::class, 'channelCreateMeta'])->name('merchantApiPortalChannelCreateMeta')->setParams(['real_name' => '商户通道配置元数据']);
+        Route::post('/my-channels', [MerchantPortalController::class, 'createChannel'])->name('merchantApiPortalChannelCreate')->setParams(['real_name' => '新增商户通道']);
+        Route::put('/my-channels/{id}', [MerchantPortalController::class, 'updateChannel'])->name('merchantApiPortalChannelUpdate')->setParams(['real_name' => '修改商户通道']);
+        Route::delete('/my-channels/{id}', [MerchantPortalController::class, 'deleteChannel'])->name('merchantApiPortalChannelDelete')->setParams(['real_name' => '删除商户通道']);
+        Route::get('/plugin-configs', [MerchantPortalController::class, 'pluginConfigs'])->name('merchantApiPortalPluginConfigs')->setParams(['real_name' => '商户插件配置']);
+        Route::get('/plugin-configs/options', [MerchantPortalController::class, 'pluginConfigOptions'])->name('merchantApiPortalPluginConfigOptions')->setParams(['real_name' => '商户插件配置选项']);
+        Route::post('/plugin-configs', [MerchantPortalController::class, 'createPluginConfig'])->name('merchantApiPortalPluginConfigCreate')->setParams(['real_name' => '新增商户插件配置']);
+        Route::put('/plugin-configs/{id}', [MerchantPortalController::class, 'updatePluginConfig'])->name('merchantApiPortalPluginConfigUpdate')->setParams(['real_name' => '修改商户插件配置']);
+        Route::delete('/plugin-configs/{id}', [MerchantPortalController::class, 'deletePluginConfig'])->name('merchantApiPortalPluginConfigDelete')->setParams(['real_name' => '删除商户插件配置']);
+        Route::get('/payment-plugins/{code}/schema', [MerchantPortalController::class, 'pluginSchema'])->name('merchantApiPortalPluginSchema')->setParams(['real_name' => '商户插件配置结构']);
+        Route::post('/file-asset/upload', [FileRecordController::class, 'upload'])->name('merchantApiFileRecordUpload')->setParams(['real_name' => '上传文件']);
+        Route::get('/file-asset/{id}/preview', [FileRecordController::class, 'preview'])->name('merchantApiFileRecordPreview')->setParams(['real_name' => '文件预览']);
+        Route::get('/file-asset/{id}/download', [FileRecordController::class, 'download'])->name('merchantApiFileRecordDownload')->setParams(['real_name' => '文件下载']);
         Route::get('/route-preview', [MerchantPortalController::class, 'routePreview'])->name('merchantApiPortalRoutePreview')->setParams(['real_name' => '路由解析']);
         Route::get('/api-credential', [MerchantPortalController::class, 'apiCredential'])->name('merchantApiPortalCredential')->setParams(['real_name' => '商户 API 凭证']);
         Route::post('/api-credential/issue-credential', [MerchantPortalController::class, 'issueCredential'])->name('merchantApiPortalIssueCredential')->setParams(['real_name' => '生成或重置商户 API 凭证']);

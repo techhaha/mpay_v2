@@ -3,6 +3,7 @@
 namespace app\service\payment\settlement;
 
 use app\common\base\BaseService;
+use app\common\constant\EventConstant;
 use app\common\constant\TradeConstant;
 use app\exception\BusinessStateException;
 use app\exception\ResourceNotFoundException;
@@ -12,6 +13,7 @@ use app\repository\payment\settlement\SettlementItemRepository;
 use app\repository\payment\settlement\SettlementOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\service\account\funds\MerchantAccountService;
+use Webman\Event\Event;
 
 /**
  * 清算生命周期服务。
@@ -133,7 +135,9 @@ class SettlementLifecycleService extends BaseService
      */
     public function completeSettlement(string $settleNo): SettlementOrder
     {
-        return $this->transactionRetry(function () use ($settleNo) {
+        $shouldDispatchEvent = false;
+
+        $settlementOrder = $this->transactionRetry(function () use ($settleNo, &$shouldDispatchEvent) {
             $settlementOrder = $this->settlementOrderRepository->findForUpdateBySettleNo($settleNo);
             if (!$settlementOrder) {
                 throw new ResourceNotFoundException('清结算单不存在', ['settle_no' => $settleNo]);
@@ -191,8 +195,16 @@ class SettlementLifecycleService extends BaseService
                 }
             }
 
+            $shouldDispatchEvent = true;
+
             return $settlementOrder->refresh();
         });
+
+        if ($shouldDispatchEvent) {
+            $this->dispatchSettlementOrderEvent(EventConstant::SETTLEMENT_ORDER_SUCCEEDED, $settlementOrder);
+        }
+
+        return $settlementOrder;
     }
 
     /**
@@ -208,7 +220,9 @@ class SettlementLifecycleService extends BaseService
      */
     public function failSettlement(string $settleNo, string $reason = ''): SettlementOrder
     {
-        return $this->transactionRetry(function () use ($settleNo, $reason) {
+        $shouldDispatchEvent = false;
+
+        $settlementOrder = $this->transactionRetry(function () use ($settleNo, $reason, &$shouldDispatchEvent) {
             $settlementOrder = $this->settlementOrderRepository->findForUpdateBySettleNo($settleNo);
             if (!$settlementOrder) {
                 throw new ResourceNotFoundException('清结算单不存在', ['settle_no' => $settleNo]);
@@ -248,8 +262,31 @@ class SettlementLifecycleService extends BaseService
                 $item->save();
             }
 
+            $shouldDispatchEvent = true;
+
             return $settlementOrder->refresh();
         });
+
+        if ($shouldDispatchEvent) {
+            $this->dispatchSettlementOrderEvent(EventConstant::SETTLEMENT_ORDER_FAILED, $settlementOrder);
+        }
+
+        return $settlementOrder;
+    }
+
+    /**
+     * 发送清算单事件。
+     *
+     * @param string $eventName 事件名称
+     * @param SettlementOrder $settlementOrder 清算单
+     * @return void
+     */
+    private function dispatchSettlementOrderEvent(string $eventName, SettlementOrder $settlementOrder): void
+    {
+        Event::dispatch($eventName, [
+            'settle_no' => (string) $settlementOrder->settle_no,
+            'settlement_order' => $settlementOrder,
+        ]);
     }
 
     /**

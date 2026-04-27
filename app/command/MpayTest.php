@@ -4,6 +4,7 @@ namespace app\command;
 
 use app\common\constant\TradeConstant;
 use app\common\util\FormatHelper;
+use app\exception\CommandException;
 use app\service\account\funds\MerchantAccountService;
 use app\service\merchant\MerchantService;
 use app\service\payment\order\PayOrderService;
@@ -11,7 +12,6 @@ use app\service\payment\order\RefundService;
 use app\service\payment\settlement\SettlementService;
 use app\service\payment\trace\TradeTraceService;
 use app\repository\payment\trade\PayOrderRepository;
-use RuntimeException;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -223,7 +223,7 @@ class MpayTest extends Command
             } elseif ($this->envBool('MPAY_TEST_REFUND_MARK_FAIL', false)) {
                 $service->markRefundFailed((string) $refund->refund_no, [
                     'failed_at' => $this->envString('MPAY_TEST_REFUND_FAILED_AT', FormatHelper::timestamp(time())),
-                    'last_error' => $this->envString('MPAY_TEST_REFUND_LAST_ERROR', 'mpay smoke refund failed'),
+                    'last_error' => $this->envString('MPAY_TEST_REFUND_LAST_ERROR', '烟雾测试退款失败'),
                 ]);
                 $message .= ', 已标记失败';
             } elseif ($this->envBool('MPAY_TEST_REFUND_MARK_SUCCESS', false)) {
@@ -437,18 +437,18 @@ class MpayTest extends Command
      *
      * @param string $class 类名
      * @return object 对象实例
-     * @throws RuntimeException
+     * @throws CommandException
      */
     private function resolve(string $class): object
     {
         try {
             $instance = container_make($class, []);
         } catch (\Throwable $e) {
-            throw new RuntimeException("无法解析 {$class}: " . $e->getMessage(), 0, $e);
+            throw new CommandException("无法解析 {$class}。", 0, $e);
         }
 
         if (!is_object($instance)) {
-            throw new RuntimeException("解析后的 {$class} 不是对象。");
+            throw new CommandException("解析后的 {$class} 不是对象。");
         }
 
         return $instance;
@@ -460,12 +460,12 @@ class MpayTest extends Command
      * @param object $instance 实例
      * @param string $method 方法名
      * @return void
-     * @throws RuntimeException
+     * @throws CommandException
      */
     private function ensureMethod(object $instance, string $method): void
     {
         if (!method_exists($instance, $method)) {
-            throw new RuntimeException(sprintf('未找到方法 %s::%s。', $instance::class, $method));
+            throw new CommandException(sprintf('未找到方法 %s::%s。', $instance::class, $method));
         }
     }
 
@@ -555,8 +555,7 @@ class MpayTest extends Command
     {
         $data = method_exists($e, 'getData') ? $e->getData() : [];
         $suffix = $data ? ' ' . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : '';
-
-        return $e::class . ': ' . $e->getMessage() . $suffix;
+        return $e::class . '：' . $e->getMessage() . $suffix;
     }
 
     /**

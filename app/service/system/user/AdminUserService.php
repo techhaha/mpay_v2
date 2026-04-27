@@ -5,6 +5,7 @@ namespace app\service\system\user;
 use app\common\base\BaseService;
 use app\common\constant\CommonConstant;
 use app\exception\ResourceNotFoundException;
+use app\exception\ValidationException;
 use app\model\admin\AdminUser;
 use app\repository\system\user\AdminUserRepository;
 
@@ -197,6 +198,40 @@ class AdminUserService extends BaseService
     }
 
     /**
+     * 修改当前管理员登录密码。
+     *
+     * @param int $adminId 管理员ID
+     * @param array $data 密码数据
+     * @return array<string, mixed> 修改结果
+     * @throws ResourceNotFoundException
+     * @throws ValidationException
+     */
+    public function changePassword(int $adminId, array $data): array
+    {
+        $admin = $this->adminUserRepository->find($adminId);
+        if (!$admin) {
+            throw new ResourceNotFoundException('管理员不存在', ['admin_id' => $adminId]);
+        }
+
+        $currentPassword = trim((string) ($data['current_password'] ?? ''));
+        $newPassword = trim((string) ($data['password'] ?? ''));
+
+        if (!password_verify($currentPassword, (string) $admin->password_hash)) {
+            throw new ValidationException('旧密码不正确');
+        }
+
+        if ($currentPassword === $newPassword) {
+            throw new ValidationException('新密码不能与旧密码相同');
+        }
+
+        $this->adminUserRepository->updateById($adminId, [
+            'password_hash' => password_hash($newPassword, PASSWORD_DEFAULT),
+        ]);
+
+        return ['updated' => true];
+    }
+
+    /**
      * 统一整理写入字段，并处理密码哈希。
      *
      * @param array $data 写入数据
@@ -226,6 +261,3 @@ class AdminUserService extends BaseService
     }
 
 }
-
-
-

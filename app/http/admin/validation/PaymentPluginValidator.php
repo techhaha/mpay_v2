@@ -19,6 +19,7 @@ class PaymentPluginValidator extends Validator
     protected array $rules = [
         'code' => 'sometimes|string|alpha_dash|min:2|max:32',
         'status' => 'sometimes|integer|in:0,1',
+        'allow_merchant' => 'sometimes|integer|in:0,1',
         'remark' => 'nullable|string|max:500',
         'keyword' => 'sometimes|string|max:128',
         'name' => 'sometimes|string|max:50',
@@ -37,6 +38,7 @@ class PaymentPluginValidator extends Validator
         'code' => '插件编码',
         'name' => '插件名称',
         'status' => '插件状态',
+        'allow_merchant' => '商户端可用',
         'remark' => '备注',
         'keyword' => '关键字',
         'page' => '页码',
@@ -52,10 +54,9 @@ class PaymentPluginValidator extends Validator
      */
     protected array $scenes = [
         'index' => ['keyword', 'code', 'name', 'status', 'page', 'page_size'],
-        'update' => ['code', 'status', 'remark'],
+        'update' => ['code', 'status', 'allow_merchant', 'remark'],
         'updateStatus' => ['code', 'status'],
         'show' => ['code'],
         'selectOptions' => ['keyword', 'page', 'page_size', 'pay_type_code', 'ids'],
     ];
 }
-

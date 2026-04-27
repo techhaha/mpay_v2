@@ -6,7 +6,7 @@ use app\common\base\BaseModel;
 
 /**
  * 商户对外接口凭证模型。
- * 保存商户 API 凭证、签名类型、启用状态和最近使用时间。
+ * 保存商户 API 凭证、商户公钥、签名类型、启用状态和最近使用时间。
  */
 class MerchantApiCredential extends BaseModel
 {
@@ -26,6 +26,7 @@ class MerchantApiCredential extends BaseModel
         'merchant_id',
         'sign_type',
         'api_key',
+        'merchant_public_key',
         'status',
         'last_used_at',
     ];
@@ -53,4 +54,3 @@ class MerchantApiCredential extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
-

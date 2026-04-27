@@ -74,6 +74,27 @@ class PaymentChannelRepository extends BaseRepository
     }
 
     /**
+     * 判断指定商户的通道名称是否已存在。
+     *
+     * @param int $merchantId 商户ID
+     * @param string $name 通道名称
+     * @param int $ignoreId 需要排除的记录ID
+     * @return bool 是否存在
+     */
+    public function existsByMerchantName(int $merchantId, string $name, int $ignoreId = 0): bool
+    {
+        $query = $this->model->newQuery()
+            ->where('merchant_id', $merchantId)
+            ->where('name', $name);
+
+        if ($ignoreId > 0) {
+            $query->where('id', '<>', $ignoreId);
+        }
+
+        return $query->exists();
+    }
+
+    /**
      * 统计商户名下的支付通道概览。
      *
      * @param int $merchantId 商户ID
@@ -102,6 +123,5 @@ class PaymentChannelRepository extends BaseRepository
             ->count();
     }
 }
-
 
 

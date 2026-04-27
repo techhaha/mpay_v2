@@ -63,7 +63,12 @@ class MerchantApiCredentialQueryService extends BaseService
 
         $paginator->getCollection()->transform(function ($row) {
             $row->sign_type_text = $this->textFromMap((int) $row->sign_type, AuthConstant::signTypeMap());
-            $row->status_text = (int) $row->status === AuthConstant::LOGIN_STATUS_ENABLED ? '启用' : '禁用';
+            $row->status_text = $this->textFromMap((int) $row->status, AuthConstant::credentialStatusMap());
+            $row->platform_public_key_preview = $this->maskCredentialValue(
+                trim((string) config('epay.v2.platform_public_key', '')),
+                false
+            );
+            $row->platform_sign_type_text = (string) config('epay.v2.sign_type', AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA);
 
             return $row;
         });
@@ -110,6 +115,7 @@ class MerchantApiCredentialQueryService extends BaseService
                 'c.id',
                 'c.merchant_id',
                 'c.sign_type',
+                'c.merchant_public_key',
                 'c.status',
                 'c.last_used_at',
                 'c.created_at',
@@ -120,9 +126,12 @@ class MerchantApiCredentialQueryService extends BaseService
 
         if ($maskCredentialValue) {
             $query->selectRaw("CASE WHEN c.api_key IS NULL OR c.api_key = '' THEN '' ELSE CONCAT(LEFT(c.api_key, 4), '****', RIGHT(c.api_key, 4)) END AS api_key_preview");
+            $query->selectRaw("CASE WHEN c.merchant_public_key IS NULL OR c.merchant_public_key = '' THEN '' ELSE CONCAT(LEFT(c.merchant_public_key, 12), '****', RIGHT(c.merchant_public_key, 12)) END AS merchant_public_key_preview");
         } else {
             $query->addSelect('c.api_key');
+            $query->addSelect('c.merchant_public_key');
             $query->selectRaw("COALESCE(c.api_key, '') AS api_key_full");
+            $query->selectRaw("COALESCE(c.merchant_public_key, '') AS merchant_public_key_full");
         }
 
         return $query;
@@ -141,8 +150,12 @@ class MerchantApiCredentialQueryService extends BaseService
         }
 
         $row->api_key_preview = $this->maskCredentialValue((string) ($row->api_key ?? ''), false);
+        $row->merchant_public_key_preview = $this->maskCredentialValue((string) ($row->merchant_public_key ?? ''), false);
         $row->sign_type_text = $this->textFromMap((int) $row->sign_type, AuthConstant::signTypeMap());
-        $row->status_text = (int) $row->status === AuthConstant::LOGIN_STATUS_ENABLED ? '启用' : '禁用';
+        $row->status_text = $this->textFromMap((int) $row->status, AuthConstant::credentialStatusMap());
+        $row->platform_public_key_full = trim((string) config('epay.v2.platform_public_key', ''));
+        $row->platform_public_key_preview = $this->maskCredentialValue((string) $row->platform_public_key_full, false);
+        $row->platform_sign_type_text = (string) config('epay.v2.sign_type', AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA);
 
         return $row;
     }

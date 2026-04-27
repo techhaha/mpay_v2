@@ -4,6 +4,7 @@ namespace app\service\payment\order;
 
 use app\common\base\BaseService;
 use app\common\constant\NotifyConstant;
+use app\common\constant\EventConstant;
 use app\common\constant\RouteConstant;
 use app\common\constant\TradeConstant;
 use app\exception\BusinessStateException;
@@ -11,6 +12,7 @@ use app\exception\ResourceNotFoundException;
 use app\model\payment\PayOrder;
 use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
+use Webman\Event\Event;
 
 /**
  * 支付单生命周期服务。
@@ -48,9 +50,17 @@ class PayOrderLifecycleService extends BaseService
      */
     public function markPaySuccess(string $payNo, array $input = []): PayOrder
     {
-        return $this->transactionRetry(function () use ($payNo, $input) {
-            return $this->markPaySuccessInCurrentTransaction($payNo, $input);
+        $shouldNotifyMerchant = false;
+
+        $payOrder = $this->transactionRetry(function () use ($payNo, $input, &$shouldNotifyMerchant) {
+            return $this->markPaySuccessInCurrentTransaction($payNo, $input, $shouldNotifyMerchant);
         });
+
+        if ($shouldNotifyMerchant) {
+            $this->dispatchPayOrderEvent(EventConstant::PAYMENT_PAY_ORDER_SUCCEEDED, $payOrder);
+        }
+
+        return $payOrder;
     }
 
     /**
@@ -64,7 +74,7 @@ class PayOrderLifecycleService extends BaseService
      * @throws ResourceNotFoundException
      * @throws BusinessStateException
      */
-    public function markPaySuccessInCurrentTransaction(string $payNo, array $input = []): PayOrder
+    public function markPaySuccessInCurrentTransaction(string $payNo, array $input = [], bool &$shouldNotifyMerchant = false): PayOrder
     {
         $payOrder = $this->payOrderRepository->findForUpdateByPayNo($payNo);
         if (!$payOrder) {
@@ -112,11 +122,12 @@ class PayOrderLifecycleService extends BaseService
         $payOrder->channel_error_code = '';
         $payOrder->channel_error_msg = '';
         $payOrder->callback_times = (int) $payOrder->callback_times + 1;
-        $payOrder->ext_json = array_merge((array) $payOrder->ext_json, $input['ext_json'] ?? []);
+        $payOrder->ext_json = array_replace_recursive((array) $payOrder->ext_json, $input['ext_json'] ?? []);
         $payOrder->save();
 
         // 业务单状态也要一起收口，保证支付单和业务单一致。
         $this->syncBizOrderAfterSuccess($payOrder, $traceNo);
+        $shouldNotifyMerchant = true;
 
         return $payOrder->refresh();
     }
@@ -130,9 +141,17 @@ class PayOrderLifecycleService extends BaseService
      */
     public function markPayFailed(string $payNo, array $input = []): PayOrder
     {
-        return $this->transactionRetry(function () use ($payNo, $input) {
-            return $this->markPayFailedInCurrentTransaction($payNo, $input);
+        $shouldDispatchEvent = false;
+
+        $payOrder = $this->transactionRetry(function () use ($payNo, $input, &$shouldDispatchEvent) {
+            return $this->markPayFailedInCurrentTransaction($payNo, $input, $shouldDispatchEvent);
         });
+
+        if ($shouldDispatchEvent) {
+            $this->dispatchPayOrderEvent(EventConstant::PAYMENT_PAY_ORDER_FAILED, $payOrder);
+        }
+
+        return $payOrder;
     }
 
     /**
@@ -144,7 +163,7 @@ class PayOrderLifecycleService extends BaseService
      * @throws ResourceNotFoundException
      * @throws BusinessStateException
      */
-    public function markPayFailedInCurrentTransaction(string $payNo, array $input = []): PayOrder
+    public function markPayFailedInCurrentTransaction(string $payNo, array $input = [], bool &$shouldDispatchEvent = false): PayOrder
     {
         $payOrder = $this->payOrderRepository->findForUpdateByPayNo($payNo);
         if (!$payOrder) {
@@ -177,15 +196,18 @@ class PayOrderLifecycleService extends BaseService
             : TradeConstant::FEE_STATUS_NONE;
         $payOrder->settlement_status = TradeConstant::SETTLEMENT_STATUS_NONE;
         $payOrder->callback_status = NotifyConstant::PROCESS_STATUS_FAILED;
+        $payOrder->channel_trade_no = (string) ($input['channel_trade_no'] ?? $payOrder->channel_trade_no ?? '');
+        $payOrder->channel_order_no = (string) ($input['channel_order_no'] ?? $payOrder->channel_order_no ?? '');
         $payOrder->channel_error_code = (string) ($input['channel_error_code'] ?? $payOrder->channel_error_code ?? '');
         $payOrder->channel_error_msg = (string) ($input['channel_error_msg'] ?? $payOrder->channel_error_msg ?? '支付失败');
         $payOrder->failed_at = $input['failed_at'] ?? $this->now();
         $payOrder->callback_times = (int) $payOrder->callback_times + 1;
-        $payOrder->ext_json = array_merge((array) $payOrder->ext_json, $input['ext_json'] ?? []);
+        $payOrder->ext_json = array_replace_recursive((array) $payOrder->ext_json, $input['ext_json'] ?? []);
         $payOrder->save();
 
         // 支付单进入终态后，同步回业务单，避免上游只能依赖支付单判断结果。
         $this->syncBizOrderAfterTerminalStatus($payOrder, $payNo, $traceNo, TradeConstant::ORDER_STATUS_FAILED, 'failed_at');
+        $shouldDispatchEvent = true;
 
         return $payOrder->refresh();
     }
@@ -199,9 +221,17 @@ class PayOrderLifecycleService extends BaseService
      */
     public function closePayOrder(string $payNo, array $input = []): PayOrder
     {
-        return $this->transactionRetry(function () use ($payNo, $input) {
-            return $this->closePayOrderInCurrentTransaction($payNo, $input);
+        $shouldDispatchEvent = false;
+
+        $payOrder = $this->transactionRetry(function () use ($payNo, $input, &$shouldDispatchEvent) {
+            return $this->closePayOrderInCurrentTransaction($payNo, $input, $shouldDispatchEvent);
         });
+
+        if ($shouldDispatchEvent) {
+            $this->dispatchPayOrderEvent(EventConstant::PAYMENT_PAY_ORDER_CLOSED, $payOrder);
+        }
+
+        return $payOrder;
     }
 
     /**
@@ -213,7 +243,7 @@ class PayOrderLifecycleService extends BaseService
      * @throws ResourceNotFoundException
      * @throws BusinessStateException
      */
-    public function closePayOrderInCurrentTransaction(string $payNo, array $input = []): PayOrder
+    public function closePayOrderInCurrentTransaction(string $payNo, array $input = [], bool &$shouldDispatchEvent = false): PayOrder
     {
         $payOrder = $this->payOrderRepository->findForUpdateByPayNo($payNo);
         if (!$payOrder) {
@@ -249,13 +279,16 @@ class PayOrderLifecycleService extends BaseService
         $extJson = (array) $payOrder->ext_json;
         $reason = trim((string) ($input['reason'] ?? ''));
         if ($reason !== '') {
-            $extJson['close_reason'] = $reason;
+            $extJson['lifecycle'] = array_replace((array) ($extJson['lifecycle'] ?? []), [
+                'close_reason' => $reason,
+            ]);
         }
-        $payOrder->ext_json = array_merge($extJson, $input['ext_json'] ?? []);
+        $payOrder->ext_json = array_replace_recursive($extJson, $input['ext_json'] ?? []);
         $payOrder->save();
 
         // 关闭态也要同步给业务单，避免后续继续拉起支付。
         $this->syncBizOrderAfterTerminalStatus($payOrder, $payNo, $traceNo, TradeConstant::ORDER_STATUS_CLOSED, 'closed_at');
+        $shouldDispatchEvent = true;
 
         return $payOrder->refresh();
     }
@@ -269,9 +302,17 @@ class PayOrderLifecycleService extends BaseService
      */
     public function timeoutPayOrder(string $payNo, array $input = []): PayOrder
     {
-        return $this->transactionRetry(function () use ($payNo, $input) {
-            return $this->timeoutPayOrderInCurrentTransaction($payNo, $input);
+        $shouldDispatchEvent = false;
+
+        $payOrder = $this->transactionRetry(function () use ($payNo, $input, &$shouldDispatchEvent) {
+            return $this->timeoutPayOrderInCurrentTransaction($payNo, $input, $shouldDispatchEvent);
         });
+
+        if ($shouldDispatchEvent) {
+            $this->dispatchPayOrderEvent(EventConstant::PAYMENT_PAY_ORDER_TIMEOUT, $payOrder);
+        }
+
+        return $payOrder;
     }
 
     /**
@@ -283,7 +324,7 @@ class PayOrderLifecycleService extends BaseService
      * @throws ResourceNotFoundException
      * @throws BusinessStateException
      */
-    public function timeoutPayOrderInCurrentTransaction(string $payNo, array $input = []): PayOrder
+    public function timeoutPayOrderInCurrentTransaction(string $payNo, array $input = [], bool &$shouldDispatchEvent = false): PayOrder
     {
         $payOrder = $this->payOrderRepository->findForUpdateByPayNo($payNo);
         if (!$payOrder) {
@@ -319,12 +360,15 @@ class PayOrderLifecycleService extends BaseService
         $extJson = (array) $payOrder->ext_json;
         $reason = trim((string) ($input['reason'] ?? ''));
         if ($reason !== '') {
-            $extJson['timeout_reason'] = $reason;
+            $extJson['lifecycle'] = array_replace((array) ($extJson['lifecycle'] ?? []), [
+                'timeout_reason' => $reason,
+            ]);
         }
-        $payOrder->ext_json = array_merge($extJson, $input['ext_json'] ?? []);
+        $payOrder->ext_json = array_replace_recursive($extJson, $input['ext_json'] ?? []);
         $payOrder->save();
 
         $this->syncBizOrderAfterTerminalStatus($payOrder, $payNo, $traceNo, TradeConstant::ORDER_STATUS_TIMEOUT, 'timeout_at');
+        $shouldDispatchEvent = true;
 
         return $payOrder->refresh();
     }
@@ -378,6 +422,22 @@ class PayOrderLifecycleService extends BaseService
             $bizOrder->trace_no = $traceNo;
         }
         $bizOrder->save();
+    }
+
+    /**
+     * 发送支付单事件。
+     *
+     * @param string $eventName 事件名称
+     * @param PayOrder $payOrder 支付订单
+     * @return void
+     */
+    private function dispatchPayOrderEvent(string $eventName, PayOrder $payOrder): void
+    {
+        Event::dispatch($eventName, [
+            'pay_no' => (string) $payOrder->pay_no,
+            'biz_no' => (string) $payOrder->biz_no,
+            'pay_order' => $payOrder,
+        ]);
     }
 
 }

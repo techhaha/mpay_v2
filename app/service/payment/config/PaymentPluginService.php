@@ -216,6 +216,10 @@ class PaymentPluginService extends BaseService
             $payload['status'] = (int) $data['status'];
         }
 
+        if (array_key_exists('allow_merchant', $data)) {
+            $payload['allow_merchant'] = (int) $data['allow_merchant'];
+        }
+
         if (array_key_exists('remark', $data)) {
             $payload['remark'] = trim((string) $data['remark']);
         }

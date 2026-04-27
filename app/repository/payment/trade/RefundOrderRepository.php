@@ -107,6 +107,7 @@ class RefundOrderRepository extends BaseRepository
     {
         return $this->model->newQuery()
             ->where('pay_no', $payNo)
+            ->orderByDesc('id')
             ->first($columns);
     }
 
@@ -151,6 +152,7 @@ class RefundOrderRepository extends BaseRepository
     {
         return $this->model->newQuery()
             ->where('pay_no', $payNo)
+            ->orderByDesc('id')
             ->lockForUpdate()
             ->first($columns);
     }
@@ -168,8 +170,6 @@ class RefundOrderRepository extends BaseRepository
             ->count();
     }
 }
-
-
 
 
 

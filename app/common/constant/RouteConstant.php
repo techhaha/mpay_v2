@@ -20,12 +20,12 @@ final class RouteConstant
     public const CHANNEL_TYPE_MERCHANT_SELF = 1;
 
     /**
-     * 代收通道模式。
+     * 代收通道模式，资金直接进入平台侧。
      */
     public const CHANNEL_MODE_COLLECT = 0;
 
     /**
-     * 自收通道模式。
+     * 自收通道模式，资金直接进入商户侧。
      */
     public const CHANNEL_MODE_SELF = 1;
 
@@ -84,7 +84,6 @@ final class RouteConstant
         ];
     }
 }
-
 
 
 

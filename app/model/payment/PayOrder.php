@@ -36,6 +36,10 @@ class PayOrder extends BaseModel
         'channel_type',
         'channel_mode',
         'pay_amount',
+        'notify_url',
+        'return_url',
+        'client_ip',
+        'device',
         'fee_rate_bp_snapshot',
         'split_rate_bp_snapshot',
         'fee_estimated_amount',
@@ -74,6 +78,10 @@ class PayOrder extends BaseModel
         'channel_type' => 'integer',
         'channel_mode' => 'integer',
         'pay_amount' => 'integer',
+        'notify_url' => 'string',
+        'return_url' => 'string',
+        'client_ip' => 'string',
+        'device' => 'string',
         'fee_rate_bp_snapshot' => 'integer',
         'split_rate_bp_snapshot' => 'integer',
         'fee_estimated_amount' => 'integer',
@@ -94,7 +102,5 @@ class PayOrder extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
-
-
 
 

@@ -79,6 +79,56 @@ class MerchantPortalService extends BaseService
         return $this->channelService->myChannels($filters, $merchantId, $page, $pageSize);
     }
 
+    public function channelCreateMeta(): array
+    {
+        return $this->channelService->createMeta();
+    }
+
+    public function pluginConfigs(array $filters, int $merchantId, int $page, int $pageSize): array
+    {
+        return $this->channelService->pluginConfigs($filters, $merchantId, $page, $pageSize);
+    }
+
+    public function createPluginConfig(int $merchantId, array $data)
+    {
+        return $this->channelService->createPluginConfig($merchantId, $data);
+    }
+
+    public function updatePluginConfig(int $merchantId, int $id, array $data)
+    {
+        return $this->channelService->updatePluginConfig($merchantId, $id, $data);
+    }
+
+    public function deletePluginConfig(int $merchantId, int $id): bool
+    {
+        return $this->channelService->deletePluginConfig($merchantId, $id);
+    }
+
+    public function pluginConfigOptions(int $merchantId, string $pluginCode = ''): array
+    {
+        return $this->channelService->pluginConfigOptions($merchantId, $pluginCode);
+    }
+
+    public function createChannel(int $merchantId, array $data)
+    {
+        return $this->channelService->createChannel($merchantId, $data);
+    }
+
+    public function updateChannel(int $merchantId, int $id, array $data)
+    {
+        return $this->channelService->updateChannel($merchantId, $id, $data);
+    }
+
+    public function deleteChannel(int $merchantId, int $id): bool
+    {
+        return $this->channelService->deleteChannel($merchantId, $id);
+    }
+
+    public function pluginSchema(string $pluginCode): array
+    {
+        return $this->channelService->pluginSchema($pluginCode);
+    }
+
     /**
      * 获取商户路由解析结果。
      *
@@ -108,11 +158,12 @@ class MerchantPortalService extends BaseService
      * 生成或重置商户门户接口凭证。
      *
      * @param int $merchantId 商户ID
+     * @param array $options 生成选项
      * @return array 凭证数据
      */
-    public function issueCredential(int $merchantId): array
+    public function issueCredential(int $merchantId, array $options = []): array
     {
-        return $this->credentialService->issueCredential($merchantId);
+        return $this->credentialService->issueCredential($merchantId, $options);
     }
 
     /**

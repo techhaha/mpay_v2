@@ -90,6 +90,7 @@ class PaymentPluginSyncService extends BaseService
                 $current = $existing[$code] ?? null;
                 $payload = array_merge($row, [
                     'status' => (int) ($current->status ?? 1),
+                    'allow_merchant' => (int) ($current->allow_merchant ?? 0),
                     'remark' => (string) ($current->remark ?? ''),
                 ]);
 
@@ -140,5 +141,4 @@ class PaymentPluginSyncService extends BaseService
         return $instance;
     }
 }
-
 

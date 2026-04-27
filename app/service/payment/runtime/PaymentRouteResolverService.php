@@ -9,6 +9,7 @@ use app\common\util\FormatHelper;
 use app\exception\BusinessStateException;
 use app\exception\ResourceNotFoundException;
 use app\exception\ValidationException;
+use Throwable;
 use app\model\payment\PaymentChannel;
 use app\model\payment\PaymentPollGroup;
 use app\repository\ops\stat\ChannelDailyStatRepository;
@@ -79,6 +80,7 @@ class PaymentRouteResolverService extends BaseService
             throw new ValidationException('路由参数不合法');
         }
 
+        // 先锁定商户分组与支付方式的绑定，再进入正式通道选路。
         $bind = $this->bindRepository->findActiveByMerchantGroupAndPayType($merchantGroupId, $payTypeId);
         if (!$bind) {
             throw new ResourceNotFoundException('路由不存在', [
@@ -87,13 +89,107 @@ class PaymentRouteResolverService extends BaseService
             ]);
         }
 
+        $route = $this->resolveRouteSelection(
+            $merchantGroupId,
+            (int) $bind->poll_group_id,
+            $payTypeId,
+            $payAmount,
+            $context
+        );
+        $route['bind'] = $bind;
+
+        return $route;
+    }
+
+    /**
+     * 预览商户可用支付方式。
+     *
+     * 这里会遍历所有启用中的支付方式，并复用正式路由解析逻辑筛出真正可用的方式。
+     *
+     * @param int $merchantGroupId 商户分组ID
+     * @param int $payAmount 支付金额（分）
+     * @param array $context 路由上下文
+     * @return array<int, array<string, mixed>> 可用支付方式列表
+     */
+    public function previewAvailablePayTypes(int $merchantGroupId, int $payAmount, array $context = []): array
+    {
+        if ($merchantGroupId <= 0 || $payAmount <= 0) {
+            return [];
+        }
+
+        // 预览阶段只拿绑定摘要，不先把所有通道明细一次性拉出来。
+        $bindRows = $this->bindRepository->listSummaryByMerchantGroupId($merchantGroupId);
+        if ($bindRows->isEmpty()) {
+            return [];
+        }
+
+        $available = [];
+        foreach ($bindRows as $row) {
+            if ((int) ($row->status ?? 0) !== CommonConstant::STATUS_ENABLED) {
+                continue;
+            }
+
+            try {
+                // 每个可用支付方式仍然复用正式选路逻辑，只是最终结果被压成前端可展示摘要。
+                $route = $this->resolveRouteSelection(
+                    $merchantGroupId,
+                    (int) ($row->poll_group_id ?? 0),
+                    (int) ($row->pay_type_id ?? 0),
+                    $payAmount,
+                    $context
+                );
+            } catch (Throwable) {
+                continue;
+            }
+
+            $selected = $route['selected_channel'];
+            /** @var PaymentChannel $channel */
+            $channel = $selected['channel'];
+            $available[] = [
+                'pay_type_id' => (int) ($row->pay_type_id ?? 0),
+                'code' => (string) ($row->pay_type_code ?? ''),
+                'name' => (string) ($row->pay_type_name ?? ''),
+                'selected_channel_id' => (int) $channel->id,
+                'selected_channel_name' => (string) $channel->name,
+                'selected_channel_mode' => (int) $channel->channel_mode,
+            ];
+        }
+
+        return $available;
+    }
+
+    /**
+     * 解析指定轮询组与支付方式的可用通道路由。
+     *
+     * 该方法负责轮询组、候选通道、插件和统计数据的加载与过滤，并返回排序后的候选集和最终选中通道。
+     *
+     * @param int $merchantGroupId 商户分组ID
+     * @param int $pollGroupId 轮询组ID
+     * @param int $payTypeId 支付类型ID
+     * @param int $payAmount 支付金额（分）
+     * @param array $context 路由上下文，支持传入 `stat_date` 等辅助参数
+     * @return array{
+     *     poll_group: PaymentPollGroup,
+     *     candidates: array<int, array<string, mixed>>,
+     *     selected_channel: array<string, mixed>
+     * }
+     * @throws ValidationException
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
+     */
+    private function resolveRouteSelection(int $merchantGroupId, int $pollGroupId, int $payTypeId, int $payAmount, array $context = []): array
+    {
+        if ($merchantGroupId <= 0 || $pollGroupId <= 0 || $payTypeId <= 0 || $payAmount <= 0) {
+            throw new ValidationException('路由参数不合法');
+        }
+
         /** @var PaymentPollGroup|null $pollGroup */
-        $pollGroup = $this->pollGroupRepository->find((int) $bind->poll_group_id);
+        $pollGroup = $this->pollGroupRepository->find($pollGroupId);
         if (!$pollGroup || (int) $pollGroup->status !== CommonConstant::STATUS_ENABLED) {
             throw new ResourceNotFoundException('路由不存在', [
                 'merchant_group_id' => $merchantGroupId,
                 'pay_type_id' => $payTypeId,
-                'poll_group_id' => (int) ($bind->poll_group_id ?? 0),
+                'poll_group_id' => $pollGroupId,
             ]);
         }
 
@@ -104,9 +200,8 @@ class PaymentRouteResolverService extends BaseService
             ]);
         }
 
-        // 先拿到轮询组下的编排记录，再去批量加载通道、插件和统计数据，避免逐条查库。
+        // 先把轮询组里的候选通道、插件和渠道统计一次性取齐，再做逐层过滤。
         $channelIds = $candidateRows->pluck('channel_id')->all();
-        // 先一次性拉出通道和插件信息，避免候选过滤过程中频繁查库。
         $channels = $this->channelRepository->query()
             ->whereIn('id', $channelIds)
             ->where('status', CommonConstant::STATUS_ENABLED)
@@ -115,7 +210,6 @@ class PaymentRouteResolverService extends BaseService
         $pluginCodes = $channels->pluck('plugin_code')->filter()->unique()->values()->all();
         $plugins = [];
         if (!empty($pluginCodes)) {
-            // 通道会复用同一个插件实现，插件信息也按编码批量加载一次即可。
             $plugins = $this->paymentPluginRepository->query()
                 ->whereIn('code', $pluginCodes)
                 ->get()
@@ -123,9 +217,10 @@ class PaymentRouteResolverService extends BaseService
                 ->all();
         }
         $paymentType = $this->paymentTypeRepository->find($payTypeId);
+        if (!$paymentType || (int) $paymentType->status !== CommonConstant::STATUS_ENABLED) {
+            throw new ValidationException('支付方式不支持');
+        }
         $payTypeCode = trim((string) ($paymentType->code ?? ''));
-
-        // 默认统计日期取当天，路由预览时也可以由外部显式传入历史日期。
         $statDate = $context['stat_date'] ?? FormatHelper::timestamp(time(), 'Y-m-d');
         $payAmount = (int) $payAmount;
         $eligible = [];
@@ -139,7 +234,7 @@ class PaymentRouteResolverService extends BaseService
                 continue;
             }
 
-            // 先按支付方式收口，避免插件和通道配置不一致时误选。
+            // 通道类型、插件支持、金额区间和日限额都必须同时满足，候选才算有效。
             if ((int) $channel->pay_type_id !== $payTypeId) {
                 continue;
             }
@@ -150,25 +245,21 @@ class PaymentRouteResolverService extends BaseService
                 continue;
             }
 
-            // 通道还必须被插件明确支持，才允许进入候选集。
             $pluginPayTypes = is_array($plugin->pay_types) ? $plugin->pay_types : [];
             $pluginPayTypes = array_values(array_filter(array_map(static fn ($item) => trim((string) $item), $pluginPayTypes)));
             if ($payTypeCode === '' || !in_array($payTypeCode, $pluginPayTypes, true)) {
                 continue;
             }
 
-            // 金额区间不匹配的通道直接过滤掉。
             if (!$this->isAmountAllowed($channel, $payAmount)) {
                 continue;
             }
 
-            // 日限额和日成功笔数也要同时校验，防止选中已接近上限的通道。
             $stat = $this->channelDailyStatRepository->findByChannelAndDate($channelId, $statDate);
             if (!$this->isDailyLimitAllowed($channel, $payAmount, $statDate, $stat)) {
                 continue;
             }
 
-            // 保留排序和择优所需的权重、默认标记和统计指标。
             $eligible[] = [
                 'channel' => $channel,
                 'poll_group_channel' => $row,
@@ -183,7 +274,6 @@ class PaymentRouteResolverService extends BaseService
         }
 
         if (empty($eligible)) {
-            // 所有候选都被过滤后，直接判定通道不可用。
             throw new BusinessStateException('支付通道不可用', [
                 'poll_group_id' => (int) $pollGroup->id,
                 'merchant_group_id' => $merchantGroupId,
@@ -191,14 +281,12 @@ class PaymentRouteResolverService extends BaseService
             ]);
         }
 
-        // 按路由模式进行排序，然后再选出最终通道。
         $routeMode = (int) $pollGroup->route_mode;
+        // 剩余候选再按轮询组策略排序，最终只从排序结果里挑一条。
         $ordered = $this->sortCandidates($eligible, $routeMode);
         $selected = $this->selectChannel($ordered, $routeMode, (int) $pollGroup->id);
 
-        // 返回绑定、轮询组、候选集和最终选中项，供路由预览和实际支付共用。
         return [
-            'bind' => $bind,
             'poll_group' => $pollGroup,
             'candidates' => $ordered,
             'selected_channel' => $selected,

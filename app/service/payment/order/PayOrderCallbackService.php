@@ -4,8 +4,10 @@ namespace app\service\payment\order;
 
 use app\common\base\BaseService;
 use app\common\constant\NotifyConstant;
+use app\common\constant\PaymentPluginStatusConstant;
 use app\exception\PaymentException;
 use app\exception\ResourceNotFoundException;
+use app\exception\ValidationException;
 use app\model\payment\PayOrder;
 use app\repository\payment\trade\PayOrderRepository;
 use app\service\payment\runtime\NotifyService;
@@ -46,13 +48,13 @@ class PayOrderCallbackService extends BaseService
      *
      * @param array $input 回调载荷
      * @return PayOrder 支付订单模型
-     * @throws \InvalidArgumentException
+     * @throws ValidationException
      */
     public function handleChannelCallback(array $input): PayOrder
     {
         $payNo = trim((string) ($input['pay_no'] ?? ''));
         if ($payNo === '') {
-            throw new \InvalidArgumentException('pay_no 不能为空');
+            throw new ValidationException('pay_no 不能为空', ['pay_no' => $payNo]);
         }
 
         // 先落回调日志，后续无论成功还是失败，都可以从统一表里排查。
@@ -96,46 +98,48 @@ class PayOrderCallbackService extends BaseService
         $plugin = $this->paymentPluginManager->createByPayOrder($payOrder, true);
 
         try {
-            // 由插件自行解析请求并返回统一结构，控制器层不直接判断渠道格式。
-            $result = $plugin->notify($request);
-            $status = (string) ($result['status'] ?? '');
-            // 老插件可能只返回 success / paid / failed 这类状态字符串，这里统一折算成布尔结果。
-            $success = array_key_exists('success', $result)
-                ? (bool) $result['success']
-                : in_array($status, ['success', 'paid'], true);
+            // 插件必须直接返回标准结构，系统层只负责校验，不再兼容旧字段别名。
+            $result = $this->validatePluginNotifyResult($plugin->notify($request));
+            $status = (string) $result['status'];
 
             // 将插件返回值归一化为生命周期服务可消费的回调载荷。
             /** @var array<string, mixed> $callbackPayload */
             $callbackPayload = [
                 'pay_no' => $payNo,
-                'success' => $success,
+                'success' => $status === PaymentPluginStatusConstant::SUCCESS,
                 'channel_id' => (int) $payOrder->channel_id,
                 'callback_type' => NotifyConstant::CALLBACK_TYPE_ASYNC,
-                'request_data' => array_merge($request->get(), $request->post()),
+                'request_data' => $request->all(),
                 'verify_status' => NotifyConstant::VERIFY_STATUS_SUCCESS,
-                'process_status' => $success ? NotifyConstant::PROCESS_STATUS_SUCCESS : NotifyConstant::PROCESS_STATUS_FAILED,
+                'process_status' => $this->resolveProcessStatus($status),
                 'process_result' => $result,
-                'channel_trade_no' => (string) ($result['chan_trade_no'] ?? ''),
-                'channel_order_no' => (string) ($result['chan_order_no'] ?? ''),
+                'channel_trade_no' => (string) ($result['channel_trade_no'] ?? ''),
+                'channel_order_no' => (string) ($result['channel_order_no'] ?? ''),
                 'paid_at' => $result['paid_at'] ?? null,
+                'failed_at' => $result['failed_at'] ?? null,
                 'channel_error_code' => (string) ($result['channel_error_code'] ?? ''),
                 'channel_error_msg' => (string) ($result['channel_error_msg'] ?? ''),
-                'ext_json' => [
-                    'plugin_code' => (string) $payOrder->plugin_code,
-                    'notify_status' => $status,
-                ],
+                // 回调原文和插件解析结果只进入 ma_pay_callback_log；
+                // 支付单本身只更新状态、渠道单号和错误字段，避免 ext_json 变成通知历史桶。
+                'ext_json' => [],
             ];
             // 部分渠道会返回实际手续费，补充进回调载荷，便于后续清算和对账。
-            if (isset($result['fee_actual_amount'])) {
+            if ($result['fee_actual_amount'] !== null) {
                 $callbackPayload['fee_actual_amount'] = (int) $result['fee_actual_amount'];
             }
+            if ($status === PaymentPluginStatusConstant::PENDING) {
+                // 渠道通知已通过验签但尚未终态时，只记录日志，不提前推进支付单状态。
+                $this->notifyService->recordPayCallback($callbackPayload);
+                return $plugin->notifySuccess();
+            }
 
-            // 回调成功后统一交给生命周期服务落库，避免状态推进分散在不同分支里。
+            // 回调终态统一交给生命周期服务落库，避免状态推进分散在不同分支里。
             $this->handleChannelCallback($callbackPayload);
 
-            return $success ? $plugin->notifySuccess() : $plugin->notifyFail();
+            // 只要验签通过且已被系统处理，统一回成功响应，避免渠道对失败终态反复重推。
+            return $plugin->notifySuccess();
         } catch (PaymentException $e) {
-            // 插件已明确返回业务失败时，记录失败日志并按失败响应收口。
+            // 验签失败或插件解析失败时，记录失败日志并返回失败响应，允许渠道按自身策略重推。
             $this->notifyService->recordPayCallback([
                 'pay_no' => $payNo,
                 'channel_id' => (int) $payOrder->channel_id,
@@ -167,5 +171,90 @@ class PayOrderCallbackService extends BaseService
 
             return $plugin->notifyFail();
         }
+    }
+
+    /**
+     * 校验插件回调结果。
+     *
+     * 插件 `notify()` 必须直接返回当前系统约定的标准字段；
+     * 服务层不再做字段别名兼容或自动补齐。
+     *
+     * @param array<string, mixed> $result 插件返回值
+     * @return array<string, mixed>
+     * @throws PaymentException
+     */
+    private function validatePluginNotifyResult(array $result): array
+    {
+        $requiredKeys = [
+            'status',
+        ];
+
+        foreach ($requiredKeys as $key) {
+            if (!array_key_exists($key, $result)) {
+                throw new PaymentException('插件回调返回缺少标准字段', 40200, [
+                    'missing_key' => $key,
+                ]);
+            }
+        }
+
+        $status = strtolower(trim((string) $result['status']));
+        if (!in_array($status, PaymentPluginStatusConstant::notifyStatuses(), true)) {
+            throw new PaymentException('插件回调返回的状态不合法', 40200, [
+                'status' => $status,
+            ]);
+        }
+
+        $channelOrderNo = trim((string) ($result['channel_order_no'] ?? ''));
+        $channelTradeNo = trim((string) ($result['channel_trade_no'] ?? ''));
+        if ($channelOrderNo === '' && $channelTradeNo === '') {
+            throw new PaymentException('插件回调必须返回 channel_order_no 或 channel_trade_no', 40200);
+        }
+        if ($channelOrderNo === '') {
+            $channelOrderNo = $channelTradeNo;
+        }
+        if ($channelTradeNo === '') {
+            $channelTradeNo = $channelOrderNo;
+        }
+
+        if (array_key_exists('ext_json', $result) && !is_array($result['ext_json'])) {
+            throw new PaymentException('插件回调 ext_json 必须为数组', 40200);
+        }
+
+        $feeActualAmount = null;
+        if (array_key_exists('fee_actual_amount', $result) && $result['fee_actual_amount'] !== null) {
+            if (!is_numeric($result['fee_actual_amount'])) {
+                throw new PaymentException('插件回调 fee_actual_amount 必须为数字', 40200);
+            }
+            $feeActualAmount = (int) $result['fee_actual_amount'];
+        }
+
+        return [
+            'status' => $status,
+            'message' => trim((string) ($result['message'] ?? '')),
+            'channel_order_no' => $channelOrderNo,
+            'channel_trade_no' => $channelTradeNo,
+            'channel_status' => trim((string) ($result['channel_status'] ?? '')),
+            'channel_error_code' => trim((string) ($result['channel_error_code'] ?? '')),
+            'channel_error_msg' => trim((string) ($result['channel_error_msg'] ?? '')),
+            'paid_at' => $result['paid_at'] ?? null,
+            'failed_at' => $result['failed_at'] ?? null,
+            'fee_actual_amount' => $feeActualAmount,
+            'ext_json' => (array) ($result['ext_json'] ?? []),
+        ];
+    }
+
+    /**
+     * 根据插件标准状态映射日志处理状态。
+     *
+     * @param string $status 标准状态
+     * @return int
+     */
+    private function resolveProcessStatus(string $status): int
+    {
+        return match ($status) {
+            PaymentPluginStatusConstant::SUCCESS => NotifyConstant::PROCESS_STATUS_SUCCESS,
+            PaymentPluginStatusConstant::FAILED => NotifyConstant::PROCESS_STATUS_FAILED,
+            default => NotifyConstant::PROCESS_STATUS_PENDING,
+        };
     }
 }

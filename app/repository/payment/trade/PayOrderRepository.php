@@ -3,6 +3,7 @@
 namespace app\repository\payment\trade;
 
 use app\common\base\BaseRepository;
+use app\common\constant\TradeConstant;
 use app\model\payment\PayOrder;
 
 /**
@@ -160,6 +161,47 @@ class PayOrderRepository extends BaseRepository
     }
 
     /**
+     * 查询已过期但还未进入终态的支付单。
+     *
+     * @param string $now 当前时间
+     * @param int $limit 限制条数
+     * @return \Illuminate\Database\Eloquent\Collection<int, PayOrder> 支付单列表
+     */
+    public function listExpiredMutable(string $now, int $limit = 100)
+    {
+        return $this->model->newQuery()
+            ->whereIn('status', TradeConstant::orderMutableStatuses())
+            ->whereNotNull('expire_at')
+            ->where('expire_at', '<=', $now)
+            ->orderBy('expire_at')
+            ->orderBy('id')
+            ->limit(max(1, $limit))
+            ->get();
+    }
+
+    /**
+     * 查询需要主动查单的支付中订单。
+     *
+     * @param string $before 最早拉起时间
+     * @param int $limit 限制条数
+     * @return \Illuminate\Database\Eloquent\Collection<int, PayOrder> 支付单列表
+     */
+    public function listPayingForActiveQuery(string $before, int $limit = 50)
+    {
+        return $this->model->newQuery()
+            ->where('status', TradeConstant::ORDER_STATUS_PAYING)
+            ->where('request_at', '<=', $before)
+            ->where(function ($query) {
+                $query->whereNull('expire_at')
+                    ->orWhere('expire_at', '>', date('Y-m-d H:i:s'));
+            })
+            ->orderBy('request_at')
+            ->orderBy('id')
+            ->limit(max(1, $limit))
+            ->get();
+    }
+
+    /**
      * 查询商户最近支付单列表，用于总览展示。
      *
      * @param int $merchantId 商户ID
@@ -185,7 +227,6 @@ class PayOrderRepository extends BaseRepository
             ]);
     }
 }
-
 
 
 
