@@ -64,4 +64,19 @@ class CashierController extends BaseController
             $this->cashierService->payOrderDetail((string) ($payload['pay_no'] ?? ''))
         );
     }
+
+    /**
+     * 查询支付单状态。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function payOrderStatus(Request $request): Response
+    {
+        $payload = $this->validated($request->all(), CashierValidator::class, 'pay_order_status');
+
+        return $this->success(
+            $this->cashierService->payOrderStatus((string) ($payload['pay_no'] ?? ''))
+        );
+    }
 }

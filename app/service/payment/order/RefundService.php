@@ -25,7 +25,8 @@ class RefundService extends BaseService
     public function __construct(
         protected RefundQueryService $queryService,
         protected RefundCreationService $creationService,
-        protected RefundLifecycleService $lifecycleService
+        protected RefundLifecycleService $lifecycleService,
+        protected RefundDispatchService $dispatchService
     ) {
     }
 
@@ -97,7 +98,7 @@ class RefundService extends BaseService
             }
         }
 
-        return $this->lifecycleService->retryRefund($refundNo, $input);
+        return $this->dispatchService->dispatch($refundNo, true);
     }
 
     /**

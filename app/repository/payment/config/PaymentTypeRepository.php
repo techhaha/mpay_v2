@@ -49,8 +49,26 @@ class PaymentTypeRepository extends BaseRepository
             ->where('code', $code)
             ->first($columns);
     }
-}
 
+    /**
+     * 根据支付方式 ID 批量查询字典。
+     *
+     * @param array<int, int> $ids 支付方式 ID 列表
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PaymentType> 支付方式列表
+     */
+    public function listByIds(array $ids, array $columns = ['*'])
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if ($ids === []) {
+            return $this->model->newCollection();
+        }
+
+        return $this->model->newQuery()
+            ->whereIn('id', $ids)
+            ->get($columns);
+    }
+}
 
 
 

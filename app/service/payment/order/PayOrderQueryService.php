@@ -26,6 +26,7 @@ use app\repository\payment\trade\PayOrderRepository;
  * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
  * @property NotifyTaskRepository $notifyTaskRepository 通知任务仓库
  * @property PayOrderReportService $payOrderReportService 支付单报表服务
+ * @property PayOrderActionResolverService $payOrderActionResolverService 支付单操作项计算服务
  */
 class PayOrderQueryService extends BaseService
 {
@@ -38,6 +39,7 @@ class PayOrderQueryService extends BaseService
      * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
      * @param NotifyTaskRepository $notifyTaskRepository 通知任务仓库
      * @param PayOrderReportService $payOrderReportService 支付单报表服务
+     * @param PayOrderActionResolverService $payOrderActionResolverService 支付单操作项计算服务
      * @return void
      */
     public function __construct(
@@ -46,7 +48,8 @@ class PayOrderQueryService extends BaseService
         protected MerchantAccountLedgerRepository $merchantAccountLedgerRepository,
         protected PaymentTypeRepository $paymentTypeRepository,
         protected NotifyTaskRepository $notifyTaskRepository,
-        protected PayOrderReportService $payOrderReportService
+        protected PayOrderReportService $payOrderReportService,
+        protected PayOrderActionResolverService $payOrderActionResolverService
     ) {
     }
 
@@ -60,11 +63,12 @@ class PayOrderQueryService extends BaseService
      * @param int $page 页码
      * @param int $pageSize 每页条数
      * @param int|null $merchantId 商户ID
+     * @param bool $includeActions 是否返回后台可操作项
      * @return array{list: array<int, array<string, mixed>>, total: int, page: int, size: int, pay_types: array<int, array{label: string, value: int}>} 支付订单列表结构
      */
-    public function paginate(array $filters = [], int $page = 1, int $pageSize = 10, ?int $merchantId = null): array
+    public function paginate(array $filters = [], int $page = 1, int $pageSize = 10, ?int $merchantId = null, bool $includeActions = false): array
     {
-        $query = $this->buildPayOrderQuery($merchantId);
+        $query = $this->buildPayOrderQuery($merchantId, $includeActions);
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
         if ($keyword !== '') {
@@ -113,7 +117,10 @@ class PayOrderQueryService extends BaseService
 
         $list = [];
         foreach ($paginator->items() as $item) {
-            $list[] = $this->payOrderReportService->formatPayOrderRow($this->rowToArray($item));
+            $list[] = $this->payOrderReportService->formatPayOrderRow($item->toArray());
+        }
+        if ($includeActions) {
+            $list = $this->payOrderActionResolverService->resolveForRows($list);
         }
 
         return [
@@ -132,11 +139,12 @@ class PayOrderQueryService extends BaseService
      *
      * @param string $payNo 支付单号
      * @param int|null $merchantId 商户ID
+     * @param bool $includeActions 是否返回后台可操作项
      * @return array{pay_order: PayOrder, biz_order: \app\model\payment\BizOrder|null, pay_order_view: array<string, mixed>|null, timeline: array<int, array<string, mixed>>, account_ledgers: iterable, account_ledgers_view: array<int, array<string, mixed>>, notify_tasks: array<int, array<string, mixed>>} 支付详情结构
      * @throws ValidationException
      * @throws ResourceNotFoundException
      */
-    public function detail(string $payNo, ?int $merchantId = null): array
+    public function detail(string $payNo, ?int $merchantId = null, bool $includeActions = false): array
     {
         $payNo = trim($payNo);
         if ($payNo === '') {
@@ -154,20 +162,26 @@ class PayOrderQueryService extends BaseService
         }
 
         $bizOrder = $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
-        $detailRow = $this->buildPayOrderQuery($merchantId)
+        $detailRow = $this->buildPayOrderQuery($merchantId, $includeActions)
             ->where('po.pay_no', $payNo)
             ->first();
         $timeline = $this->payOrderReportService->buildPayTimeline($payOrder);
         $accountLedgers = $this->loadPayLedgers($payOrder);
         $accountLedgerRows = [];
         foreach ($accountLedgers as $ledger) {
-            $accountLedgerRows[] = $this->payOrderReportService->formatLedgerRow($this->rowToArray($ledger));
+            $accountLedgerRows[] = $this->payOrderReportService->formatLedgerRow($ledger->toArray());
+        }
+        $payOrderView = $detailRow ? $this->payOrderReportService->formatPayOrderRow($detailRow->toArray()) : null;
+        if ($includeActions && $payOrderView) {
+            $payOrderView = $this->payOrderActionResolverService->resolveForRow($payOrderView);
         }
 
         return [
             'pay_order' => $payOrder,
             'biz_order' => $bizOrder,
-            'pay_order_view' => $detailRow ? $this->payOrderReportService->formatPayOrderRow($this->rowToArray($detailRow)) : null,
+            'pay_order_view' => $payOrderView,
+            'actions' => $includeActions ? ($payOrderView['actions'] ?? []) : [],
+            'enabled_actions' => $includeActions ? ($payOrderView['enabled_actions'] ?? []) : [],
             'timeline' => $timeline,
             'account_ledgers' => $accountLedgers,
             'account_ledgers_view' => $accountLedgerRows,
@@ -202,9 +216,10 @@ class PayOrderQueryService extends BaseService
      * 查询支付单详情展示行，供列表与详情复用。
      *
      * @param int|null $merchantId 商户ID
+     * @param bool $includeActionColumns 是否包含后台动作计算所需字段
      * @return \Illuminate\Database\Eloquent\Builder
      */
-    private function buildPayOrderQuery(?int $merchantId = null)
+    private function buildPayOrderQuery(?int $merchantId = null, bool $includeActionColumns = false)
     {
         $query = $this->payOrderRepository->query()
             ->from('ma_pay_order as po')
@@ -228,12 +243,10 @@ class PayOrderQueryService extends BaseService
                 'po.channel_type',
                 'po.channel_mode',
                 'po.pay_amount',
-                'po.fee_rate_bp_snapshot',
                 'po.split_rate_bp_snapshot',
-                'po.fee_estimated_amount',
-                'po.fee_actual_amount',
+                'po.service_fee_amount',
                 'po.status',
-                'po.fee_status',
+                'po.service_fee_status',
                 'po.settlement_status',
                 'po.channel_request_no',
                 'po.channel_order_no',
@@ -275,7 +288,27 @@ class PayOrderQueryService extends BaseService
                 't.code as pay_type_code',
                 't.name as pay_type_name',
                 't.icon as pay_type_icon',
+            ])
+            ->selectRaw("COALESCE((SELECT ff.freeze_no FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), '') AS freeze_no")
+            ->selectRaw("COALESCE((SELECT ff.freeze_type FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), 0) AS freeze_type")
+            ->selectRaw("COALESCE((SELECT ff.remaining_amount FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), 0) AS freeze_remaining_amount")
+            ->selectRaw("COALESCE((SELECT ff.reason FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), '') AS freeze_reason")
+            ->selectRaw("COALESCE((SELECT ff.admin_id FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), 0) AS freeze_admin_id")
+            ->selectRaw("(SELECT ff.available_at FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1) AS freeze_available_at")
+            ->selectRaw("(SELECT ff.frozen_at FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1) AS frozen_at")
+            ->selectRaw("'' AS unfreeze_reason")
+            ->selectRaw("0 AS unfrozen_by")
+            ->selectRaw("NULL AS unfrozen_at");
+
+        if ($includeActionColumns) {
+            // 通知地址只用于后台按钮判断，避免影响商户/API 侧原有列表输出面。
+            $query->addSelect([
+                'po.notify_url',
+                'po.return_url',
+                'bo.notify_url as biz_notify_url',
+                'bo.return_url as biz_return_url',
             ]);
+        }
 
         if ($merchantId !== null && $merchantId > 0) {
             $query->where('po.merchant_id', $merchantId);
@@ -335,29 +368,6 @@ class PayOrderQueryService extends BaseService
             })
             ->values()
             ->all();
-    }
-
-    /**
-     * 将查询结果统一转换为纯数组，避免直接强转模型对象时把内部属性泄漏出去。
-     *
-     * @param mixed $row 查询结果行
-     * @return array<string, mixed>
-     */
-    private function rowToArray(mixed $row): array
-    {
-        if (is_array($row)) {
-            return $row;
-        }
-
-        if (is_object($row) && method_exists($row, 'toArray')) {
-            /** @var array<string, mixed> $data */
-            $data = $row->toArray();
-            return $data;
-        }
-
-        /** @var array<string, mixed> $data */
-        $data = (array) $row;
-        return $data;
     }
 
 }

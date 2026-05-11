@@ -112,6 +112,7 @@ class MerchantValidator extends Validator
             'remark',
         ],
         'updateStatus' => ['id', 'status'],
+        'loginToken' => ['id'],
         'resetPassword' => ['id', 'password', 'password_confirm'],
         'destroy' => ['id'],
     ];
@@ -181,6 +182,18 @@ class MerchantValidator extends Validator
     }
 
     /**
+     * 配置商户后台登录令牌场景规则。
+     *
+     * @return static 校验器实例
+     */
+    public function sceneLoginToken(): static
+    {
+        return $this->appendRules([
+            'id' => 'required|integer|min:1',
+        ]);
+    }
+
+    /**
      * 配置删除商户场景规则。
      *
      * @return static 校验器实例
@@ -192,4 +205,3 @@ class MerchantValidator extends Validator
         ]);
     }
 }
-

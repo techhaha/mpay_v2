@@ -90,52 +90,13 @@ class SystemConfigRuntimeService extends BaseService
      */
     protected function buildValueMap(): array
     {
-        $values = [];
-        $tabs = $this->systemConfigDefinitionService->tabs();
-        $keys = [];
-
-        foreach ($tabs as $tab) {
-            foreach ((array) ($tab['rules'] ?? []) as $rule) {
-                if (!is_array($rule)) {
-                    continue;
-                }
-
-                $field = strtolower(trim((string) ($rule['field'] ?? '')));
-                if ($field !== '' && !str_starts_with($field, '__')) {
-                    $keys[] = $field;
-                }
-            }
-        }
-
-        $keys = array_values(array_unique($keys));
-        if ($keys === []) {
+        $values = $this->systemConfigDefinitionService->allDefaultStorageValues();
+        if ($values === []) {
             return [];
         }
 
-        $rows = $this->systemConfigRepository->query()
-            ->whereIn('config_key', $keys)
-            ->get(['config_key', 'config_value']);
-
-        $rowMap = [];
-        foreach ($rows as $row) {
-            $rowMap[strtolower((string) $row->config_key)] = (string) ($row->config_value ?? '');
-        }
-
-        foreach ($tabs as $tab) {
-            foreach ((array) ($tab['rules'] ?? []) as $rule) {
-                if (!is_array($rule)) {
-                    continue;
-                }
-
-                $field = strtolower(trim((string) ($rule['field'] ?? '')));
-                if ($field === '' || str_starts_with($field, '__')) {
-                    continue;
-                }
-
-                $values[$field] = array_key_exists($field, $rowMap)
-                    ? (string) $rowMap[$field]
-                    : (string) ($rule['value'] ?? '');
-            }
+        foreach ($this->systemConfigRepository->valueMapByKeys(array_keys($values)) as $field => $value) {
+            $values[$field] = $value;
         }
 
         return $values;

@@ -6,7 +6,7 @@ use app\common\base\BaseModel;
 
 /**
  * 支付单模型。
- * 表示一次具体支付尝试，包含通道、状态、手续费快照和回调状态。
+ * 表示一次具体支付尝试，包含通道、状态、平台服务费快照和回调状态。
  */
 class PayOrder extends BaseModel
 {
@@ -40,12 +40,10 @@ class PayOrder extends BaseModel
         'return_url',
         'client_ip',
         'device',
-        'fee_rate_bp_snapshot',
         'split_rate_bp_snapshot',
-        'fee_estimated_amount',
-        'fee_actual_amount',
+        'service_fee_amount',
         'status',
-        'fee_status',
+        'service_fee_status',
         'settlement_status',
         'channel_request_no',
         'channel_order_no',
@@ -82,12 +80,10 @@ class PayOrder extends BaseModel
         'return_url' => 'string',
         'client_ip' => 'string',
         'device' => 'string',
-        'fee_rate_bp_snapshot' => 'integer',
         'split_rate_bp_snapshot' => 'integer',
-        'fee_estimated_amount' => 'integer',
-        'fee_actual_amount' => 'integer',
+        'service_fee_amount' => 'integer',
         'status' => 'integer',
-        'fee_status' => 'integer',
+        'service_fee_status' => 'integer',
         'settlement_status' => 'integer',
         'request_at' => 'datetime',
         'paid_at' => 'datetime',
@@ -102,5 +98,3 @@ class PayOrder extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
-
-

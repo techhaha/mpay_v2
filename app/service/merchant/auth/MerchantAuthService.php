@@ -136,7 +136,7 @@ class MerchantAuthService extends BaseService
      * @param string $password 密码
      * @param string $ip 请求 IP
      * @param string $userAgent 用户代理
-     * @return array{token: string, expires_in: int, merchant: Merchant, credential: array{status: int, sign_type: int, last_used_at: mixed}|null} 登录结果
+     * @return array{token: string, expires_in: int, merchant: Merchant, credential: array{status: int, last_used_at: mixed}|null} 登录结果
      * @throws ValidationException
      */
     public function authenticateCredentials(string $merchantNo, string $password, string $ip = '', string $userAgent = ''): array
@@ -183,7 +183,7 @@ class MerchantAuthService extends BaseService
      * @param int $ttlSeconds 过期秒数
      * @param string $ip 请求 IP
      * @param string $userAgent 用户代理
-     * @return array{token: string, expires_in: int, merchant: Merchant, credential: array{status: int, sign_type: int, last_used_at: mixed}|null} 登录结果
+     * @return array{token: string, expires_in: int, merchant: Merchant, credential: array{status: int, last_used_at: mixed}|null} 登录结果
      * @throws ValidationException
      */
     public function issueToken(int $merchantId, int $ttlSeconds = 86400, string $ip = '', string $userAgent = ''): array
@@ -213,7 +213,6 @@ class MerchantAuthService extends BaseService
             'merchant' => $merchant,
             'credential' => $credential ? [
                 'status' => (int) ($credential->status ?? 0),
-                'sign_type' => (int) ($credential->sign_type ?? 0),
                 'last_used_at' => $credential->last_used_at,
             ] : null,
         ];

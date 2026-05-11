@@ -149,6 +149,7 @@ class PaymentRouteResolverService extends BaseService
                 'pay_type_id' => (int) ($row->pay_type_id ?? 0),
                 'code' => (string) ($row->pay_type_code ?? ''),
                 'name' => (string) ($row->pay_type_name ?? ''),
+                'icon' => (string) ($row->pay_type_icon ?? ''),
                 'selected_channel_id' => (int) $channel->id,
                 'selected_channel_name' => (string) $channel->name,
                 'selected_channel_mode' => (int) $channel->channel_mode,

@@ -40,6 +40,18 @@ class PaymentPluginManager extends BaseService
     }
 
     /**
+     * 根据渠道创建转账插件实例。
+     *
+     * @param PaymentChannel|int $channel 渠道对象或渠道ID
+     * @param bool $allowDisabled 是否允许已禁用插件
+     * @return PaymentInterface&PayPluginInterface 插件实例
+     */
+    public function createTransferByChannel(PaymentChannel|int $channel, bool $allowDisabled = false): PaymentInterface & PayPluginInterface
+    {
+        return $this->factoryService->createTransferByChannel($channel, $allowDisabled);
+    }
+
+    /**
      * 根据支付订单创建支付插件实例。
      *
      * @param PayOrder $payOrder 支付订单
@@ -75,6 +87,5 @@ class PaymentPluginManager extends BaseService
         return $this->factoryService->pluginPayTypes($pluginCode, $allowDisabled);
     }
 }
-
 
 

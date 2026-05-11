@@ -226,8 +226,156 @@ class PayOrderRepository extends BaseRepository
                 'c.name as channel_name',
             ]);
     }
+
+    /**
+     * 查询网页流水监听需要关注的待支付订单。
+     *
+     * @param array<int, string> $pluginCodes 插件编码列表
+     * @param string $now 当前时间
+     * @param int $limit 限制条数
+     * @return \Illuminate\Database\Eloquent\Collection<int, PayOrder> 支付单列表
+     */
+    public function listReceiptWatcherPendingOrders(array $pluginCodes, string $now, int $limit = 500)
+    {
+        $pluginCodes = array_values(array_filter(array_map(static fn ($code): string => trim((string) $code), $pluginCodes)));
+        if ($pluginCodes === []) {
+            return $this->model->newCollection();
+        }
+
+        return $this->model->newQuery()
+            ->from('ma_pay_order as po')
+            ->join('ma_payment_channel as c', 'po.channel_id', '=', 'c.id')
+            ->leftJoin('ma_payment_type as t', 'po.pay_type_id', '=', 't.id')
+            ->whereIn('po.status', TradeConstant::orderMutableStatuses())
+            ->whereIn('c.plugin_code', $pluginCodes)
+            ->where('c.status', 1)
+            ->where(function ($query) use ($now): void {
+                $query->whereNull('po.expire_at')
+                    ->orWhere('po.expire_at', '>', $now);
+            })
+            ->orderBy('po.request_at')
+            ->orderBy('po.id')
+            ->limit(max(1, $limit))
+            ->get([
+                'po.id',
+                'po.pay_no',
+                'po.channel_id',
+                'po.pay_type_id',
+                'po.pay_amount',
+                'po.channel_order_no',
+                'po.channel_trade_no',
+                'po.request_at',
+                'po.expire_at',
+                'po.created_at',
+                'c.plugin_code',
+                'c.api_config_id',
+                't.code as pay_type',
+            ]);
+    }
+
+    /**
+     * 查询同一收款账号下已占用的识别金额。
+     *
+     * @param array<int, int> $channelIds 通道ID列表
+     * @param string $excludePayNo 排除的支付单号
+     * @param string $now 当前时间
+     * @return array<int, int> 已占用金额列表，单位分
+     */
+    public function listUsedReceiptAmounts(array $channelIds, string $excludePayNo, string $now): array
+    {
+        $channelIds = array_values(array_unique(array_filter(array_map('intval', $channelIds))));
+        if ($channelIds === []) {
+            return [];
+        }
+
+        return $this->model->newQuery()
+            ->whereIn('channel_id', $channelIds)
+            ->where('pay_no', '<>', $excludePayNo)
+            ->whereIn('status', TradeConstant::orderMutableStatuses())
+            ->where('expire_at', '>', $now)
+            ->lockForUpdate()
+            ->pluck('pay_amount')
+            ->map(fn ($amount): int => (int) $amount)
+            ->all();
+    }
+
+    /**
+     * 根据第三方流水号匹配支付单。
+     *
+     * @param array<int, int> $channelIds 通道ID列表
+     * @param string $orderNo 第三方流水号
+     * @param array $columns 字段列表
+     * @return PayOrder|null 支付单
+     */
+    public function findByReceiptChannelOrder(array $channelIds, string $orderNo, array $columns = ['*']): ?PayOrder
+    {
+        $channelIds = array_values(array_unique(array_filter(array_map('intval', $channelIds))));
+        $orderNo = trim($orderNo);
+        if ($channelIds === [] || $orderNo === '') {
+            return null;
+        }
+
+        return $this->model->newQuery()
+            ->whereIn('channel_id', $channelIds)
+            ->where(function ($query) use ($orderNo): void {
+                $query->where('channel_order_no', $orderNo)
+                    ->orWhere('channel_trade_no', $orderNo);
+            })
+            ->orderByDesc('id')
+            ->first($columns);
+    }
+
+    /**
+     * 根据金额查询同一收款账号下有效待支付订单。
+     *
+     * @param array<int, int> $channelIds 通道ID列表
+     * @param int $amount 金额，单位分
+     * @param int $payTypeId 支付方式ID
+     * @param string $now 当前时间
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PayOrder> 支付单列表
+     */
+    public function listMutableReceiptOrdersByAmount(array $channelIds, int $amount, int $payTypeId, string $now, array $columns = ['*'])
+    {
+        $channelIds = array_values(array_unique(array_filter(array_map('intval', $channelIds))));
+        if ($channelIds === []) {
+            return $this->model->newCollection();
+        }
+
+        $query = $this->model->newQuery()
+            ->whereIn('channel_id', $channelIds)
+            ->where('pay_amount', $amount)
+            ->whereIn('status', TradeConstant::orderMutableStatuses())
+            ->where('expire_at', '>', $now);
+
+        if ($payTypeId > 0) {
+            $query->where('pay_type_id', $payTypeId);
+        }
+
+        return $query->get($columns);
+    }
+
+    /**
+     * 查询同一收款账号下有效待支付订单，用于备注匹配。
+     *
+     * @param array<int, int> $channelIds 通道ID列表
+     * @param string $now 当前时间
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PayOrder> 支付单列表
+     */
+    public function listMutableReceiptOrders(array $channelIds, string $now, array $columns = ['*'])
+    {
+        $channelIds = array_values(array_unique(array_filter(array_map('intval', $channelIds))));
+        if ($channelIds === []) {
+            return $this->model->newCollection();
+        }
+
+        return $this->model->newQuery()
+            ->whereIn('channel_id', $channelIds)
+            ->whereIn('status', TradeConstant::orderMutableStatuses())
+            ->where('expire_at', '>', $now)
+            ->get($columns);
+    }
 }
-
-
 
 

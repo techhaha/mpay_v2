@@ -4,6 +4,7 @@ namespace app\service\payment\order;
 
 use app\common\base\BaseService;
 use app\model\payment\PayOrder;
+use app\model\payment\PaymentChannel;
 use support\Request;
 use support\Response;
 
@@ -40,11 +41,12 @@ class PayOrderService extends BaseService
      * @param int $page 页码
      * @param int $pageSize 每页条数
      * @param int|null $merchantId 商户ID
+     * @param bool $includeActions 是否返回后台可操作项
      * @return array 分页数据
      */
-    public function paginate(array $filters = [], int $page = 1, int $pageSize = 10, ?int $merchantId = null): array
+    public function paginate(array $filters = [], int $page = 1, int $pageSize = 10, ?int $merchantId = null, bool $includeActions = false): array
     {
-        return $this->queryService->paginate($filters, $page, $pageSize, $merchantId);
+        return $this->queryService->paginate($filters, $page, $pageSize, $merchantId, $includeActions);
     }
 
     /**
@@ -52,11 +54,12 @@ class PayOrderService extends BaseService
      *
      * @param string $payNo 支付单号
      * @param int|null $merchantId 商户ID
+     * @param bool $includeActions 是否返回后台可操作项
      * @return array 订单详情
      */
-    public function detail(string $payNo, ?int $merchantId = null): array
+    public function detail(string $payNo, ?int $merchantId = null, bool $includeActions = false): array
     {
-        return $this->queryService->detail($payNo, $merchantId);
+        return $this->queryService->detail($payNo, $merchantId, $includeActions);
     }
 
     /**
@@ -68,6 +71,18 @@ class PayOrderService extends BaseService
     public function preparePayAttempt(array $input): array
     {
         return $this->attemptService->preparePayAttempt($input);
+    }
+
+    /**
+     * 预创建指定通道支付尝试。
+     *
+     * @param array $input 下单数据
+     * @param PaymentChannel $channel 指定支付通道
+     * @return array 发起结果
+     */
+    public function preparePayAttemptByChannel(array $input, PaymentChannel $channel): array
+    {
+        return $this->attemptService->preparePayAttemptByChannel($input, $channel);
     }
 
     /**
@@ -178,17 +193,6 @@ class PayOrderService extends BaseService
     }
 
     /**
-     * 处理渠道回调。
-     *
-     * @param array $input 回调数据
-     * @return PayOrder 支付订单模型
-     */
-    public function handleChannelCallback(array $input): PayOrder
-    {
-        return $this->callbackService->handleChannelCallback($input);
-    }
-
-    /**
      * 按支付单号处理真实第三方回调。
      *
      * @param string $payNo 支付单号
@@ -199,6 +203,16 @@ class PayOrderService extends BaseService
     {
         return $this->callbackService->handlePluginCallback($payNo, $request);
     }
+
+    /**
+     * 按通道处理不携带支付单号的通知。
+     *
+     * @param int $channelId 通道ID
+     * @param Request $request 请求对象
+     * @return string|Response 字符串或响应对象
+     */
+    public function handleChannelNotify(int $channelId, Request $request): string|Response
+    {
+        return $this->callbackService->handleChannelNotify($channelId, $request);
+    }
 }
-
-

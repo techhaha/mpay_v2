@@ -522,7 +522,10 @@ class EpayMapiTest extends Command
 
         $extJson = (array) ($payOrder['ext_json'] ?? []);
         $presentation = (array) ($extJson['presentation'] ?? []);
-        $summary = $this->summarizePayParamsSnapshot((array) ($presentation['params_snapshot'] ?? []));
+        $summary = $this->summarizePayParams(
+            (array) ($presentation['pay_params'] ?? []),
+            (string) ($presentation['pay_page'] ?? '')
+        );
         if ($summary !== []) {
             $output->writeln('  插件返回:');
             $output->writeln('    ' . $this->formatJson($summary));
@@ -533,15 +536,16 @@ class EpayMapiTest extends Command
      * 归纳支付参数快照。
      *
      * @param array $snapshot 支付参数快照
+     * @param string $payPage 承接页类型
      * @return array 归纳结果
      */
-    private function summarizePayParamsSnapshot(array $snapshot): array
+    private function summarizePayParams(array $snapshot, string $payPage = ''): array
     {
         if ($snapshot === []) {
             return [];
         }
 
-        $summary = ['type' => (string) ($snapshot['type'] ?? '')];
+        $summary = ['pay_page' => $payPage];
         if (isset($snapshot['pay_product'])) {
             $summary['pay_product'] = (string) $snapshot['pay_product'];
         }
@@ -549,20 +553,20 @@ class EpayMapiTest extends Command
             $summary['pay_action'] = (string) $snapshot['pay_action'];
         }
 
-        switch ((string) ($snapshot['type'] ?? '')) {
-            case 'form':
+        switch ($summary['pay_page']) {
+            case 'html':
                 $html = $this->stringifyValue($snapshot['html'] ?? '');
                 $summary['html_length'] = strlen($html);
                 $summary['html_head'] = $this->limitString($this->normalizeWhitespace($html), 160);
                 break;
             case 'qrcode':
-                $summary['qrcode_url'] = $this->stringifyValue($snapshot['qrcode_url'] ?? $snapshot['qrcode_data'] ?? '');
+                $summary['qrcode'] = $this->stringifyValue($snapshot['qrcode'] ?? '');
                 break;
             case 'urlscheme':
-                $summary['urlscheme'] = $this->stringifyValue($snapshot['urlscheme'] ?? $snapshot['order_str'] ?? '');
+                $summary['urlscheme'] = $this->stringifyValue($snapshot['urlscheme'] ?? '');
                 break;
-            case 'url':
-                $summary['payurl'] = $this->stringifyValue($snapshot['payurl'] ?? '');
+            case 'jump':
+                $summary['url'] = $this->stringifyValue($snapshot['url'] ?? '');
                 break;
             default:
                 if (isset($snapshot['raw']) && is_array($snapshot['raw'])) {
@@ -1075,7 +1079,7 @@ class EpayMapiTest extends Command
     private function resolve(string $class): object
     {
         try {
-            $instance = container_make($class, []);
+            $instance = container_get($class);
         } catch (\Throwable $e) {
             throw new CommandException("无法解析 {$class}。", 0, $e);
         }

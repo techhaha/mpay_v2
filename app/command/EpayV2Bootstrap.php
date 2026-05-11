@@ -143,7 +143,6 @@ class EpayV2Bootstrap extends Command
             [
                 'merchant_id' => (int) $merchant->id,
                 'status' => AuthConstant::CREDENTIAL_STATUS_ENABLED,
-                'sign_type' => (int) ($credential?->sign_type ?? AuthConstant::API_SIGN_TYPE_MD5),
                 'api_key' => (string) ($credential?->api_key ?: bin2hex(random_bytes(16))),
                 'merchant_public_key' => $pair['public_key'],
             ]
@@ -476,7 +475,7 @@ POWERSHELL;
     private function resolve(string $class): object
     {
         try {
-            $instance = container_make($class, []);
+            $instance = container_get($class);
         } catch (\Throwable $e) {
             throw new CommandException("无法解析 {$class}。", 0, $e);
         }

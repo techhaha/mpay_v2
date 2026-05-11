@@ -3,6 +3,7 @@
 namespace app\repository\payment\config;
 
 use app\common\base\BaseRepository;
+use app\common\constant\CommonConstant;
 use app\model\payment\PaymentChannel;
 
 /**
@@ -122,6 +123,83 @@ class PaymentChannelRepository extends BaseRepository
             ->where('merchant_id', $merchantId)
             ->count();
     }
-}
 
+    /**
+     * 查询网页流水监听可用通道。
+     *
+     * @param array<int, string> $pluginCodes 支持监听的插件编码
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PaymentChannel> 通道列表
+     */
+    public function listReceiptWatcherChannels(array $pluginCodes, array $columns = ['*'])
+    {
+        $pluginCodes = array_values(array_filter(array_map(static fn ($code): string => trim((string) $code), $pluginCodes)));
+        if ($pluginCodes === []) {
+            return $this->model->newCollection();
+        }
+
+        return $this->model->newQuery()
+            ->where('status', CommonConstant::STATUS_ENABLED)
+            ->where('api_config_id', '>', 0)
+            ->whereIn('plugin_code', $pluginCodes)
+            ->orderBy('api_config_id')
+            ->orderBy('id')
+            ->get($columns);
+    }
+
+    /**
+     * 查询指定插件配置下的通道 ID。
+     *
+     * @param string $pluginCode 插件编码
+     * @param int $apiConfigId 插件配置ID
+     * @return array<int, int> 通道 ID 列表
+     */
+    public function idsByPluginConfig(string $pluginCode, int $apiConfigId): array
+    {
+        if (trim($pluginCode) === '' || $apiConfigId <= 0) {
+            return [];
+        }
+
+        return $this->model->newQuery()
+            ->where('plugin_code', $pluginCode)
+            ->where('api_config_id', $apiConfigId)
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+    }
+
+    /**
+     * 根据插件配置和支付方式解析流水对应通道。
+     *
+     * @param string $pluginCode 插件编码
+     * @param int $apiConfigId 插件配置ID
+     * @param string $payTypeCode 支付方式编码
+     * @return PaymentChannel|null 支付通道
+     */
+    public function findReceiptFlowChannel(string $pluginCode, int $apiConfigId, string $payTypeCode): ?PaymentChannel
+    {
+        $pluginCode = trim($pluginCode);
+        $payTypeCode = trim($payTypeCode);
+        if ($pluginCode === '' || $apiConfigId <= 0) {
+            return null;
+        }
+
+        $query = $this->model->newQuery()
+            ->from('ma_payment_channel as c')
+            ->where('c.plugin_code', $pluginCode)
+            ->where('c.api_config_id', $apiConfigId)
+            ->where('c.status', CommonConstant::STATUS_ENABLED)
+            ->orderBy('c.sort_no')
+            ->orderBy('c.id');
+
+        if ($payTypeCode !== '') {
+            $query->join('ma_payment_type as t', 'c.pay_type_id', '=', 't.id')
+                ->where('t.code', $payTypeCode);
+        }
+
+        /** @var PaymentChannel|null $channel */
+        $channel = $query->first(['c.*']);
+        return $channel;
+    }
+}
 

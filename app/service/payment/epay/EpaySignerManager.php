@@ -30,9 +30,9 @@ class EpaySignerManager
      */
     public function sign(array $params, string $signType, string $key): string
     {
-        return match ($this->normalizeSignType($signType)) {
+        return match (strtoupper(trim($signType))) {
             AuthConstant::API_SIGN_NAME_MD5 => $this->md5Signer->sign($params, $key),
-            AuthConstant::API_SIGN_NORMALIZED_SHA256_WITH_RSA => $this->rsaSigner->sign($params, $key),
+            AuthConstant::API_SIGN_NAME_RSA => $this->rsaSigner->sign($params, $key),
             default => throw new PaymentException('不支持的签名类型', 40200),
         };
     }
@@ -48,28 +48,10 @@ class EpaySignerManager
      */
     public function verify(array $params, string $signType, string $sign, string $key): bool
     {
-        return match ($this->normalizeSignType($signType)) {
+        return match (strtoupper(trim($signType))) {
             AuthConstant::API_SIGN_NAME_MD5 => $this->md5Signer->verify($params, $sign, $key),
-            AuthConstant::API_SIGN_NORMALIZED_SHA256_WITH_RSA => $this->rsaSigner->verify($params, $sign, $key),
+            AuthConstant::API_SIGN_NAME_RSA => $this->rsaSigner->verify($params, $sign, $key),
             default => false,
-        };
-    }
-
-    /**
-     * 归一化签名类型。
-     *
-     * @param string $signType 原始签名类型
-     * @return string 归一化后的签名类型
-     */
-    public function normalizeSignType(string $signType): string
-    {
-        $signType = strtoupper(trim($signType));
-
-        return match ($signType) {
-            'RSA' => AuthConstant::API_SIGN_NORMALIZED_SHA256_WITH_RSA,
-            AuthConstant::API_SIGN_NORMALIZED_SHA256_WITH_RSA => AuthConstant::API_SIGN_NORMALIZED_SHA256_WITH_RSA,
-            AuthConstant::API_SIGN_NAME_MD5 => AuthConstant::API_SIGN_NAME_MD5,
-            default => $signType,
         };
     }
 }

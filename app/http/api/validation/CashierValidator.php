@@ -27,6 +27,7 @@ class CashierValidator extends Validator
         'context' => ['biz_no'],
         'confirm' => ['biz_no', 'type'],
         'pay_order' => ['pay_no'],
+        'pay_order_status' => ['pay_no'],
     ];
 
     /**
@@ -60,6 +61,18 @@ class CashierValidator extends Validator
      * @return static
      */
     public function scenePayOrder(): static
+    {
+        return $this->appendRules([
+            'pay_no' => 'required|string|max:32',
+        ]);
+    }
+
+    /**
+     * 支付状态查询场景。
+     *
+     * @return static
+     */
+    public function scenePayOrderStatus(): static
     {
         return $this->appendRules([
             'pay_no' => 'required|string|max:32',

@@ -404,7 +404,6 @@ class EpayMockChainTest extends Command
                 'merchant_id' => (int) $merchant->id,
                 'api_key' => 'mock-v1-api-key-20260423',
                 'merchant_public_key' => '',
-                'sign_type' => AuthConstant::API_SIGN_TYPE_MD5,
                 'status' => AuthConstant::CREDENTIAL_STATUS_ENABLED,
             ]
         );
@@ -477,7 +476,6 @@ class EpayMockChainTest extends Command
                 'merchant_id' => (int) $merchant->id,
                 'api_key' => 'mock-v2-api-key-20260423',
                 'merchant_public_key' => $merchantPair['public_key'],
-                'sign_type' => AuthConstant::API_SIGN_TYPE_SHA256_WITH_RSA,
                 'status' => AuthConstant::CREDENTIAL_STATUS_ENABLED,
             ]
         );
@@ -847,10 +845,10 @@ class EpayMockChainTest extends Command
         /** @var EpaySignerManager $signerManager */
         $signerManager = $this->resolve(EpaySignerManager::class);
         $payload['timestamp'] = (string) time();
-        $payload['sign_type'] = AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA;
+        $payload['sign_type'] = AuthConstant::API_SIGN_NAME_RSA;
         $signPayload = $payload;
         unset($signPayload['sign'], $signPayload['sign_type']);
-        $payload['sign'] = $signerManager->sign($signPayload, AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA, $privateKey);
+        $payload['sign'] = $signerManager->sign($signPayload, AuthConstant::API_SIGN_NAME_RSA, $privateKey);
 
         return $payload;
     }
@@ -870,11 +868,10 @@ class EpayMockChainTest extends Command
             return ['passed' => false, 'message' => '响应缺少 sign'];
         }
 
-        $signType = $signerManager->normalizeSignType((string) ($responseData['sign_type'] ?? AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA));
         $verifyPayload = $responseData;
         unset($verifyPayload['sign'], $verifyPayload['sign_type']);
 
-        if (!$signerManager->verify($verifyPayload, $signType, $sign, $platformPublicKey)) {
+        if (!$signerManager->verify($verifyPayload, (string) ($responseData['sign_type'] ?? AuthConstant::API_SIGN_NAME_RSA), $sign, $platformPublicKey)) {
             return ['passed' => false, 'message' => '响应验签失败'];
         }
 
@@ -942,11 +939,11 @@ class EpayMockChainTest extends Command
             'param' => (string) (((array) ($bizOrder->ext_json['merchant'] ?? []))['param'] ?? ''),
             'timestamp' => (string) time(),
             'endtime' => FormatHelper::dateTime($this->nowDateTime()),
-            'sign_type' => AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA,
+            'sign_type' => AuthConstant::API_SIGN_NAME_RSA,
         ];
         $signPayload = $payload;
         unset($signPayload['sign'], $signPayload['sign_type']);
-        $payload['sign'] = $signerManager->sign($signPayload, AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA, $mockPlatformPrivateKey);
+        $payload['sign'] = $signerManager->sign($signPayload, AuthConstant::API_SIGN_NAME_RSA, $mockPlatformPrivateKey);
 
         return $payload;
     }
@@ -1300,7 +1297,7 @@ class EpayMockChainTest extends Command
     private function resolve(string $class): object
     {
         try {
-            $instance = container_make($class, []);
+            $instance = container_get($class);
         } catch (Throwable $e) {
             throw new CommandException('无法解析 ' . $class, 50002, $e);
         }

@@ -80,6 +80,33 @@ class PaymentPluginFactoryService extends BaseService
     }
 
     /**
+     * 根据渠道创建转账插件实例。
+     *
+     * 转账能力由插件 transfer_types 声明，不再用支付方式 pay_types 做拦截。
+     *
+     * @param PaymentChannel|int $channel 渠道对象或渠道ID
+     * @param bool $allowDisabled 是否允许已禁用插件
+     * @return PaymentInterface&PayPluginInterface 插件实例
+     * @throws PaymentException
+     */
+    public function createTransferByChannel(PaymentChannel|int $channel, bool $allowDisabled = false): PaymentInterface & PayPluginInterface
+    {
+        $channelModel = $channel instanceof PaymentChannel
+            ? $channel
+            : $this->paymentChannelRepository->find((int) $channel);
+
+        if (!$channelModel) {
+            throw new PaymentException('支付通道不存在', 40402, ['channel_id' => (int) $channel]);
+        }
+
+        $plugin = $this->resolvePlugin((string) $channelModel->plugin_code, $allowDisabled);
+        $instance = $this->instantiatePlugin((string) $plugin->class_name);
+        $instance->init($this->buildChannelConfig($channelModel, $plugin));
+
+        return $instance;
+    }
+
+    /**
      * 根据支付订单创建支付插件实例。
      *
      * @param PayOrder $payOrder 支付订单

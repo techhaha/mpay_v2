@@ -158,6 +158,23 @@ class RefundOrderRepository extends BaseRepository
     }
 
     /**
+     * 锁定指定支付单下会占用可退余额的退款单。
+     *
+     * @param string $payNo 支付单号
+     * @param array<int, int> $statuses 状态列表
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, RefundOrder> 退款单列表
+     */
+    public function listForUpdateByPayNoAndStatuses(string $payNo, array $statuses, array $columns = ['*'])
+    {
+        return $this->model->newQuery()
+            ->where('pay_no', $payNo)
+            ->whereIn('status', $statuses)
+            ->lockForUpdate()
+            ->get($columns);
+    }
+
+    /**
      * 统计商户下的退款订单数量。
      *
      * @param int $merchantId 商户ID
@@ -170,6 +187,5 @@ class RefundOrderRepository extends BaseRepository
             ->count();
     }
 }
-
 
 

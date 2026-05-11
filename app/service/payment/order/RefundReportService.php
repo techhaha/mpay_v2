@@ -36,7 +36,7 @@ class RefundReportService extends BaseService
         $row['refund_amount_text'] = $this->formatAmount((int) ($row['refund_amount'] ?? 0));
         $row['fee_reverse_amount_text'] = $this->formatAmount((int) ($row['fee_reverse_amount'] ?? 0));
         $row['pay_order_amount_text'] = $this->formatAmount((int) ($row['pay_order_amount'] ?? 0));
-        $row['pay_fee_actual_amount_text'] = $this->formatAmount((int) ($row['pay_fee_actual_amount'] ?? 0));
+        $row['pay_service_fee_amount_text'] = $this->formatAmount((int) ($row['pay_service_fee_amount'] ?? 0));
         $row['biz_order_amount_text'] = $this->formatAmount((int) ($row['biz_order_amount'] ?? 0));
         $row['biz_paid_amount_text'] = $this->formatAmount((int) ($row['biz_paid_amount'] ?? 0));
         $row['biz_refund_amount_text'] = $this->formatAmount((int) ($row['biz_refund_amount'] ?? 0));
@@ -112,4 +112,3 @@ class RefundReportService extends BaseService
         return $row;
     }
 }
-

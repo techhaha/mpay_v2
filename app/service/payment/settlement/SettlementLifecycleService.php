@@ -12,7 +12,9 @@ use app\model\payment\SettlementOrder;
 use app\repository\payment\settlement\SettlementItemRepository;
 use app\repository\payment\settlement\SettlementOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
+use app\repository\payment\trade\RefundOrderRepository;
 use app\service\account\funds\MerchantAccountService;
+use app\service\payment\order\PayOrderRiskControlService;
 use Webman\Event\Event;
 
 /**
@@ -23,7 +25,9 @@ use Webman\Event\Event;
  * @property SettlementOrderRepository $settlementOrderRepository 结算订单仓库
  * @property SettlementItemRepository $settlementItemRepository 结算明细仓库
  * @property PayOrderRepository $payOrderRepository 支付单仓库
+ * @property RefundOrderRepository $refundOrderRepository 退款单仓库
  * @property MerchantAccountService $merchantAccountService 商户账户服务
+ * @property PayOrderRiskControlService $payOrderRiskControlService 支付单风控服务
  */
 class SettlementLifecycleService extends BaseService
 {
@@ -33,14 +37,18 @@ class SettlementLifecycleService extends BaseService
      * @param SettlementOrderRepository $settlementOrderRepository 结算订单仓库
      * @param SettlementItemRepository $settlementItemRepository 结算明细仓库
      * @param PayOrderRepository $payOrderRepository 支付订单仓库
+     * @param RefundOrderRepository $refundOrderRepository 退款订单仓库
      * @param MerchantAccountService $merchantAccountService 商户账户服务
+     * @param PayOrderRiskControlService $payOrderRiskControlService 支付单风控服务
      * @return void
      */
     public function __construct(
         protected SettlementOrderRepository $settlementOrderRepository,
         protected SettlementItemRepository $settlementItemRepository,
         protected PayOrderRepository $payOrderRepository,
-        protected MerchantAccountService $merchantAccountService
+        protected RefundOrderRepository $refundOrderRepository,
+        protected MerchantAccountService $merchantAccountService,
+        protected PayOrderRiskControlService $payOrderRiskControlService
     ) {
     }
 
@@ -160,6 +168,24 @@ class SettlementLifecycleService extends BaseService
                 ]);
             }
 
+            $items = $this->settlementItemRepository->listBySettleNo($settleNo);
+            $lockedPayOrders = [];
+            foreach ($items as $item) {
+                $payNo = trim((string) ($item->pay_no ?? ''));
+                if ($payNo === '') {
+                    continue;
+                }
+
+                $payOrder = $this->payOrderRepository->findForUpdateByPayNo($payNo);
+                if ($payOrder) {
+                    // 清算入账前锁定并检查支付单，避免冻结单继续入账。
+                    $this->payOrderRiskControlService->assertNotFrozen($payOrder, '清算入账');
+                    $lockedPayOrders[$payNo] = $payOrder;
+                }
+            }
+
+            $this->refreshSettlementAmountsBeforeAccount($settlementOrder, $items, $lockedPayOrders);
+
             if ((int) $settlementOrder->accounted_amount > 0) {
                 // 只有净额大于 0 时才入账到商户可提现余额。
                 $this->merchantAccountService->creditAvailableAmountInCurrentTransaction(
@@ -180,14 +206,13 @@ class SettlementLifecycleService extends BaseService
             $settlementOrder->completed_at = $this->now();
             $settlementOrder->save();
 
-            $items = $this->settlementItemRepository->listBySettleNo($settleNo);
             foreach ($items as $item) {
                 // 清算明细和关联支付单状态一起同步，避免批次与订单状态不一致。
                 $item->item_status = TradeConstant::SETTLEMENT_STATUS_SETTLED;
                 $item->save();
 
                 if (!empty($item->pay_no)) {
-                    $payOrder = $this->payOrderRepository->findByPayNo((string) $item->pay_no);
+                    $payOrder = $lockedPayOrders[(string) $item->pay_no] ?? null;
                     if ($payOrder) {
                         $payOrder->settlement_status = TradeConstant::SETTLEMENT_STATUS_SETTLED;
                         $payOrder->save();
@@ -272,6 +297,73 @@ class SettlementLifecycleService extends BaseService
         }
 
         return $settlementOrder;
+    }
+
+    /**
+     * 入账前按支付单和已成功退款重算清算金额。
+     *
+     * @param SettlementOrder $settlementOrder 清算单
+     * @param iterable $items 清算明细
+     * @param array<string, \app\model\payment\PayOrder> $lockedPayOrders 已锁定支付单
+     * @return void
+     */
+    private function refreshSettlementAmountsBeforeAccount(SettlementOrder $settlementOrder, iterable $items, array $lockedPayOrders): void
+    {
+        $grossAmount = 0;
+        $feeAmount = 0;
+        $refundAmount = 0;
+        $feeReverseAmount = 0;
+        $netAmount = 0;
+        $hasPayItems = false;
+
+        foreach ($items as $item) {
+            $payNo = trim((string) ($item->pay_no ?? ''));
+            $payOrder = $payNo !== '' ? ($lockedPayOrders[$payNo] ?? null) : null;
+            if (!$payOrder) {
+                continue;
+            }
+
+            $hasPayItems = true;
+            $itemPayAmount = (int) $payOrder->pay_amount;
+            $itemFeeAmount = (int) $payOrder->service_fee_amount;
+            $itemRefundAmount = 0;
+            $itemFeeReverseAmount = 0;
+
+            $refunds = $this->refundOrderRepository->listForUpdateByPayNoAndStatuses($payNo, [
+                TradeConstant::REFUND_STATUS_SUCCESS,
+            ], ['refund_amount', 'fee_reverse_amount']);
+            foreach ($refunds as $refund) {
+                $itemRefundAmount += (int) $refund->refund_amount;
+                $itemFeeReverseAmount += (int) $refund->fee_reverse_amount;
+            }
+
+            $itemNetAmount = max(0, $itemPayAmount - $itemFeeAmount - $itemRefundAmount + $itemFeeReverseAmount);
+
+            $item->pay_amount = $itemPayAmount;
+            $item->fee_amount = $itemFeeAmount;
+            $item->refund_amount = $itemRefundAmount;
+            $item->fee_reverse_amount = $itemFeeReverseAmount;
+            $item->net_amount = $itemNetAmount;
+            $item->save();
+
+            $grossAmount += $itemPayAmount;
+            $feeAmount += $itemFeeAmount;
+            $refundAmount += $itemRefundAmount;
+            $feeReverseAmount += $itemFeeReverseAmount;
+            $netAmount += $itemNetAmount;
+        }
+
+        if (!$hasPayItems) {
+            return;
+        }
+
+        $settlementOrder->gross_amount = $grossAmount;
+        $settlementOrder->fee_amount = $feeAmount;
+        $settlementOrder->refund_amount = $refundAmount;
+        $settlementOrder->fee_reverse_amount = $feeReverseAmount;
+        $settlementOrder->net_amount = $netAmount;
+        $settlementOrder->accounted_amount = $netAmount;
+        $settlementOrder->save();
     }
 
     /**

@@ -144,6 +144,10 @@ class MpayTest extends Command
                 'pay_amount' => $payAmount,
                 'subject' => $this->envString('MPAY_TEST_PAYMENT_SUBJECT', 'mpay smoke payment'),
                 'body' => $this->envString('MPAY_TEST_PAYMENT_BODY', 'mpay smoke payment'),
+                'notify_url' => $this->envString('MPAY_TEST_PAYMENT_NOTIFY_URL', ''),
+                'return_url' => $this->envString('MPAY_TEST_PAYMENT_RETURN_URL', ''),
+                'client_ip' => $this->envString('MPAY_TEST_PAYMENT_CLIENT_IP', '127.0.0.1'),
+                'device' => $this->envString('MPAY_TEST_PAYMENT_DEVICE', 'pc'),
                 'ext_json' => $this->envJson('MPAY_TEST_PAYMENT_EXT_JSON', []),
             ]);
 
@@ -164,7 +168,6 @@ class MpayTest extends Command
                 $message .= ', 已标记超时';
             } elseif ($this->envBool('MPAY_TEST_PAYMENT_MARK_SUCCESS', false)) {
                 $service->markPaySuccess((string) $payOrder->pay_no, [
-                    'fee_actual_amount' => $this->envInt('MPAY_TEST_PAYMENT_FEE_AMOUNT', (int) $payOrder->fee_estimated_amount),
                     'channel_trade_no' => $this->envString('MPAY_TEST_PAYMENT_CHANNEL_TRADE_NO', $this->generateTestNo('CH-')),
                     'channel_order_no' => $this->envString('MPAY_TEST_PAYMENT_CHANNEL_ORDER_NO', $this->generateTestNo('CO-')),
                 ]);
@@ -273,10 +276,10 @@ class MpayTest extends Command
                             'pay_no' => (string) $payOrder->pay_no,
                             'refund_no' => '',
                             'pay_amount' => (int) $payOrder->pay_amount,
-                            'fee_amount' => (int) $payOrder->fee_actual_amount,
+                            'fee_amount' => (int) $payOrder->service_fee_amount,
                             'refund_amount' => 0,
                             'fee_reverse_amount' => 0,
-                            'net_amount' => max(0, (int) $payOrder->pay_amount - (int) $payOrder->fee_actual_amount),
+                            'net_amount' => max(0, (int) $payOrder->pay_amount - (int) $payOrder->service_fee_amount),
                             'item_status' => TradeConstant::SETTLEMENT_STATUS_PENDING,
                         ]];
                         $merchantId = (int) $payOrder->merchant_id;
@@ -442,7 +445,7 @@ class MpayTest extends Command
     private function resolve(string $class): object
     {
         try {
-            $instance = container_make($class, []);
+            $instance = container_get($class);
         } catch (\Throwable $e) {
             throw new CommandException("无法解析 {$class}。", 0, $e);
         }

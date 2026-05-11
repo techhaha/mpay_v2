@@ -3,6 +3,7 @@
 namespace app\service\account\funds;
 
 use app\common\base\BaseService;
+use app\common\constant\FundFreezeConstant;
 use app\common\constant\LedgerConstant;
 use app\exception\BalanceInsufficientException;
 use app\exception\ConflictException;
@@ -10,6 +11,7 @@ use app\exception\ValidationException;
 use app\model\merchant\MerchantAccount;
 use app\model\merchant\MerchantAccountLedger;
 use app\repository\account\balance\MerchantAccountRepository;
+use app\repository\account\freeze\MerchantFundFreezeRepository;
 use app\repository\account\ledger\MerchantAccountLedgerRepository;
 
 /**
@@ -18,6 +20,7 @@ use app\repository\account\ledger\MerchantAccountLedgerRepository;
  * 只负责账户创建、冻结、扣减、释放和入账等资金变更。
  *
  * @property MerchantAccountRepository $accountRepository 账户仓库
+ * @property MerchantFundFreezeRepository $fundFreezeRepository 资金冻结仓库
  * @property MerchantAccountLedgerRepository $ledgerRepository 流水仓库
  */
 class MerchantAccountCommandService extends BaseService
@@ -26,11 +29,13 @@ class MerchantAccountCommandService extends BaseService
      * 构造方法。
      *
      * @param MerchantAccountRepository $accountRepository 账户仓库
+     * @param MerchantFundFreezeRepository $fundFreezeRepository 资金冻结仓库
      * @param MerchantAccountLedgerRepository $ledgerRepository 流水仓库
      * @return void
      */
     public function __construct(
         protected MerchantAccountRepository $accountRepository,
+        protected MerchantFundFreezeRepository $fundFreezeRepository,
         protected MerchantAccountLedgerRepository $ledgerRepository
     ) {
     }
@@ -109,44 +114,41 @@ class MerchantAccountCommandService extends BaseService
      */
     public function freezeAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
-        $this->assertPositiveAmount($amount);
-        if ($idempotencyKey === '') {
-            throw new ValidationException('幂等键不能为空');
-        }
+        return $this->freezeAvailableByBizTypeInCurrentTransaction(
+            $merchantId,
+            $amount,
+            $bizNo,
+            $idempotencyKey,
+            LedgerConstant::BIZ_TYPE_PAY_FREEZE,
+            $extJson['remark'] ?? '余额冻结',
+            $extJson,
+            $traceNo
+        );
+    }
 
-        if ($existing = $this->findLedgerByIdempotencyKey($idempotencyKey)) {
-            $this->assertLedgerMatch($existing, LedgerConstant::BIZ_TYPE_PAY_FREEZE, $bizNo, $amount, LedgerConstant::DIRECTION_OUT);
-            return $existing;
-        }
-
-        $account = $this->ensureAccountInCurrentTransaction($merchantId);
-        if ((int) $account->available_balance < $amount) {
-            throw new BalanceInsufficientException($merchantId, $amount, (int) $account->available_balance);
-        }
-
-        $availableBefore = (int) $account->available_balance;
-        $frozenBefore = (int) $account->frozen_balance;
-
-        $account->available_balance = $availableBefore - $amount;
-        $account->frozen_balance = $frozenBefore + $amount;
-        $account->save();
-
-        return $this->createLedger([
-            'merchant_id' => $merchantId,
-            'biz_type' => LedgerConstant::BIZ_TYPE_PAY_FREEZE,
-            'biz_no' => $bizNo,
-            'trace_no' => $this->normalizeTraceNo($traceNo, $bizNo),
-            'event_type' => LedgerConstant::EVENT_TYPE_CREATE,
-            'direction' => LedgerConstant::DIRECTION_OUT,
-            'amount' => $amount,
-            'available_before' => $availableBefore,
-            'available_after' => (int) $account->available_balance,
-            'frozen_before' => $frozenBefore,
-            'frozen_after' => (int) $account->frozen_balance,
-            'idempotency_key' => $idempotencyKey,
-            'remark' => $extJson['remark'] ?? '余额冻结',
-            'ext_json' => $extJson,
-        ]);
+    /**
+     * 在当前事务中冻结风控资金。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function freezeRiskAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->freezeAvailableByBizTypeInCurrentTransaction(
+            $merchantId,
+            $amount,
+            $bizNo,
+            $idempotencyKey,
+            LedgerConstant::BIZ_TYPE_RISK_FREEZE,
+            $extJson['remark'] ?? '风控资金冻结',
+            $extJson,
+            $traceNo
+        );
     }
 
     /**
@@ -206,6 +208,8 @@ class MerchantAccountCommandService extends BaseService
         $account->frozen_balance = $frozenBefore - $amount;
         $account->save();
 
+        $this->reduceFundFreezeRecordIfNeeded($merchantId, $amount, $bizNo, LedgerConstant::BIZ_TYPE_PAY_DEDUCT, $extJson);
+
         return $this->createLedger([
             'merchant_id' => $merchantId,
             'biz_type' => LedgerConstant::BIZ_TYPE_PAY_DEDUCT,
@@ -220,7 +224,6 @@ class MerchantAccountCommandService extends BaseService
             'frozen_after' => (int) $account->frozen_balance,
             'idempotency_key' => $idempotencyKey,
             'remark' => $extJson['remark'] ?? '余额扣减',
-            'ext_json' => $extJson,
         ]);
     }
 
@@ -256,48 +259,41 @@ class MerchantAccountCommandService extends BaseService
      */
     public function releaseFrozenAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
-        $this->assertPositiveAmount($amount);
-        if ($idempotencyKey === '') {
-            throw new ValidationException('幂等键不能为空');
-        }
+        return $this->releaseFrozenByBizTypeInCurrentTransaction(
+            $merchantId,
+            $amount,
+            $bizNo,
+            $idempotencyKey,
+            LedgerConstant::BIZ_TYPE_PAY_RELEASE,
+            $extJson['remark'] ?? '冻结余额释放',
+            $extJson,
+            $traceNo
+        );
+    }
 
-        if ($existing = $this->findLedgerByIdempotencyKey($idempotencyKey)) {
-            $this->assertLedgerMatch($existing, LedgerConstant::BIZ_TYPE_PAY_RELEASE, $bizNo, $amount, LedgerConstant::DIRECTION_IN);
-            return $existing;
-        }
-
-        $account = $this->ensureAccountInCurrentTransaction($merchantId);
-        if ((int) $account->frozen_balance < $amount) {
-            throw new ValidationException('冻结余额不足', [
-                'merchant_id' => $merchantId,
-                'amount' => $amount,
-                'frozen_balance' => (int) $account->frozen_balance,
-            ]);
-        }
-
-        $availableBefore = (int) $account->available_balance;
-        $frozenBefore = (int) $account->frozen_balance;
-
-        $account->available_balance = $availableBefore + $amount;
-        $account->frozen_balance = $frozenBefore - $amount;
-        $account->save();
-
-        return $this->createLedger([
-            'merchant_id' => $merchantId,
-            'biz_type' => LedgerConstant::BIZ_TYPE_PAY_RELEASE,
-            'biz_no' => $bizNo,
-            'trace_no' => $this->normalizeTraceNo($traceNo, $bizNo),
-            'event_type' => LedgerConstant::EVENT_TYPE_REVERSE,
-            'direction' => LedgerConstant::DIRECTION_IN,
-            'amount' => $amount,
-            'available_before' => $availableBefore,
-            'available_after' => (int) $account->available_balance,
-            'frozen_before' => $frozenBefore,
-            'frozen_after' => (int) $account->frozen_balance,
-            'idempotency_key' => $idempotencyKey,
-            'remark' => $extJson['remark'] ?? '冻结余额释放',
-            'ext_json' => $extJson,
-        ]);
+    /**
+     * 在当前事务中释放风控冻结资金。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function releaseRiskFrozenAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->releaseFrozenByBizTypeInCurrentTransaction(
+            $merchantId,
+            $amount,
+            $bizNo,
+            $idempotencyKey,
+            LedgerConstant::BIZ_TYPE_RISK_RELEASE,
+            $extJson['remark'] ?? '风控冻结释放',
+            $extJson,
+            $traceNo
+        );
     }
 
     /**
@@ -363,7 +359,6 @@ class MerchantAccountCommandService extends BaseService
             'frozen_after' => (int) $account->frozen_balance,
             'idempotency_key' => $idempotencyKey,
             'remark' => $extJson['remark'] ?? '清算入账',
-            'ext_json' => $extJson,
         ]);
     }
 
@@ -400,13 +395,287 @@ class MerchantAccountCommandService extends BaseService
      */
     public function debitAvailableAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
+        return $this->debitAvailableByBizTypeInCurrentTransaction(
+            $merchantId,
+            $amount,
+            $bizNo,
+            $idempotencyKey,
+            LedgerConstant::BIZ_TYPE_REFUND_REVERSE,
+            LedgerConstant::EVENT_TYPE_REVERSE,
+            $extJson['remark'] ?? '余额冲减',
+            $extJson,
+            $traceNo
+        );
+    }
+
+    /**
+     * 在当前事务中扣减支付平台服务费。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function debitPayFeeAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->debitAvailableByBizTypeInCurrentTransaction(
+            $merchantId,
+            $amount,
+            $bizNo,
+            $idempotencyKey,
+            LedgerConstant::BIZ_TYPE_PAY_DEDUCT,
+            LedgerConstant::EVENT_TYPE_SUCCESS,
+            $extJson['remark'] ?? '自收通道服务费扣减',
+            $extJson,
+            $traceNo
+        );
+    }
+
+    /**
+     * 在当前事务中扣减转账本金。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function debitTransferAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->debitAvailableByBizTypeInCurrentTransaction(
+            $merchantId,
+            $amount,
+            $bizNo,
+            $idempotencyKey,
+            LedgerConstant::BIZ_TYPE_TRANSFER_DEDUCT,
+            LedgerConstant::EVENT_TYPE_CREATE,
+            $extJson['remark'] ?? '转账本金扣减',
+            $extJson,
+            $traceNo
+        );
+    }
+
+    /**
+     * 在当前事务中扣减转账手续费。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function debitTransferFeeInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->debitAvailableByBizTypeInCurrentTransaction(
+            $merchantId,
+            $amount,
+            $bizNo,
+            $idempotencyKey,
+            LedgerConstant::BIZ_TYPE_TRANSFER_FEE,
+            LedgerConstant::EVENT_TYPE_CREATE,
+            $extJson['remark'] ?? '转账手续费扣减',
+            $extJson,
+            $traceNo
+        );
+    }
+
+    /**
+     * 在当前事务中释放失败转账已扣金额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function releaseTransferAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->creditAvailableByBizTypeInCurrentTransaction(
+            $merchantId,
+            $amount,
+            $bizNo,
+            $idempotencyKey,
+            LedgerConstant::BIZ_TYPE_TRANSFER_RELEASE,
+            LedgerConstant::EVENT_TYPE_REVERSE,
+            $extJson['remark'] ?? '转账失败释放',
+            $extJson,
+            $traceNo
+        );
+    }
+
+    /**
+     * 按指定业务类型冻结可用余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param int $bizType 流水业务类型
+     * @param string $remark 流水备注
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    private function freezeAvailableByBizTypeInCurrentTransaction(
+        int $merchantId,
+        int $amount,
+        string $bizNo,
+        string $idempotencyKey,
+        int $bizType,
+        string $remark,
+        array $extJson = [],
+        string $traceNo = ''
+    ): MerchantAccountLedger {
         $this->assertPositiveAmount($amount);
         if ($idempotencyKey === '') {
             throw new ValidationException('幂等键不能为空');
         }
 
         if ($existing = $this->findLedgerByIdempotencyKey($idempotencyKey)) {
-            $this->assertLedgerMatch($existing, LedgerConstant::BIZ_TYPE_REFUND_REVERSE, $bizNo, $amount, LedgerConstant::DIRECTION_OUT);
+            $this->assertLedgerMatch($existing, $bizType, $bizNo, $amount, LedgerConstant::DIRECTION_OUT);
+            return $existing;
+        }
+
+        $account = $this->ensureAccountInCurrentTransaction($merchantId);
+        if ((int) $account->available_balance < $amount) {
+            throw new BalanceInsufficientException($merchantId, $amount, (int) $account->available_balance);
+        }
+
+        $availableBefore = (int) $account->available_balance;
+        $frozenBefore = (int) $account->frozen_balance;
+
+        $account->available_balance = $availableBefore - $amount;
+        $account->frozen_balance = $frozenBefore + $amount;
+        $account->save();
+
+        $this->createFundFreezeRecordIfNeeded($merchantId, $amount, $bizNo, $bizType, $remark, $extJson, $traceNo);
+
+        return $this->createLedger([
+            'merchant_id' => $merchantId,
+            'biz_type' => $bizType,
+            'biz_no' => $bizNo,
+            'trace_no' => $this->normalizeTraceNo($traceNo, $bizNo),
+            'event_type' => LedgerConstant::EVENT_TYPE_CREATE,
+            'direction' => LedgerConstant::DIRECTION_OUT,
+            'amount' => $amount,
+            'available_before' => $availableBefore,
+            'available_after' => (int) $account->available_balance,
+            'frozen_before' => $frozenBefore,
+            'frozen_after' => (int) $account->frozen_balance,
+            'idempotency_key' => $idempotencyKey,
+            'remark' => $remark,
+        ]);
+    }
+
+    /**
+     * 按指定业务类型释放冻结余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param int $bizType 流水业务类型
+     * @param string $remark 流水备注
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    private function releaseFrozenByBizTypeInCurrentTransaction(
+        int $merchantId,
+        int $amount,
+        string $bizNo,
+        string $idempotencyKey,
+        int $bizType,
+        string $remark,
+        array $extJson = [],
+        string $traceNo = ''
+    ): MerchantAccountLedger {
+        $this->assertPositiveAmount($amount);
+        if ($idempotencyKey === '') {
+            throw new ValidationException('幂等键不能为空');
+        }
+
+        if ($existing = $this->findLedgerByIdempotencyKey($idempotencyKey)) {
+            $this->assertLedgerMatch($existing, $bizType, $bizNo, $amount, LedgerConstant::DIRECTION_IN);
+            return $existing;
+        }
+
+        $account = $this->ensureAccountInCurrentTransaction($merchantId);
+        if ((int) $account->frozen_balance < $amount) {
+            throw new ValidationException('冻结余额不足', [
+                'merchant_id' => $merchantId,
+                'amount' => $amount,
+                'frozen_balance' => (int) $account->frozen_balance,
+            ]);
+        }
+
+        $availableBefore = (int) $account->available_balance;
+        $frozenBefore = (int) $account->frozen_balance;
+
+        $account->available_balance = $availableBefore + $amount;
+        $account->frozen_balance = $frozenBefore - $amount;
+        $account->save();
+
+        $this->reduceFundFreezeRecordIfNeeded($merchantId, $amount, $bizNo, $bizType, $extJson);
+
+        return $this->createLedger([
+            'merchant_id' => $merchantId,
+            'biz_type' => $bizType,
+            'biz_no' => $bizNo,
+            'trace_no' => $this->normalizeTraceNo($traceNo, $bizNo),
+            'event_type' => LedgerConstant::EVENT_TYPE_REVERSE,
+            'direction' => LedgerConstant::DIRECTION_IN,
+            'amount' => $amount,
+            'available_before' => $availableBefore,
+            'available_after' => (int) $account->available_balance,
+            'frozen_before' => $frozenBefore,
+            'frozen_after' => (int) $account->frozen_balance,
+            'idempotency_key' => $idempotencyKey,
+            'remark' => $remark,
+        ]);
+    }
+
+    /**
+     * 按指定业务类型扣减可用余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param int $bizType 流水业务类型
+     * @param int $eventType 流水事件类型
+     * @param string $remark 流水备注
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    private function debitAvailableByBizTypeInCurrentTransaction(
+        int $merchantId,
+        int $amount,
+        string $bizNo,
+        string $idempotencyKey,
+        int $bizType,
+        int $eventType,
+        string $remark,
+        array $extJson = [],
+        string $traceNo = ''
+    ): MerchantAccountLedger {
+        $this->assertPositiveAmount($amount);
+        if ($idempotencyKey === '') {
+            throw new ValidationException('幂等键不能为空');
+        }
+
+        if ($existing = $this->findLedgerByIdempotencyKey($idempotencyKey)) {
+            $this->assertLedgerMatch($existing, $bizType, $bizNo, $amount, LedgerConstant::DIRECTION_OUT);
             return $existing;
         }
 
@@ -423,10 +692,10 @@ class MerchantAccountCommandService extends BaseService
 
         return $this->createLedger([
             'merchant_id' => $merchantId,
-            'biz_type' => LedgerConstant::BIZ_TYPE_REFUND_REVERSE,
+            'biz_type' => $bizType,
             'biz_no' => $bizNo,
             'trace_no' => $this->normalizeTraceNo($traceNo, $bizNo),
-            'event_type' => LedgerConstant::EVENT_TYPE_REVERSE,
+            'event_type' => $eventType,
             'direction' => LedgerConstant::DIRECTION_OUT,
             'amount' => $amount,
             'available_before' => $availableBefore,
@@ -434,9 +703,151 @@ class MerchantAccountCommandService extends BaseService
             'frozen_before' => $frozenBefore,
             'frozen_after' => (int) $account->frozen_balance,
             'idempotency_key' => $idempotencyKey,
-            'remark' => $extJson['remark'] ?? '余额冲减',
-            'ext_json' => $extJson,
+            'remark' => $remark,
         ]);
+    }
+
+    /**
+     * 按指定业务类型增加可用余额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param int $bizType 流水业务类型
+     * @param int $eventType 流水事件类型
+     * @param string $remark 流水备注
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    private function creditAvailableByBizTypeInCurrentTransaction(
+        int $merchantId,
+        int $amount,
+        string $bizNo,
+        string $idempotencyKey,
+        int $bizType,
+        int $eventType,
+        string $remark,
+        array $extJson = [],
+        string $traceNo = ''
+    ): MerchantAccountLedger {
+        $this->assertPositiveAmount($amount);
+        if ($idempotencyKey === '') {
+            throw new ValidationException('幂等键不能为空');
+        }
+
+        if ($existing = $this->findLedgerByIdempotencyKey($idempotencyKey)) {
+            $this->assertLedgerMatch($existing, $bizType, $bizNo, $amount, LedgerConstant::DIRECTION_IN);
+            return $existing;
+        }
+
+        $account = $this->ensureAccountInCurrentTransaction($merchantId);
+        $availableBefore = (int) $account->available_balance;
+        $frozenBefore = (int) $account->frozen_balance;
+
+        $account->available_balance = $availableBefore + $amount;
+        $account->save();
+
+        return $this->createLedger([
+            'merchant_id' => $merchantId,
+            'biz_type' => $bizType,
+            'biz_no' => $bizNo,
+            'trace_no' => $this->normalizeTraceNo($traceNo, $bizNo),
+            'event_type' => $eventType,
+            'direction' => LedgerConstant::DIRECTION_IN,
+            'amount' => $amount,
+            'available_before' => $availableBefore,
+            'available_after' => (int) $account->available_balance,
+            'frozen_before' => $frozenBefore,
+            'frozen_after' => (int) $account->frozen_balance,
+            'idempotency_key' => $idempotencyKey,
+            'remark' => $remark,
+        ]);
+    }
+
+    /**
+     * 为会进入账户冻结余额的业务创建冻结明细。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param int $bizType 账户流水业务类型
+     * @param string $remark 备注
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return void
+     */
+    private function createFundFreezeRecordIfNeeded(int $merchantId, int $amount, string $bizNo, int $bizType, string $remark, array $extJson = [], string $traceNo = ''): void
+    {
+        if ($bizType !== LedgerConstant::BIZ_TYPE_PAY_FREEZE) {
+            return;
+        }
+
+        $payNo = trim((string) ($extJson['pay_no'] ?? $bizNo));
+        if ($payNo === '') {
+            return;
+        }
+
+        if ($this->fundFreezeRepository->firstActiveForUpdateByPayNoAndType($payNo, FundFreezeConstant::TYPE_PAY_FEE, $this->now())) {
+            return;
+        }
+
+        $this->fundFreezeRepository->create([
+            'freeze_no' => (string) ($extJson['freeze_no'] ?? $this->generateNo('FRZ')),
+            'merchant_id' => $merchantId,
+            'biz_no' => $bizNo,
+            'pay_no' => $payNo,
+            'trace_no' => $this->normalizeTraceNo($traceNo, $bizNo),
+            'freeze_type' => FundFreezeConstant::TYPE_PAY_FEE,
+            'freeze_amount' => $amount,
+            'remaining_amount' => $amount,
+            'status' => FundFreezeConstant::STATUS_ACTIVE,
+            'reason' => $remark,
+            'admin_id' => 0,
+            'available_at' => null,
+            'frozen_at' => $this->now(),
+            'release_reason' => '',
+            'released_by' => 0,
+            'released_at' => null,
+        ]);
+    }
+
+    /**
+     * 账户冻结余额减少时，同步扣减冻结明细剩余金额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param int $bizType 账户流水业务类型
+     * @param array $extJson 扩展字段
+     * @return void
+     */
+    private function reduceFundFreezeRecordIfNeeded(int $merchantId, int $amount, string $bizNo, int $bizType, array $extJson = []): void
+    {
+        if (!in_array($bizType, [LedgerConstant::BIZ_TYPE_PAY_DEDUCT, LedgerConstant::BIZ_TYPE_PAY_RELEASE], true)) {
+            return;
+        }
+
+        $payNo = trim((string) ($extJson['pay_no'] ?? $bizNo));
+        if ($payNo === '') {
+            return;
+        }
+
+        $freeze = $this->fundFreezeRepository->firstActiveForUpdateByPayNoAndType($payNo, FundFreezeConstant::TYPE_PAY_FEE, $this->now());
+        if (!$freeze) {
+            return;
+        }
+
+        $remainingAmount = max(0, (int) $freeze->remaining_amount - $amount);
+        $freeze->remaining_amount = $remainingAmount;
+        if ($remainingAmount === 0) {
+            $freeze->status = FundFreezeConstant::STATUS_RELEASED;
+            $freeze->release_reason = (string) ($extJson['remark'] ?? '支付服务费冻结释放');
+            $freeze->released_by = 0;
+            $freeze->released_at = $this->now();
+        }
+        $freeze->save();
     }
 
     /**
@@ -447,6 +858,7 @@ class MerchantAccountCommandService extends BaseService
      */
     private function createLedger(array $data): MerchantAccountLedger
     {
+        unset($data['ext_json']);
         $data['ledger_no'] = $data['ledger_no'] ?? $this->generateNo('LG');
         $data['trace_no'] = trim((string) ($data['trace_no'] ?? $data['biz_no'] ?? ''));
         $data['created_at'] = $data['created_at'] ?? $this->now();
@@ -518,8 +930,5 @@ class MerchantAccountCommandService extends BaseService
         return $bizNo;
     }
 }
-
-
-
 
 

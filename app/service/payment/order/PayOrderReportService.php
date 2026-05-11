@@ -34,15 +34,14 @@ class PayOrderReportService extends BaseService
         $row['biz_status_text'] = $this->textFromMap((int) ($row['biz_status'] ?? -1), TradeConstant::orderStatusMap());
 
         $row['status_text'] = $this->textFromMap((int) ($row['status'] ?? -1), TradeConstant::orderStatusMap());
-        $row['fee_status_text'] = $this->textFromMap((int) ($row['fee_status'] ?? -1), TradeConstant::feeStatusMap());
+        $row['service_fee_status_text'] = $this->textFromMap((int) ($row['service_fee_status'] ?? -1), TradeConstant::serviceFeeStatusMap());
         $row['settlement_status_text'] = $this->textFromMap((int) ($row['settlement_status'] ?? -1), TradeConstant::settlementStatusMap());
         $row['callback_status_text'] = $this->textFromMap((int) ($row['callback_status'] ?? -1), NotifyConstant::processStatusMap());
         $row['channel_type_text'] = $this->textFromMap((int) ($row['channel_type'] ?? -1), RouteConstant::channelTypeMap());
         $row['channel_mode_text'] = $this->textFromMap((int) ($row['channel_mode'] ?? -1), RouteConstant::channelModeMap());
 
         $row['pay_amount_text'] = $this->formatAmount((int) ($row['pay_amount'] ?? 0));
-        $row['fee_estimated_amount_text'] = $this->formatAmount((int) ($row['fee_estimated_amount'] ?? 0));
-        $row['fee_actual_amount_text'] = $this->formatAmount((int) ($row['fee_actual_amount'] ?? 0));
+        $row['service_fee_amount_text'] = $this->formatAmount((int) ($row['service_fee_amount'] ?? 0));
         $row['biz_order_amount_text'] = $this->formatAmount((int) ($row['biz_order_amount'] ?? 0));
         $row['biz_paid_amount_text'] = $this->formatAmount((int) ($row['biz_paid_amount'] ?? 0));
         $row['biz_refund_amount_text'] = $this->formatAmount((int) ($row['biz_refund_amount'] ?? 0));
@@ -72,9 +71,6 @@ class PayOrderReportService extends BaseService
      */
     public function buildPayTimeline(PayOrder $payOrder): array
     {
-        $extJson = (array) ($payOrder->ext_json ?? []);
-        $lifecycle = (array) ($extJson['lifecycle'] ?? []);
-
         // 只保留真实发生过的节点，未触发的状态直接过滤掉，避免时间线里出现空占位。
         return array_values(array_filter([
             [
@@ -91,21 +87,19 @@ class PayOrderReportService extends BaseService
                 'status' => 'closed',
                 'label' => '支付关闭',
                 'at' => $this->formatDateTime($payOrder->closed_at, '—'),
-                // 关闭原因优先取扩展信息里的记录，便于展示人工关单或自动关单原因。
-                'reason' => (string) ($lifecycle['close_reason'] ?? ''),
+                'reason' => '',
             ] : null,
             $payOrder->failed_at ? [
                 'status' => 'failed',
                 'label' => '支付失败',
                 'at' => $this->formatDateTime($payOrder->failed_at, '—'),
-                // 失败原因先看渠道返回，再回落到扩展信息里保存的统一原因字段。
-                'reason' => (string) ($payOrder->channel_error_msg ?: ($extJson['reason'] ?? '')),
+                'reason' => (string) $payOrder->channel_error_msg,
             ] : null,
             $payOrder->timeout_at ? [
                 'status' => 'timeout',
                 'label' => '支付超时',
                 'at' => $this->formatDateTime($payOrder->timeout_at, '—'),
-                'reason' => (string) ($lifecycle['timeout_reason'] ?? ''),
+                'reason' => '',
             ] : null,
         ]));
     }

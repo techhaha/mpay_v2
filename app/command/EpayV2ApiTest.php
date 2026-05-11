@@ -506,8 +506,8 @@ class EpayV2ApiTest extends Command
         $signerManager = $this->resolve(EpaySignerManager::class);
         $payload['pid'] = (int) ($payload['pid'] ?? 0);
         $payload['timestamp'] = (string) time();
-        $payload['sign_type'] = AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA;
-        $payload['sign'] = $signerManager->sign($payload, AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA, $privateKey);
+        $payload['sign_type'] = AuthConstant::API_SIGN_NAME_RSA;
+        $payload['sign'] = $signerManager->sign($payload, AuthConstant::API_SIGN_NAME_RSA, $privateKey);
 
         return $payload;
     }
@@ -762,8 +762,8 @@ class EpayV2ApiTest extends Command
             'pid' => 1,
             'timestamp' => (string) time(),
         ];
-        $sign = $signerManager->sign($probePayload, AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA, $merchantPrivateKey);
-        if (!$signerManager->verify($probePayload, AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA, $sign, $merchantPublicKey)) {
+        $sign = $signerManager->sign($probePayload, AuthConstant::API_SIGN_NAME_RSA, $merchantPrivateKey);
+        if (!$signerManager->verify($probePayload, AuthConstant::API_SIGN_NAME_RSA, $sign, $merchantPublicKey)) {
             throw new CommandException('提供的商户私钥与后台配置的商户公钥不匹配。');
         }
     }
@@ -1203,7 +1203,7 @@ class EpayV2ApiTest extends Command
     private function resolve(string $class): object
     {
         try {
-            $instance = container_make($class, []);
+            $instance = container_get($class);
         } catch (\Throwable $e) {
             throw new CommandException("无法解析 {$class}。", 0, $e);
         }

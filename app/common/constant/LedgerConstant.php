@@ -43,6 +43,14 @@ final class LedgerConstant
      * 转账释放流水。
      */
     public const BIZ_TYPE_TRANSFER_RELEASE = 8;
+    /**
+     * 风控资金冻结流水。
+     */
+    public const BIZ_TYPE_RISK_FREEZE = 9;
+    /**
+     * 风控资金释放流水。
+     */
+    public const BIZ_TYPE_RISK_RELEASE = 10;
 
     /**
      * 账务事件的创建动作。
@@ -87,6 +95,8 @@ final class LedgerConstant
             self::BIZ_TYPE_TRANSFER_DEDUCT => '转账扣款',
             self::BIZ_TYPE_TRANSFER_FEE => '转账手续费',
             self::BIZ_TYPE_TRANSFER_RELEASE => '转账释放',
+            self::BIZ_TYPE_RISK_FREEZE => '风控冻结',
+            self::BIZ_TYPE_RISK_RELEASE => '风控释放',
         ];
     }
 
@@ -118,5 +128,4 @@ final class LedgerConstant
         ];
     }
 }
-
 

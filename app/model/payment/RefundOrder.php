@@ -6,7 +6,7 @@ use app\common\base\BaseModel;
 
 /**
  * 退款单模型。
- * 当前按整单全额退款设计，因此同一支付单只允许一张退款单。
+ * 支持同一支付单按商户退款号发起多笔部分退款。
  */
 class RefundOrder extends BaseModel
 {
@@ -68,7 +68,6 @@ class RefundOrder extends BaseModel
         'updated_at' => 'datetime',
     ];
 }
-
 
 
 

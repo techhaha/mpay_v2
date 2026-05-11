@@ -21,6 +21,16 @@ final class NotifyConstant
     public const EVENT_SETTLEMENT_SUCCESS = 'SETTLEMENT_SUCCESS';
 
     /**
+     * 商户通知成功响应。
+     */
+    public const MERCHANT_SUCCESS_RESPONSE = 'success';
+
+    /**
+     * ePay 通知交易成功状态。
+     */
+    public const EPAY_TRADE_STATUS_SUCCESS = 'TRADE_SUCCESS';
+
+    /**
      * 异步通知类型。
      */
     public const NOTIFY_TYPE_ASYNC = 0;

@@ -5,6 +5,7 @@ namespace app\http\admin\controller\merchant;
 use app\common\base\BaseController;
 use app\http\admin\validation\MerchantApiCredentialValidator;
 use app\http\admin\validation\MerchantValidator;
+use app\service\merchant\auth\MerchantAuthService;
 use app\service\merchant\MerchantService;
 use support\Request;
 use support\Response;
@@ -25,7 +26,8 @@ class MerchantController extends BaseController
      * @return void
      */
     public function __construct(
-        protected MerchantService $merchantService
+        protected MerchantService $merchantService,
+        protected MerchantAuthService $merchantAuthService
     ) {
     }
 
@@ -125,6 +127,34 @@ class MerchantController extends BaseController
         $data = $this->validated($payload, MerchantValidator::class, 'resetPassword');
 
         return $this->success($this->merchantService->resetPassword((int) $data['id'], (string) $data['password']));
+    }
+
+    /**
+     * 签发商户后台临时登录令牌。
+     *
+     * 该入口只在管理后台登录态下可用，用于客服或运营从商户工作台直接进入当前商户后台。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 商户ID
+     * @return Response 响应对象
+     */
+    public function loginToken(Request $request, string $id): Response
+    {
+        $data = $this->validated(['id' => (int) $id], MerchantValidator::class, 'loginToken');
+        $merchant = $this->merchantService->ensureMerchantEnabled((int) $data['id']);
+        $issued = $this->merchantAuthService->issueToken(
+            (int) $merchant->id,
+            3600,
+            (string) $request->getRealIp(),
+            (string) $request->header('user-agent', '')
+        );
+
+        return $this->success([
+            'token' => (string) $issued['token'],
+            'expires_in' => (int) $issued['expires_in'],
+            'merchant_id' => (int) $merchant->id,
+            'merchant_no' => (string) $merchant->merchant_no,
+        ]);
     }
 
     /**

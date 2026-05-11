@@ -16,7 +16,7 @@ use support\Response;
 class SystemConfigPageController extends BaseController
 {
     /**
- * 构造方法。
+     * 构造方法。
      *
      * @param SystemConfigPageService $systemConfigPageService 系统配置页面服务
      * @return void

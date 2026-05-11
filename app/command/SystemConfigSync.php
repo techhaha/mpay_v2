@@ -39,32 +39,23 @@ class SystemConfigSync extends Command
     {
         try {
             /** @var SystemConfigDefinitionService $definitionService */
-            $definitionService = container_make(SystemConfigDefinitionService::class, []);
+            $definitionService = container_get(SystemConfigDefinitionService::class);
             /** @var SystemConfigRepository $repository */
-            $repository = container_make(SystemConfigRepository::class, []);
+            $repository = container_get(SystemConfigRepository::class);
             /** @var SystemConfigRuntimeService $runtimeService */
-            $runtimeService = container_make(SystemConfigRuntimeService::class, []);
+            $runtimeService = container_get(SystemConfigRuntimeService::class);
 
             $tabs = $definitionService->tabs();
             $written = 0;
 
             foreach ($tabs as $tab) {
                 $groupCode = (string) ($tab['key'] ?? '');
-                foreach ((array) ($tab['rules'] ?? []) as $rule) {
-                    if (!is_array($rule)) {
-                        continue;
-                    }
-
-                    $configKey = strtolower(trim((string) ($rule['field'] ?? '')));
-                    if ($configKey === '' || str_starts_with($configKey, '__')) {
-                        continue;
-                    }
-
+                foreach ($definitionService->defaultStorageValues($tab) as $configKey => $configValue) {
                     $repository->updateOrCreate(
                         ['config_key' => $configKey],
                         [
                             'group_code' => $groupCode,
-                            'config_value' => (string) ($rule['value'] ?? ''),
+                            'config_value' => $configValue,
                         ]
                     );
 
@@ -84,4 +75,3 @@ class SystemConfigSync extends Command
         }
     }
 }
-

@@ -4,6 +4,7 @@ namespace app\service\payment\runtime;
 
 use app\common\base\BaseService;
 use app\common\constant\AuthConstant;
+use app\common\constant\EpayProtocolConstant;
 use app\common\constant\EventConstant;
 use app\common\constant\NotifyConstant;
 use app\common\util\FormatHelper;
@@ -20,7 +21,9 @@ use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\service\payment\config\PaymentTypeService;
 use app\service\payment\epay\EpaySignerManager;
+use app\service\payment\order\PayOrderRiskControlService;
 use GuzzleHttp\Client;
+use RuntimeException;
 use support\Log;
 use Throwable;
 use Webman\Event\Event;
@@ -32,10 +35,6 @@ use Webman\Event\Event;
  */
 class MerchantNotifyDispatcherService extends BaseService
 {
-    private const PROTOCOL_V1 = 'v1';
-    private const PROTOCOL_V2 = 'v2';
-    private const SUCCESS_RESPONSE = 'success';
-
     private Client $httpClient;
 
     public function __construct(
@@ -45,7 +44,9 @@ class MerchantNotifyDispatcherService extends BaseService
         protected PayOrderRepository $payOrderRepository,
         protected MerchantApiCredentialRepository $merchantApiCredentialRepository,
         protected PaymentTypeService $paymentTypeService,
-        protected EpaySignerManager $signerManager
+        protected EpaySignerManager $signerManager,
+        protected PaymentQueueService $paymentQueueService,
+        protected PayOrderRiskControlService $payOrderRiskControlService
     ) {
         $this->httpClient = new Client([
             'timeout' => 10,
@@ -56,15 +57,23 @@ class MerchantNotifyDispatcherService extends BaseService
     }
 
     /**
-     * 为支付成功创建通知任务，并立即尝试派发一次。
+     * 为支付成功创建通知任务。
      *
      * @param PayOrder $payOrder 支付单
      * @param BizOrder|null $bizOrder 业务单
      * @return NotifyTask|null 通知任务；没有 notify_url 时返回 null
      * @throws ValidationException
      */
-    public function enqueueAndDispatchPaySuccess(PayOrder $payOrder, ?BizOrder $bizOrder = null): ?NotifyTask
+    public function enqueuePaySuccess(PayOrder $payOrder, ?BizOrder $bizOrder = null): ?NotifyTask
     {
+        if (!$this->merchantNotifyEnabled()) {
+            return null;
+        }
+
+        if ($this->payOrderRiskControlService->isFrozen($payOrder)) {
+            return null;
+        }
+
         $bizOrder ??= $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
         $notifyUrl = trim((string) ($payOrder->notify_url ?: ($bizOrder?->notify_url ?? '')));
         if ($notifyUrl === '') {
@@ -83,19 +92,80 @@ class MerchantNotifyDispatcherService extends BaseService
             'status' => NotifyConstant::TASK_STATUS_PENDING,
         ]);
 
-        return $this->dispatchTask($task);
+        return $task;
     }
 
     /**
-     * 为退款成功创建通知任务，并立即尝试派发一次。
+     * 后台手动重新创建支付成功通知任务。
+     *
+     * 与自动通知不同，手动重新通知不复用历史 notify_task，避免成功过的任务被
+     * dispatchTask 幂等返回，导致后台点击后没有真正再次通知商户。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @param BizOrder|null $bizOrder 业务单
+     * @param int $adminId 管理员ID
+     * @param string $reason 操作原因
+     * @return NotifyTask|null 通知任务；没有 notify_url 时返回 null
+     */
+    public function enqueueManualPaySuccess(PayOrder $payOrder, ?BizOrder $bizOrder = null, int $adminId = 0, string $reason = ''): ?NotifyTask
+    {
+        if (!$this->merchantNotifyEnabled()) {
+            return null;
+        }
+
+        $this->payOrderRiskControlService->assertNotFrozen($payOrder, '重新通知');
+
+        $bizOrder ??= $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
+        $notifyUrl = trim((string) ($payOrder->notify_url ?: ($bizOrder?->notify_url ?? '')));
+        if ($notifyUrl === '') {
+            return null;
+        }
+
+        return $this->notifyService->enqueueMerchantNotify([
+            'merchant_id' => (int) $payOrder->merchant_id,
+            'merchant_group_id' => (int) $payOrder->merchant_group_id,
+            'event_type' => NotifyConstant::EVENT_PAY_SUCCESS,
+            'ref_no' => (string) $payOrder->pay_no,
+            'biz_no' => (string) $payOrder->biz_no,
+            'pay_no' => (string) $payOrder->pay_no,
+            'notify_url' => $notifyUrl,
+            'notify_data' => $this->buildPaySuccessPayload($payOrder, $bizOrder),
+            'status' => NotifyConstant::TASK_STATUS_PENDING,
+        ], false);
+    }
+
+    /**
+     * 为支付成功创建通知任务，并立即尝试派发一次。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @param BizOrder|null $bizOrder 业务单
+     * @return NotifyTask|null 通知任务；没有 notify_url 时返回 null
+     * @throws ValidationException
+     */
+    public function enqueueAndDispatchPaySuccess(PayOrder $payOrder, ?BizOrder $bizOrder = null): ?NotifyTask
+    {
+        $task = $this->enqueuePaySuccess($payOrder, $bizOrder);
+        return $task ? $this->dispatchTask($task) : null;
+    }
+
+    /**
+     * 为退款成功创建通知任务。
      *
      * @param RefundOrder $refundOrder 退款单
      * @return NotifyTask|null 通知任务；没有 notify_url 时返回 null
      */
-    public function enqueueAndDispatchRefundSuccess(RefundOrder $refundOrder): ?NotifyTask
+    public function enqueueRefundSuccess(RefundOrder $refundOrder): ?NotifyTask
     {
+        if (!$this->merchantNotifyEnabled()) {
+            return null;
+        }
+
         $bizOrder = $this->bizOrderRepository->findByBizNo((string) $refundOrder->biz_no);
         $payOrder = $this->payOrderRepository->findByPayNo((string) $refundOrder->pay_no);
+        if ($payOrder && $this->payOrderRiskControlService->isFrozen($payOrder)) {
+            return null;
+        }
+
         $notifyUrl = trim((string) ($payOrder?->notify_url ?: ($bizOrder?->notify_url ?? '')));
         if ($notifyUrl === '') {
             return null;
@@ -113,19 +183,35 @@ class MerchantNotifyDispatcherService extends BaseService
             'status' => NotifyConstant::TASK_STATUS_PENDING,
         ]);
 
-        return $this->dispatchTask($task);
+        return $task;
     }
 
     /**
-     * 为清算完成创建通知任务，并立即尝试派发一次。
+     * 为退款成功创建通知任务，并立即尝试派发一次。
+     *
+     * @param RefundOrder $refundOrder 退款单
+     * @return NotifyTask|null 通知任务；没有 notify_url 时返回 null
+     */
+    public function enqueueAndDispatchRefundSuccess(RefundOrder $refundOrder): ?NotifyTask
+    {
+        $task = $this->enqueueRefundSuccess($refundOrder);
+        return $task ? $this->dispatchTask($task) : null;
+    }
+
+    /**
+     * 为清算完成创建通知任务。
      *
      * 当前清算单只有在 ext_json.notify_url 明确存在时才通知商户。
      *
      * @param SettlementOrder $settlementOrder 清算单
      * @return NotifyTask|null 通知任务；没有 notify_url 时返回 null
      */
-    public function enqueueAndDispatchSettlementSuccess(SettlementOrder $settlementOrder): ?NotifyTask
+    public function enqueueSettlementSuccess(SettlementOrder $settlementOrder): ?NotifyTask
     {
+        if (!$this->merchantNotifyEnabled()) {
+            return null;
+        }
+
         $extJson = (array) ($settlementOrder->ext_json ?? []);
         $notifyUrl = trim((string) ($extJson['notify_url'] ?? ''));
         if ($notifyUrl === '') {
@@ -144,43 +230,75 @@ class MerchantNotifyDispatcherService extends BaseService
             'status' => NotifyConstant::TASK_STATUS_PENDING,
         ]);
 
-        return $this->dispatchTask($task);
+        return $task;
+    }
+
+    /**
+     * 为清算完成创建通知任务，并立即尝试派发一次。
+     *
+     * 当前清算单只有在 ext_json.notify_url 明确存在时才通知商户。
+     *
+     * @param SettlementOrder $settlementOrder 清算单
+     * @return NotifyTask|null 通知任务；没有 notify_url 时返回 null
+     */
+    public function enqueueAndDispatchSettlementSuccess(SettlementOrder $settlementOrder): ?NotifyTask
+    {
+        $task = $this->enqueueSettlementSuccess($settlementOrder);
+        return $task ? $this->dispatchTask($task) : null;
     }
 
     /**
      * 派发单个通知任务。
      *
      * @param NotifyTask|string $task 通知任务模型或通知号
-     * @return NotifyTask
+     * @param bool $throwOnFailure 通知失败时是否抛出异常
+     * @return NotifyTask 最新通知任务
      * @throws ResourceNotFoundException
      */
-    public function dispatchTask(NotifyTask|string $task): NotifyTask
+    public function dispatchTask(NotifyTask|string $task, bool $throwOnFailure = false): NotifyTask
     {
         $task = $this->resolveTask($task);
         if ((int) $task->status === NotifyConstant::TASK_STATUS_SUCCESS) {
             return $task;
         }
 
+        if (!$this->merchantNotifyEnabled()) {
+            $task->last_response = '商户通知已关闭，暂停派发';
+            $task->save();
+
+            return $task->refresh();
+        }
+
+        if ($this->pauseTaskIfPayOrderFrozen($task)) {
+            return $task->refresh();
+        }
+
         $eventName = EventConstant::MERCHANT_NOTIFY_FAILED;
+        $failureMessage = '';
         try {
+            $timeout = $this->intConfig('pay_notify_request_timeout_seconds', 10, 1, 60);
             $response = $this->httpClient->request('GET', (string) $task->notify_url, [
                 'query' => (array) ($task->notify_data ?? []),
+                'timeout' => $timeout,
+                'connect_timeout' => $timeout,
             ]);
             $body = trim((string) $response->getBody());
 
-            if (strtolower($body) === self::SUCCESS_RESPONSE) {
+            if (strtolower($body) === NotifyConstant::MERCHANT_SUCCESS_RESPONSE) {
                 $task = $this->notifyService->markTaskSuccess((string) $task->notify_no, [
                     'last_notify_at' => $this->now(),
                     'last_response' => $this->truncateResponse($body),
                 ]);
                 $eventName = EventConstant::MERCHANT_NOTIFY_SUCCEEDED;
             } else {
+                $failureMessage = $body !== '' ? $body : '商户未返回 success';
                 $task = $this->notifyService->markTaskFailed((string) $task->notify_no, [
                     'last_notify_at' => $this->now(),
-                    'last_response' => $this->truncateResponse($body !== '' ? $body : '商户未返回 success'),
+                    'last_response' => $this->truncateResponse($failureMessage),
                 ]);
             }
         } catch (Throwable $e) {
+            $failureMessage = $e->getMessage();
             Log::warning(sprintf(
                 '[MerchantNotify] 派发失败 notify_no=%s pay_no=%s error=%s',
                 (string) $task->notify_no,
@@ -195,18 +313,28 @@ class MerchantNotifyDispatcherService extends BaseService
         }
 
         $this->dispatchNotifyTaskEvent($eventName, $task);
+        if ($throwOnFailure && (int) $task->status !== NotifyConstant::TASK_STATUS_SUCCESS) {
+            throw new RuntimeException($failureMessage !== '' ? $failureMessage : '商户通知失败');
+        }
 
         return $task;
     }
 
     /**
-     * 批量重试到期任务。
+     * 批量投递到期重试任务。
+     *
+     * 到期任务只重新入队，不在维护进程里同步请求商户，避免定时进程被
+     * 商户 notify_url 的网络耗时拖住。
      *
      * @param int $limit 最大处理数量
-     * @return int 实际处理数量
+     * @return int 实际投递数量
      */
     public function dispatchRetryableTasks(int $limit = 100): int
     {
+        if (!$this->merchantNotifyEnabled()) {
+            return 0;
+        }
+
         $limit = max(1, $limit);
         $count = 0;
 
@@ -215,8 +343,16 @@ class MerchantNotifyDispatcherService extends BaseService
                 break;
             }
 
-            $this->dispatchTask($task);
-            $count++;
+            try {
+                $this->paymentQueueService->sendMerchantNotify((string) $task->notify_no);
+                $count++;
+            } catch (Throwable $e) {
+                Log::warning(sprintf(
+                    '[MerchantNotify] 重试任务投递队列失败 notify_no=%s error=%s',
+                    (string) $task->notify_no,
+                    $e->getMessage()
+                ));
+            }
         }
 
         return $count;
@@ -233,8 +369,8 @@ class MerchantNotifyDispatcherService extends BaseService
     private function buildPaySuccessPayload(PayOrder $payOrder, ?BizOrder $bizOrder = null): array
     {
         return match ($this->resolveProtocolVersion($payOrder, $bizOrder)) {
-            self::PROTOCOL_V1 => $this->buildV1PaySuccessPayload($payOrder, $bizOrder),
-            self::PROTOCOL_V2 => $this->buildV2PaySuccessPayload($payOrder, $bizOrder),
+            EpayProtocolConstant::VERSION_V1 => $this->buildV1PaySuccessPayload($payOrder, $bizOrder),
+            EpayProtocolConstant::VERSION_V2 => $this->buildV2PaySuccessPayload($payOrder, $bizOrder),
             default => throw new ValidationException('订单未记录协议版本，无法发送商户通知'),
         };
     }
@@ -290,7 +426,7 @@ class MerchantNotifyDispatcherService extends BaseService
             'endtime' => FormatHelper::dateTime($settlementOrder->completed_at ?: $this->now()),
         ];
         $extJson = (array) ($settlementOrder->ext_json ?? []);
-        $protocol = strtolower(trim((string) ($extJson['_protocol_version'] ?? self::PROTOCOL_V2)));
+        $protocol = strtolower(trim((string) ($extJson['_protocol_version'] ?? EpayProtocolConstant::VERSION_V2)));
 
         return $this->signEventPayload($payload, $protocol, (int) $settlementOrder->merchant_id);
     }
@@ -308,7 +444,7 @@ class MerchantNotifyDispatcherService extends BaseService
         $bizExtJson = (array) (($bizOrder?->ext_json) ?? []);
         $version = strtolower(trim((string) ($payExtJson['_protocol_version'] ?? $bizExtJson['_protocol_version'] ?? '')));
 
-        return in_array($version, [self::PROTOCOL_V1, self::PROTOCOL_V2], true) ? $version : '';
+        return in_array($version, [EpayProtocolConstant::VERSION_V1, EpayProtocolConstant::VERSION_V2], true) ? $version : '';
     }
 
     /**
@@ -328,7 +464,7 @@ class MerchantNotifyDispatcherService extends BaseService
         }
 
         $payload = $this->buildBasePaySuccessPayload($payOrder, $bizOrder);
-        $payload['trade_status'] = 'TRADE_SUCCESS';
+        $payload['trade_status'] = NotifyConstant::EPAY_TRADE_STATUS_SUCCESS;
         $payload['sign_type'] = AuthConstant::API_SIGN_NAME_MD5;
         $payload['sign'] = $this->signerManager->sign($this->signPayload($payload), AuthConstant::API_SIGN_NAME_MD5, $apiKey);
 
@@ -350,9 +486,9 @@ class MerchantNotifyDispatcherService extends BaseService
             throw new ValidationException('平台 RSA 私钥未配置，无法发送 V2 通知');
         }
 
-        $signType = (string) config('epay.v2.sign_type', AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA);
+        $signType = (string) config('epay.v2.sign_type', AuthConstant::API_SIGN_NAME_RSA);
         $payload = $this->buildBasePaySuccessPayload($payOrder, $bizOrder);
-        $payload['trade_status'] = 'TRADE_SUCCESS';
+        $payload['trade_status'] = NotifyConstant::EPAY_TRADE_STATUS_SUCCESS;
         $payload['addtime'] = FormatHelper::dateTime($payOrder->created_at);
         $payload['endtime'] = FormatHelper::dateTime($payOrder->paid_at ?: $this->now());
         $payload['timestamp'] = (string) time();
@@ -372,7 +508,7 @@ class MerchantNotifyDispatcherService extends BaseService
      */
     private function signEventPayload(array $payload, string $protocol, int $merchantId): array
     {
-        if ($protocol === self::PROTOCOL_V1) {
+        if ($protocol === EpayProtocolConstant::VERSION_V1) {
             $credential = $this->merchantApiCredentialRepository->findByMerchantId($merchantId);
             $apiKey = trim((string) ($credential?->api_key ?? ''));
             if ($apiKey === '') {
@@ -390,7 +526,7 @@ class MerchantNotifyDispatcherService extends BaseService
             throw new ValidationException('平台 RSA 私钥未配置，无法发送 V2 通知');
         }
 
-        $signType = (string) config('epay.v2.sign_type', AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA);
+        $signType = (string) config('epay.v2.sign_type', AuthConstant::API_SIGN_NAME_RSA);
         $payload['timestamp'] = (string) time();
         $payload['sign_type'] = $signType;
         $payload['sign'] = $this->signerManager->sign($this->signPayload($payload), $signType, $privateKey);
@@ -469,6 +605,33 @@ class MerchantNotifyDispatcherService extends BaseService
     }
 
     /**
+     * 支付单冻结时暂停商户通知。
+     *
+     * 已经入队但尚未派发的任务也要在这里兜底拦截，避免冻结后队列消费者继续
+     * 请求商户。任务保持原状态，解冻后可通过后台重新通知。
+     *
+     * @param NotifyTask $task 通知任务
+     * @return bool 是否已暂停
+     */
+    private function pauseTaskIfPayOrderFrozen(NotifyTask $task): bool
+    {
+        $payNo = trim((string) ($task->pay_no ?? ''));
+        if ($payNo === '') {
+            return false;
+        }
+
+        $payOrder = $this->payOrderRepository->findByPayNo($payNo);
+        if (!$payOrder || !$this->payOrderRiskControlService->isFrozen($payOrder)) {
+            return false;
+        }
+
+        $task->last_response = '支付单已冻结，暂停商户通知';
+        $task->save();
+
+        return true;
+    }
+
+    /**
      * 发送商户通知任务事件。
      *
      * @param string $eventName 事件名称
@@ -521,5 +684,45 @@ class MerchantNotifyDispatcherService extends BaseService
         }
 
         return mb_strlen($body) > $length ? mb_substr($body, 0, $length) : $body;
+    }
+
+    /**
+     * 商户通知是否启用。
+     *
+     * @return bool 是否启用
+     */
+    private function merchantNotifyEnabled(): bool
+    {
+        return $this->boolConfig('pay_notify_enabled', true);
+    }
+
+    /**
+     * 读取布尔配置。
+     *
+     * @param string $key 配置键
+     * @param bool $default 默认值
+     * @return bool 布尔值
+     */
+    private function boolConfig(string $key, bool $default): bool
+    {
+        $value = strtolower(trim((string) sys_config($key, $default ? '1' : '0')));
+
+        return in_array($value, ['1', 'true', 'yes', 'on', 'enabled'], true);
+    }
+
+    /**
+     * 读取整数配置。
+     *
+     * @param string $key 配置键
+     * @param int $default 默认值
+     * @param int $min 最小值
+     * @param int $max 最大值
+     * @return int 整数值
+     */
+    private function intConfig(string $key, int $default, int $min, int $max): int
+    {
+        $value = (int) sys_config($key, $default);
+
+        return min($max, max($min, $value));
     }
 }

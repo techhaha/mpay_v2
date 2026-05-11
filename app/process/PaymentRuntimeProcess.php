@@ -76,13 +76,15 @@ class PaymentRuntimeProcess
                 )
             );
 
-            $this->runIfDue(
-                'order_timeout',
-                $this->intConfig('pay_order_timeout_scan_interval_seconds', 60, 5),
-                fn (): array => $this->maintenanceService()->timeoutExpiredPayOrders(
-                    $this->intConfig('pay_order_timeout_batch_size', 100, 1)
-                )
-            );
+            if ($this->boolConfig('pay_order_timeout_enabled', true)) {
+                $this->runIfDue(
+                    'order_timeout',
+                    $this->intConfig('pay_order_timeout_scan_interval_seconds', 60, 5),
+                    fn (): array => $this->maintenanceService()->timeoutExpiredPayOrders(
+                        $this->intConfig('pay_order_timeout_batch_size', 100, 1)
+                    )
+                );
+            }
 
             if ($this->boolConfig('pay_active_query_enabled', true)) {
                 $this->runIfDue(
@@ -161,7 +163,7 @@ class PaymentRuntimeProcess
      */
     private function maintenanceService(): PaymentRuntimeMaintenanceService
     {
-        return container_make(PaymentRuntimeMaintenanceService::class, []);
+        return container_get(PaymentRuntimeMaintenanceService::class);
     }
 
     /**
@@ -216,6 +218,6 @@ class PaymentRuntimeProcess
      */
     private function runtimeConfig(): SystemConfigRuntimeService
     {
-        return container_make(SystemConfigRuntimeService::class, []);
+        return container_get(SystemConfigRuntimeService::class);
     }
 }

@@ -3,10 +3,12 @@
 namespace app\service\payment\config;
 
 use app\common\base\BaseService;
+use app\common\constant\EventConstant;
 use app\exception\PaymentException;
 use app\model\payment\PaymentPluginConf;
 use app\repository\payment\config\PaymentPluginConfRepository;
 use app\repository\payment\config\PaymentPluginRepository;
+use Webman\Event\Event;
 
 /**
  * 支付插件配置服务。
@@ -105,7 +107,10 @@ class PaymentPluginConfService extends BaseService
         $payload = $this->normalizePayload($data);
         $this->assertPluginExists((string) $payload['plugin_code']);
 
-        return $this->paymentPluginConfRepository->create($payload);
+        $config = $this->paymentPluginConfRepository->create($payload);
+        $this->dispatchWatcherConfigChanged('create', $config);
+
+        return $config;
     }
 
     /**
@@ -125,7 +130,12 @@ class PaymentPluginConfService extends BaseService
             return null;
         }
 
-        return $this->paymentPluginConfRepository->find($id);
+        $config = $this->paymentPluginConfRepository->find($id);
+        if ($config) {
+            $this->dispatchWatcherConfigChanged('update', $config);
+        }
+
+        return $config;
     }
 
     /**
@@ -136,7 +146,13 @@ class PaymentPluginConfService extends BaseService
      */
     public function delete(int $id): bool
     {
-        return $this->paymentPluginConfRepository->deleteById($id);
+        $config = $this->paymentPluginConfRepository->find($id);
+        $deleted = $this->paymentPluginConfRepository->deleteById($id);
+        if ($deleted && $config) {
+            $this->dispatchWatcherConfigChanged('delete', $config);
+        }
+
+        return $deleted;
     }
 
     /**
@@ -284,5 +300,22 @@ class PaymentPluginConfService extends BaseService
                 'plugin_code' => $pluginCode,
             ]);
         }
+    }
+
+    /**
+     * 发送网页流水监听配置刷新事件。
+     *
+     * @param string $action 操作
+     * @param PaymentPluginConf $config 插件配置
+     * @return void
+     */
+    private function dispatchWatcherConfigChanged(string $action, PaymentPluginConf $config): void
+    {
+        Event::dispatch(EventConstant::PAYMENT_RECEIPT_WATCHER_CONFIG_CHANGED, [
+            'source' => 'payment_plugin_conf',
+            'action' => $action,
+            'api_config_id' => (int) $config->id,
+            'plugin_code' => (string) $config->plugin_code,
+        ]);
     }
 }

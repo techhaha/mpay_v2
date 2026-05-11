@@ -170,4 +170,16 @@ class EpayV2Controller extends BaseController
     {
         return $this->payOrderService->handlePluginCallback($payNo, $request);
     }
+
+    /**
+     * 通道级通知入口。
+     *
+     * @param Request $request 请求对象
+     * @param int $chanId 通道ID
+     * @return string|Response
+     */
+    public function channelNotify(Request $request, int $chanId): string|Response
+    {
+        return $this->payOrderService->handleChannelNotify($chanId, $request);
+    }
 }

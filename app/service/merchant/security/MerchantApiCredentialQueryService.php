@@ -62,13 +62,11 @@ class MerchantApiCredentialQueryService extends BaseService
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
 
         $paginator->getCollection()->transform(function ($row) {
-            $row->sign_type_text = $this->textFromMap((int) $row->sign_type, AuthConstant::signTypeMap());
             $row->status_text = $this->textFromMap((int) $row->status, AuthConstant::credentialStatusMap());
             $row->platform_public_key_preview = $this->maskCredentialValue(
                 trim((string) config('epay.v2.platform_public_key', '')),
                 false
             );
-            $row->platform_sign_type_text = (string) config('epay.v2.sign_type', AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA);
 
             return $row;
         });
@@ -114,7 +112,6 @@ class MerchantApiCredentialQueryService extends BaseService
             ->select([
                 'c.id',
                 'c.merchant_id',
-                'c.sign_type',
                 'c.merchant_public_key',
                 'c.status',
                 'c.last_used_at',
@@ -151,11 +148,9 @@ class MerchantApiCredentialQueryService extends BaseService
 
         $row->api_key_preview = $this->maskCredentialValue((string) ($row->api_key ?? ''), false);
         $row->merchant_public_key_preview = $this->maskCredentialValue((string) ($row->merchant_public_key ?? ''), false);
-        $row->sign_type_text = $this->textFromMap((int) $row->sign_type, AuthConstant::signTypeMap());
         $row->status_text = $this->textFromMap((int) $row->status, AuthConstant::credentialStatusMap());
         $row->platform_public_key_full = trim((string) config('epay.v2.platform_public_key', ''));
         $row->platform_public_key_preview = $this->maskCredentialValue((string) $row->platform_public_key_full, false);
-        $row->platform_sign_type_text = (string) config('epay.v2.sign_type', AuthConstant::API_SIGN_NAME_SHA256_WITH_RSA);
 
         return $row;
     }

@@ -54,21 +54,21 @@ final class TradeConstant
     public const ORDER_STATUS_TIMEOUT = 5;
 
     /**
-     * 手续费未处理。
+     * 平台服务费未处理。
      */
-    public const FEE_STATUS_NONE = 0;
+    public const SERVICE_FEE_STATUS_NONE = 0;
     /**
-     * 手续费已冻结。
+     * 平台服务费已冻结。
      */
-    public const FEE_STATUS_FROZEN = 1;
+    public const SERVICE_FEE_STATUS_FROZEN = 1;
     /**
-     * 手续费已扣除。
+     * 平台服务费已扣除。
      */
-    public const FEE_STATUS_DEDUCTED = 2;
+    public const SERVICE_FEE_STATUS_DEDUCTED = 2;
     /**
-     * 手续费已释放。
+     * 平台服务费已释放。
      */
-    public const FEE_STATUS_RELEASED = 3;
+    public const SERVICE_FEE_STATUS_RELEASED = 3;
 
     /**
      * 清算状态为空。
@@ -142,17 +142,17 @@ final class TradeConstant
     }
 
     /**
-     * 获取手续费状态映射。
+     * 获取平台服务费状态映射。
      *
-     * @return array<int, string> 手续费状态名称表
+     * @return array<int, string> 平台服务费状态名称表
      */
-    public static function feeStatusMap(): array
+    public static function serviceFeeStatusMap(): array
     {
         return [
-            self::FEE_STATUS_NONE => '无',
-            self::FEE_STATUS_FROZEN => '冻结',
-            self::FEE_STATUS_DEDUCTED => '已扣',
-            self::FEE_STATUS_RELEASED => '已释放',
+            self::SERVICE_FEE_STATUS_NONE => '无',
+            self::SERVICE_FEE_STATUS_FROZEN => '冻结',
+            self::SERVICE_FEE_STATUS_DEDUCTED => '已扣',
+            self::SERVICE_FEE_STATUS_RELEASED => '已释放',
         ];
     }
 
@@ -300,6 +300,4 @@ final class TradeConstant
         return in_array($status, self::settlementTerminalStatuses(), true);
     }
 }
-
-
 

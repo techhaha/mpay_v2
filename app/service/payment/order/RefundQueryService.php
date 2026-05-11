@@ -100,7 +100,7 @@ class RefundQueryService extends BaseService
         // 列表页需要直接显示文案和金额格式，所以在查询层统一做一次格式化。
         $list = [];
         foreach ($paginator->items() as $item) {
-            $list[] = $this->refundReportService->formatRefundOrderRow((array) $item);
+            $list[] = $this->refundReportService->formatRefundOrderRow($item->toArray());
         }
 
         return [
@@ -136,7 +136,7 @@ class RefundQueryService extends BaseService
             throw new ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
         }
 
-        $refundOrder = $this->refundReportService->formatRefundOrderRow((array) $row);
+        $refundOrder = $this->refundReportService->formatRefundOrderRow($row->toArray());
         // 详情页把原始行再转成展示数组，便于前端直接渲染各类状态和金额字段。
         $timeline = $this->refundReportService->buildRefundTimeline($row);
         $accountLedgers = $this->loadRefundLedgers($row);
@@ -226,7 +226,7 @@ class RefundQueryService extends BaseService
                 'po.channel_type',
                 'po.pay_type_id',
                 'po.pay_amount as pay_order_amount',
-                'po.fee_actual_amount as pay_fee_actual_amount',
+                'po.service_fee_amount as pay_service_fee_amount',
                 'po.status as pay_status',
                 'bo.merchant_order_no',
                 'bo.subject',
@@ -284,7 +284,7 @@ class RefundQueryService extends BaseService
 
         $rows = [];
         foreach ($ledgers as $ledger) {
-            $rows[] = $this->refundReportService->formatLedgerRow((array) $ledger);
+            $rows[] = $this->refundReportService->formatLedgerRow($ledger->toArray());
         }
 
         return $rows;

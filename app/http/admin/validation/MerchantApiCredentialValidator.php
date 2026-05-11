@@ -18,7 +18,6 @@ class MerchantApiCredentialValidator extends Validator
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
         'merchant_id' => 'sometimes|integer|min:1|exists:ma_merchant,id',
-        'sign_type' => 'sometimes|integer|in:0,1',
         'rotate_v1' => 'sometimes|integer|in:0,1',
         'rotate_v2' => 'sometimes|integer|in:0,1',
         'api_key' => 'nullable|string|max:128',
@@ -37,7 +36,6 @@ class MerchantApiCredentialValidator extends Validator
         'id' => '凭证ID',
         'keyword' => '关键词',
         'merchant_id' => '所属商户',
-        'sign_type' => '签名类型',
         'rotate_v1' => '是否重置 V1',
         'rotate_v2' => '是否重置 V2',
         'api_key' => '接口凭证值',
@@ -54,11 +52,11 @@ class MerchantApiCredentialValidator extends Validator
      */
     protected array $scenes = [
         'index' => ['keyword', 'merchant_id', 'status', 'page', 'page_size'],
-        'store' => ['merchant_id', 'sign_type', 'api_key', 'merchant_public_key', 'status'],
-        'update' => ['id', 'sign_type', 'api_key', 'merchant_public_key', 'status'],
+        'store' => ['merchant_id', 'api_key', 'merchant_public_key', 'status'],
+        'update' => ['id', 'api_key', 'merchant_public_key', 'status'],
         'show' => ['id'],
         'destroy' => ['id'],
-        'issueCredential' => ['rotate_v1', 'rotate_v2', 'sign_type', 'status'],
+        'issueCredential' => ['rotate_v1', 'rotate_v2', 'status'],
     ];
 
     /**
@@ -70,7 +68,6 @@ class MerchantApiCredentialValidator extends Validator
     {
         return $this->appendRules([
             'merchant_id' => 'required|integer|min:1|exists:ma_merchant,id',
-            'sign_type' => 'required|integer|in:0,1',
             'merchant_public_key' => 'nullable|string|max:65535',
             'status' => 'required|integer|in:0,1',
         ]);
@@ -85,7 +82,6 @@ class MerchantApiCredentialValidator extends Validator
     {
         return $this->appendRules([
             'id' => 'required|integer|min:1',
-            'sign_type' => 'sometimes|integer|in:0,1',
             'api_key' => 'nullable|string|max:128',
             'merchant_public_key' => 'nullable|string|max:65535',
             'status' => 'sometimes|integer|in:0,1',
@@ -102,7 +98,6 @@ class MerchantApiCredentialValidator extends Validator
         return $this->appendRules([
             'rotate_v1' => 'sometimes|integer|in:0,1',
             'rotate_v2' => 'sometimes|integer|in:0,1',
-            'sign_type' => 'sometimes|integer|in:0,1',
             'status' => 'sometimes|integer|in:0,1',
         ]);
     }

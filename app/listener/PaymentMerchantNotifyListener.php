@@ -9,25 +9,37 @@ use app\repository\payment\settlement\SettlementOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\repository\payment\trade\RefundOrderRepository;
 use app\service\payment\runtime\MerchantNotifyDispatcherService;
+use app\service\payment\runtime\PaymentQueueService;
 use support\Log;
 
 /**
  * 支付域商户通知监听器。
  *
- * 聚合支付、退款、清算等会触发商户通知的事件处理。
+ * 聚合支付、退款、清算等会触发商户通知的事件处理，并把实际 HTTP 通知交给队列消费。
  */
 class PaymentMerchantNotifyListener
 {
+    /**
+     * 构造方法。
+     *
+     * @param MerchantNotifyDispatcherService $merchantNotifyDispatcherService 商户通知派发服务
+     * @param PayOrderRepository $payOrderRepository 支付单仓库
+     * @param RefundOrderRepository $refundOrderRepository 退款单仓库
+     * @param SettlementOrderRepository $settlementOrderRepository 清算单仓库
+     * @param PaymentQueueService $paymentQueueService 支付队列服务
+     * @return void
+     */
     public function __construct(
         protected MerchantNotifyDispatcherService $merchantNotifyDispatcherService,
         protected PayOrderRepository $payOrderRepository,
         protected RefundOrderRepository $refundOrderRepository,
-        protected SettlementOrderRepository $settlementOrderRepository
+        protected SettlementOrderRepository $settlementOrderRepository,
+        protected PaymentQueueService $paymentQueueService
     ) {
     }
 
     /**
-     * 支付成功后创建并尝试派发商户通知。
+     * 支付成功后创建商户通知任务并投递队列。
      *
      * @param array<string, mixed> $payload 事件载荷
      * @param string $eventName 事件名称
@@ -47,7 +59,10 @@ class PaymentMerchantNotifyListener
                 return;
             }
 
-            $this->merchantNotifyDispatcherService->enqueueAndDispatchPaySuccess($payOrder);
+            $task = $this->merchantNotifyDispatcherService->enqueuePaySuccess($payOrder);
+            if ($task) {
+                $this->paymentQueueService->sendMerchantNotify((string) $task->notify_no);
+            }
         } catch (\Throwable $e) {
             Log::warning(sprintf(
                 '[PaymentMerchantNotifyListener] 商户支付通知创建失败 event=%s pay_no=%s error=%s',
@@ -59,7 +74,7 @@ class PaymentMerchantNotifyListener
     }
 
     /**
-     * 退款成功后创建并尝试派发商户通知。
+     * 退款成功后创建商户通知任务并投递队列。
      *
      * @param array<string, mixed> $payload 事件载荷
      * @param string $eventName 事件名称
@@ -79,7 +94,10 @@ class PaymentMerchantNotifyListener
                 return;
             }
 
-            $this->merchantNotifyDispatcherService->enqueueAndDispatchRefundSuccess($refundOrder);
+            $task = $this->merchantNotifyDispatcherService->enqueueRefundSuccess($refundOrder);
+            if ($task) {
+                $this->paymentQueueService->sendMerchantNotify((string) $task->notify_no);
+            }
         } catch (\Throwable $e) {
             Log::warning(sprintf(
                 '[PaymentMerchantNotifyListener] 商户退款通知创建失败 event=%s refund_no=%s error=%s',
@@ -91,7 +109,7 @@ class PaymentMerchantNotifyListener
     }
 
     /**
-     * 清算成功后创建并尝试派发商户通知。
+     * 清算成功后创建商户通知任务并投递队列。
      *
      * @param array<string, mixed> $payload 事件载荷
      * @param string $eventName 事件名称
@@ -111,7 +129,10 @@ class PaymentMerchantNotifyListener
                 return;
             }
 
-            $this->merchantNotifyDispatcherService->enqueueAndDispatchSettlementSuccess($settlementOrder);
+            $task = $this->merchantNotifyDispatcherService->enqueueSettlementSuccess($settlementOrder);
+            if ($task) {
+                $this->paymentQueueService->sendMerchantNotify((string) $task->notify_no);
+            }
         } catch (\Throwable $e) {
             Log::warning(sprintf(
                 '[PaymentMerchantNotifyListener] 商户清算通知创建失败 event=%s settle_no=%s error=%s',

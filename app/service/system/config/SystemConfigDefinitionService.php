@@ -4,6 +4,7 @@ namespace app\service\system\config;
 
 use app\common\base\BaseService;
 use app\exception\ConflictException;
+use app\exception\ValidationException;
 
 /**
  * 系统配置定义解析服务。
@@ -120,6 +121,92 @@ class SystemConfigDefinitionService extends BaseService
     }
 
     /**
+     * 获取标签页内的实际配置字段。
+     *
+     * @param array $tab 标签页定义
+     * @return array<int, string> 配置字段列表
+     */
+    public function fields(array $tab): array
+    {
+        $fields = [];
+        foreach ((array) ($tab['rules'] ?? []) as $rule) {
+            if (!is_array($rule)) {
+                continue;
+            }
+
+            $field = strtolower(trim((string) ($rule['field'] ?? '')));
+            if ($field === '' || $this->isVirtualField($field)) {
+                continue;
+            }
+
+            $fields[$field] = true;
+        }
+
+        return array_keys($fields);
+    }
+
+    /**
+     * 获取全部实际配置字段。
+     *
+     * @return array<int, string> 配置字段列表
+     */
+    public function allFields(): array
+    {
+        $fields = [];
+        foreach ($this->tabs() as $tab) {
+            foreach ($this->fields($tab) as $field) {
+                $fields[$field] = true;
+            }
+        }
+
+        return array_keys($fields);
+    }
+
+    /**
+     * 获取标签页内配置项的默认落库值。
+     *
+     * @param array $tab 标签页定义
+     * @return array<string, string> 字段到默认值的映射
+     * @throws ValidationException
+     */
+    public function defaultStorageValues(array $tab): array
+    {
+        $defaults = [];
+        foreach ((array) ($tab['rules'] ?? []) as $rule) {
+            if (!is_array($rule)) {
+                continue;
+            }
+
+            $field = strtolower(trim((string) ($rule['field'] ?? '')));
+            if ($field === '' || $this->isVirtualField($field)) {
+                continue;
+            }
+
+            $defaults[$field] = $this->stringifyValue($rule['value'] ?? '');
+        }
+
+        return $defaults;
+    }
+
+    /**
+     * 获取全部配置项默认落库值。
+     *
+     * @return array<string, string> 字段到默认值的映射
+     * @throws ValidationException
+     */
+    public function allDefaultStorageValues(): array
+    {
+        $defaults = [];
+        foreach ($this->tabs() as $tab) {
+            foreach ($this->defaultStorageValues($tab) as $field => $value) {
+                $defaults[$field] = $value;
+            }
+        }
+
+        return $defaults;
+    }
+
+    /**
      * 使用当前值回填标签页规则。
      *
      * @param array $tab 标签页定义
@@ -140,7 +227,10 @@ class SystemConfigDefinitionService extends BaseService
             }
 
             if (!$this->isVirtualField($field)) {
-                $rule['value'] = array_key_exists($field, $values) ? $values[$field] : ($rule['value'] ?? '');
+                $rule['value'] = $this->normalizeValueForForm(
+                    $rule,
+                    array_key_exists($field, $values) ? $values[$field] : ($rule['value'] ?? '')
+                );
             }
             $rules[] = $rule;
         }
@@ -168,7 +258,10 @@ class SystemConfigDefinitionService extends BaseService
                 continue;
             }
 
-            $data[$field] = array_key_exists($field, $values) ? $values[$field] : ($rule['value'] ?? '');
+            $data[$field] = $this->normalizeValueForForm(
+                $rule,
+                array_key_exists($field, $values) ? $values[$field] : ($rule['value'] ?? '')
+            );
         }
 
         return $data;
@@ -206,6 +299,26 @@ class SystemConfigDefinitionService extends BaseService
         }
 
         return $messages;
+    }
+
+    /**
+     * 将配置值转换为可落库字符串。
+     *
+     * @param mixed $value 配置值
+     * @return string 可落库字符串
+     * @throws ValidationException
+     */
+    public function stringifyValue(mixed $value): string
+    {
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+
+        if (is_array($value) || is_object($value)) {
+            throw new ValidationException('系统配置值暂不支持复杂类型');
+        }
+
+        return (string) $value;
     }
 
     /**
@@ -268,7 +381,7 @@ class SystemConfigDefinitionService extends BaseService
 
             $options[] = [
                 'label' => (string) ($option['label'] ?? ''),
-                'value' => (string) ($option['value'] ?? ''),
+                'value' => $option['value'] ?? '',
             ];
         }
 
@@ -285,7 +398,7 @@ class SystemConfigDefinitionService extends BaseService
         $normalized['type'] = (string) ($rule['type'] ?? 'input');
         $normalized['field'] = $field;
         $normalized['title'] = (string) ($rule['title'] ?? $field);
-        $normalized['value'] = (string) ($rule['value'] ?? '');
+        $normalized['value'] = $rule['value'] ?? '';
         $normalized['props'] = is_array($rule['props'] ?? null) ? $rule['props'] : [];
         $normalized['options'] = $options;
         $normalized['validate'] = $validate;
@@ -294,13 +407,38 @@ class SystemConfigDefinitionService extends BaseService
     }
 
     /**
+     * 按表单组件类型整理前端模型值。
+     *
+     * @param array<string, mixed> $rule 配置项定义
+     * @param mixed $value 原始值
+     * @return mixed 前端表单值
+     */
+    private function normalizeValueForForm(array $rule, mixed $value): mixed
+    {
+        $type = strtolower(trim((string) ($rule['type'] ?? '')));
+        if ($type !== 'inputnumber') {
+            return $value;
+        }
+
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            return str_contains((string) $value, '.') ? (float) $value : (int) $value;
+        }
+
+        return null;
+    }
+
+    /**
      * 判断是否为虚拟字段。
      *
      * @param string $field 字段名
      * @return bool 是否为虚拟字段
      */
-    private function isVirtualField(string $field): bool
+    public function isVirtualField(string $field): bool
     {
-        return str_starts_with($field, self::VIRTUAL_FIELD_PREFIX);
+        return str_starts_with(trim($field), self::VIRTUAL_FIELD_PREFIX);
     }
 }

@@ -21,6 +21,7 @@ class SettlementOrderValidator extends Validator
         'channel_id' => 'sometimes|integer|min:1',
         'status' => 'sometimes|integer|min:0',
         'cycle_type' => 'sometimes|integer|min:0',
+        'reason' => 'sometimes|string|max:255',
         'page' => 'sometimes|integer|min:1',
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
@@ -37,6 +38,7 @@ class SettlementOrderValidator extends Validator
         'channel_id' => '所属通道',
         'status' => '清算单状态',
         'cycle_type' => '结算周期类型',
+        'reason' => '失败原因',
         'page' => '页码',
         'page_size' => '每页条数',
     ];
@@ -49,6 +51,6 @@ class SettlementOrderValidator extends Validator
     protected array $scenes = [
         'index' => ['keyword', 'merchant_id', 'channel_id', 'status', 'cycle_type', 'page', 'page_size'],
         'show' => ['settle_no'],
+        'fail' => ['settle_no', 'reason'],
     ];
 }
-

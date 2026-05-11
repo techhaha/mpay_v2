@@ -14,8 +14,7 @@ class EpayV2Validator extends Validator
     protected array $rules = [
         'pid' => 'required|integer|min:1',
         'timestamp' => 'required|integer|min:1',
-        // 兼容旧版 SDK 里使用的 `RSA` 简写，同时内部统一按 SHA256WithRSA 验签。
-        'sign_type' => 'required|string|in:SHA256WithRSA,RSA',
+        'sign_type' => 'required|string|in:RSA',
         // RSA 签名是 Base64 文本，长度会明显超过 MD5，不能沿用 255 的短限制。
         'sign' => 'required|string|max:2048',
         'type' => 'nullable|string|max:32',
@@ -25,7 +24,7 @@ class EpayV2Validator extends Validator
         'notify_url' => 'nullable|string|max:255',
         'return_url' => 'nullable|string|max:255',
         'name' => 'nullable|string|max:255',
-        'money' => 'nullable|regex:/^\d+(?:\.\d{1,2})?$/',
+        'money' => 'nullable|regex:/^(?=.*[1-9])\d+(?:\.\d{1,2})?$/',
         'param' => 'nullable',
         'auth_code' => 'nullable|string|max:128',
         'sub_openid' => 'nullable|string|max:128',
@@ -104,8 +103,8 @@ class EpayV2Validator extends Validator
             'notify_url' => 'required|string|max:255',
             'return_url' => 'required|string|max:255',
             'name' => 'required|string|max:255',
-            'money' => 'required|regex:/^\d+(?:\.\d{1,2})?$/',
-            'sign_type' => 'required|string|in:SHA256WithRSA,RSA',
+            'money' => 'required|regex:/^(?=.*[1-9])\d+(?:\.\d{1,2})?$/',
+            'sign_type' => 'required|string|in:RSA',
             'sign' => 'required|string|max:2048',
         ]);
     }
@@ -124,9 +123,9 @@ class EpayV2Validator extends Validator
             'notify_url' => 'required|string|max:255',
             'return_url' => 'nullable|string|max:255',
             'name' => 'required|string|max:255',
-            'money' => 'required|regex:/^\d+(?:\.\d{1,2})?$/',
+            'money' => 'required|regex:/^(?=.*[1-9])\d+(?:\.\d{1,2})?$/',
             'device' => 'nullable|string|in:pc,mobile,qq,wechat,alipay',
-            'sign_type' => 'required|string|in:SHA256WithRSA,RSA',
+            'sign_type' => 'required|string|in:RSA',
             'sign' => 'required|string|max:2048',
         ]);
     }
@@ -139,11 +138,11 @@ class EpayV2Validator extends Validator
     public function sceneRefund(): static
     {
         return $this->appendRules([
-            'money' => 'required|regex:/^\d+(?:\.\d{1,2})?$/',
+            'money' => 'required|regex:/^(?=.*[1-9])\d+(?:\.\d{1,2})?$/',
             'trade_no' => 'nullable|string|max:64|required_without:out_trade_no',
             'out_trade_no' => 'nullable|string|max:64|required_without:trade_no',
             'out_refund_no' => 'nullable|string|max:64',
-            'sign_type' => 'required|string|in:SHA256WithRSA,RSA',
+            'sign_type' => 'required|string|in:RSA',
             'sign' => 'required|string|max:2048',
         ]);
     }
@@ -208,8 +207,8 @@ class EpayV2Validator extends Validator
             'type' => 'required|string|in:alipay,wxpay,qqpay,bank',
             'account' => 'required|string|max:100',
             'name' => 'required|string|max:100',
-            'money' => 'required|regex:/^\d+(?:\.\d{1,2})?$/',
-            'sign_type' => 'required|string|in:SHA256WithRSA,RSA',
+            'money' => 'required|regex:/^(?=.*[1-9])\d+(?:\.\d{1,2})?$/',
+            'sign_type' => 'required|string|in:RSA',
             'sign' => 'required|string|max:2048',
         ]);
     }

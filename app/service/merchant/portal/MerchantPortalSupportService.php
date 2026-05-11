@@ -3,7 +3,6 @@
 namespace app\service\merchant\portal;
 
 use app\common\base\BaseService;
-use app\common\constant\AuthConstant;
 use app\exception\ResourceNotFoundException;
 use app\repository\merchant\base\MerchantRepository;
 use app\service\merchant\MerchantService;
@@ -171,14 +170,4 @@ class MerchantPortalSupportService extends BaseService
         return $payTypeId > 0 ? '未知' : '';
     }
 
-    /**
-     * 签名类型文案。
-     *
-     * @param int $signType 签名类型
-     * @return string 签名类型文本
-     */
-    public function signTypeText(int $signType): string
-    {
-        return $this->textFromMap($signType, AuthConstant::signTypeMap());
-    }
 }

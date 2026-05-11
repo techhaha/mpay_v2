@@ -21,7 +21,7 @@ class EpayV1Validator extends Validator
         'notify_url' => 'nullable|string|max:255',
         'return_url' => 'nullable|string|max:255',
         'name' => 'nullable|string|max:255',
-        'money' => 'nullable|regex:/^\d+(?:\.\d{1,2})?$/',
+        'money' => 'nullable|regex:/^(?=.*[1-9])\d+(?:\.\d{1,2})?$/',
         'param' => 'nullable',
         'clientip' => 'nullable|ip',
         'device' => 'nullable|string|in:pc,mobile,qq,wechat,alipay,jump',
@@ -73,7 +73,7 @@ class EpayV1Validator extends Validator
             'notify_url' => 'required|string|max:255',
             'return_url' => 'required|string|max:255',
             'name' => 'required|string|max:255',
-            'money' => 'required|regex:/^\d+(?:\.\d{1,2})?$/',
+            'money' => 'required|regex:/^(?=.*[1-9])\d+(?:\.\d{1,2})?$/',
             'sign_type' => 'required|string|in:MD5',
             'sign' => 'required|string|max:255',
         ]);
@@ -92,7 +92,7 @@ class EpayV1Validator extends Validator
             'notify_url' => 'required|string|max:255',
             'return_url' => 'nullable|string|max:255',
             'name' => 'required|string|max:255',
-            'money' => 'required|regex:/^\d+(?:\.\d{1,2})?$/',
+            'money' => 'required|regex:/^(?=.*[1-9])\d+(?:\.\d{1,2})?$/',
             'clientip' => 'required|ip',
             'sign_type' => 'required|string|in:MD5',
             'sign' => 'required|string|max:255',
@@ -160,7 +160,7 @@ class EpayV1Validator extends Validator
     {
         return $this->appendRules([
             'key' => 'required|string|max:128',
-            'money' => 'required|regex:/^\d+(?:\.\d{1,2})?$/',
+            'money' => 'required|regex:/^(?=.*[1-9])\d+(?:\.\d{1,2})?$/',
             'trade_no' => 'nullable|string|max:64|required_without:out_trade_no',
             'out_trade_no' => 'nullable|string|max:64|required_without:trade_no',
         ]);

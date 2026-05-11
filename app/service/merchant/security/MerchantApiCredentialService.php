@@ -96,7 +96,6 @@ class MerchantApiCredentialService extends BaseService
             throw new ValidationException('请至少选择一种要生成的凭证类型');
         }
 
-        $signType = (int) ($options['sign_type'] ?? ($current?->sign_type ?? AuthConstant::API_SIGN_TYPE_MD5));
         $status = (int) ($options['status'] ?? ($current?->status ?? AuthConstant::CREDENTIAL_STATUS_ENABLED));
         $credentialValue = $rotateV1 ? $this->generateCredentialValue() : trim((string) ($current?->api_key ?? ''));
         $merchantPrivateKey = '';
@@ -112,7 +111,6 @@ class MerchantApiCredentialService extends BaseService
             ['merchant_id' => $merchantId],
             [
                 'merchant_id' => $merchantId,
-                'sign_type' => $signType,
                 'status' => $status,
                 'api_key' => $credentialValue,
                 'merchant_public_key' => $merchantPublicKey,
@@ -274,19 +272,16 @@ class MerchantApiCredentialService extends BaseService
      * @param bool $isUpdate 是否更新
      * @param MerchantApiCredential|null $current 当前凭证
      * 更新场景下，空字符串视为“不修改”，避免手动配置时误清空已有密钥。
-     * `sign_type` 在当前阶段只作为展示/默认接入说明，不再作为 V1/V2 互斥开关。
      *
-     * @return array{merchant_id: int, sign_type: int, status: int, api_key?: string} 标准化后的写入数据
+     * @return array{merchant_id: int, status: int, api_key?: string} 标准化后的写入数据
      */
     private function normalizePayload(array $data, bool $isUpdate, ?MerchantApiCredential $current = null): array
     {
         // 更新场景下以现有记录的 merchant_id 为准，避免把凭证误挂到别的商户。
         $merchantId = (int) ($current?->merchant_id ?? ($data['merchant_id'] ?? 0));
-        $currentSignType = (int) ($current?->sign_type ?? AuthConstant::API_SIGN_TYPE_MD5);
         $currentStatus = (int) ($current?->status ?? AuthConstant::CREDENTIAL_STATUS_ENABLED);
         $payload = [
             'merchant_id' => $merchantId,
-            'sign_type' => (int) ($data['sign_type'] ?? $currentSignType),
             'status' => (int) ($data['status'] ?? $currentStatus),
         ];
 

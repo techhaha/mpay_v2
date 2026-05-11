@@ -45,7 +45,6 @@ class MerchantPortalValidator extends Validator
         'status' => 'sometimes|integer|in:0,1',
         'rotate_v1' => 'sometimes|integer|in:0,1',
         'rotate_v2' => 'sometimes|integer|in:0,1',
-        'sign_type' => 'sometimes|integer|in:0,1',
         'sort_no' => 'nullable|integer|min:0',
         'page' => 'sometimes|integer|min:1',
         'page_size' => 'sometimes|integer|min:1|max:100',
@@ -87,7 +86,6 @@ class MerchantPortalValidator extends Validator
         'status' => '状态',
         'rotate_v1' => 'V1 凭证',
         'rotate_v2' => 'V2 凭证',
-        'sign_type' => '签名类型',
         'sort_no' => '排序',
         'page' => '页码',
         'page_size' => '每页条数',
@@ -118,7 +116,7 @@ class MerchantPortalValidator extends Validator
         'channelStore' => ['name', 'pay_type_id', 'plugin_code', 'api_config_id', 'daily_limit_amount', 'daily_limit_count', 'min_amount', 'max_amount', 'remark', 'status', 'sort_no'],
         'channelUpdate' => ['id', 'name', 'pay_type_id', 'plugin_code', 'api_config_id', 'daily_limit_amount', 'daily_limit_count', 'min_amount', 'max_amount', 'remark', 'status', 'sort_no'],
         'channelDestroy' => ['id'],
-        'issueCredential' => ['rotate_v1', 'rotate_v2', 'sign_type', 'status'],
+        'issueCredential' => ['rotate_v1', 'rotate_v2', 'status'],
     ];
 
     public function rules(): array

@@ -34,6 +34,7 @@ class PaymentChannelValidator extends Validator
         'remark' => 'nullable|string|max:255',
         'status' => 'sometimes|integer|in:0,1',
         'sort_no' => 'nullable|integer|min:0',
+        'money' => 'sometimes|numeric|min:0.01',
         'page' => 'sometimes|integer|min:1',
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
@@ -48,8 +49,8 @@ class PaymentChannelValidator extends Validator
         'keyword' => '关键字',
         'merchant_id' => '所属商户',
         'name' => '通道名称',
-        'split_rate_bp' => '分成比例',
-        'cost_rate_bp' => '通道成本',
+        'split_rate_bp' => '商户分账比例',
+        'cost_rate_bp' => '第三方通道成本',
         'channel_mode' => '通道模式',
         'pay_type_id' => '支付方式',
         'plugin_code' => '支付插件',
@@ -61,6 +62,7 @@ class PaymentChannelValidator extends Validator
         'remark' => '备注',
         'status' => '通道状态',
         'sort_no' => '排序',
+        'money' => '测试金额',
         'page' => '页码',
         'page_size' => '每页条数',
     ];
@@ -77,6 +79,7 @@ class PaymentChannelValidator extends Validator
         'updateStatus' => ['id', 'status'],
         'show' => ['id'],
         'destroy' => ['id'],
+        'test' => ['id', 'name', 'money'],
     ];
 
     /**
@@ -116,6 +119,11 @@ class PaymentChannelValidator extends Validator
             ]),
             'show', 'destroy' => array_merge($rules, [
                 'id' => 'required|integer|min:1',
+            ]),
+            'test' => array_merge($rules, [
+                'id' => 'required|integer|min:1',
+                'name' => 'required|string|min:1|max:128',
+                'money' => 'required|numeric|min:0.01',
             ]),
             default => $rules,
         };

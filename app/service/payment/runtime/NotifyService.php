@@ -94,11 +94,15 @@ class NotifyService extends BaseService
      * 不在日志层吞掉后续通知。
      *
      * @param array $input 回调数据
-     * @return PayCallbackLog 支付回调日志
+     * @return PayCallbackLog|null 支付回调日志；关闭日志时返回 null
      * @throws ValidationException
      */
-    public function recordPayCallback(array $input): PayCallbackLog
+    public function recordPayCallback(array $input): ?PayCallbackLog
     {
+        if (!$this->boolConfig('pay_callback_log_enabled', true)) {
+            return null;
+        }
+
         $payNo = trim((string) ($input['pay_no'] ?? ''));
         if ($payNo === '') {
             throw new ValidationException('pay_no 不能为空', ['pay_no' => $payNo]);
@@ -126,9 +130,10 @@ class NotifyService extends BaseService
      * 通常用于支付成功、退款成功或清算完成后的商户异步通知。
      *
      * @param array $input 通知任务数据
+     * @param bool $deduplicate 是否按事件引用单号去重
      * @return NotifyTask 通知任务
      */
-    public function enqueueMerchantNotify(array $input): NotifyTask
+    public function enqueueMerchantNotify(array $input, bool $deduplicate = true): NotifyTask
     {
         $eventType = (string) ($input['event_type'] ?? NotifyConstant::EVENT_PAY_SUCCESS);
         $refNo = (string) ($input['ref_no'] ?? $input['pay_no'] ?? '');
@@ -136,9 +141,11 @@ class NotifyService extends BaseService
             throw new ValidationException('通知事件引用单号不能为空');
         }
 
-        $existing = $this->notifyTaskRepository->findByEventRef($eventType, $refNo);
-        if ($existing) {
-            return $existing;
+        if ($deduplicate) {
+            $existing = $this->notifyTaskRepository->findByEventRef($eventType, $refNo);
+            if ($existing) {
+                return $existing;
+            }
         }
 
         return $this->notifyTaskRepository->create([
@@ -263,6 +270,20 @@ class NotifyService extends BaseService
     private function retryIntervalMinutes(): int
     {
         return max(1, (int) $this->systemConfigRuntimeService->get('pay_notify_retry_interval', 10));
+    }
+
+    /**
+     * 读取布尔配置。
+     *
+     * @param string $key 配置键
+     * @param bool $default 默认值
+     * @return bool 布尔值
+     */
+    private function boolConfig(string $key, bool $default): bool
+    {
+        $value = strtolower(trim((string) $this->systemConfigRuntimeService->get($key, $default ? '1' : '0')));
+
+        return in_array($value, ['1', 'true', 'yes', 'on', 'enabled'], true);
     }
 
     /**

@@ -37,8 +37,24 @@ class ChannelDailyStatRepository extends BaseRepository
             ->where('stat_date', $statDate)
             ->first($columns);
     }
-}
 
+    /**
+     * 根据通道和日期加锁查询统计记录。
+     *
+     * @param int $channelId 渠道ID
+     * @param string $statDate 统计日期
+     * @param array $columns 字段列表
+     * @return ChannelDailyStat|null 统计记录
+     */
+    public function findForUpdateByChannelAndDate(int $channelId, string $statDate, array $columns = ['*'])
+    {
+        return $this->model->newQuery()
+            ->where('channel_id', $channelId)
+            ->where('stat_date', $statDate)
+            ->lockForUpdate()
+            ->first($columns);
+    }
+}
 
 
 

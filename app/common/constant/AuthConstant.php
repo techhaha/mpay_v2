@@ -45,42 +45,14 @@ final class AuthConstant
     public const CREDENTIAL_STATUS_ENABLED = 1;
 
     /**
-     * API 签名类型：MD5。
-     */
-    public const API_SIGN_TYPE_MD5 = 0;
-
-    /**
-     * API 签名类型：SHA256WithRSA。
-     */
-    public const API_SIGN_TYPE_SHA256_WITH_RSA = 1;
-
-    /**
      * API 签名类型名称：MD5。
      */
     public const API_SIGN_NAME_MD5 = 'MD5';
 
     /**
-     * API 签名类型名称：SHA256WithRSA。
+     * API 签名类型名称：RSA。
      */
-    public const API_SIGN_NAME_SHA256_WITH_RSA = 'SHA256WithRSA';
-
-    /**
-     * API 签名类型归一化名称：SHA256WITHRSA。
-     */
-    public const API_SIGN_NORMALIZED_SHA256_WITH_RSA = 'SHA256WITHRSA';
-
-    /**
-     * 获取签名类型映射。
-     *
-     * @return array<int, string> 签名类型名称表
-     */
-    public static function signTypeMap(): array
-    {
-        return [
-            self::API_SIGN_TYPE_MD5 => self::API_SIGN_NAME_MD5,
-            self::API_SIGN_TYPE_SHA256_WITH_RSA => self::API_SIGN_NAME_SHA256_WITH_RSA,
-        ];
-    }
+    public const API_SIGN_NAME_RSA = 'RSA';
 
     /**
      * 获取接口凭证状态映射。
@@ -108,5 +80,3 @@ final class AuthConstant
         ];
     }
 }
-
-

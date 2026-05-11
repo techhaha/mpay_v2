@@ -3,6 +3,8 @@
 namespace app\service\ops\stat;
 
 use app\common\base\BaseService;
+use app\model\payment\PayOrder;
+use app\model\payment\RefundOrder;
 use app\model\admin\ChannelDailyStat;
 use app\repository\ops\stat\ChannelDailyStatRepository;
 
@@ -94,6 +96,68 @@ class ChannelDailyStatService extends BaseService
     }
 
     /**
+     * 记录支付成功统计。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @return void
+     */
+    public function recordPaySuccess(PayOrder $payOrder): void
+    {
+        $this->applyDelta($this->buildBaseDelta($payOrder) + [
+            'pay_success_count' => 1,
+            'pay_fail_count' => 0,
+            'pay_amount' => (int) $payOrder->pay_amount,
+            'refund_count' => 0,
+            'refund_amount' => 0,
+            'latency_ms' => $this->resolvePayLatencyMs($payOrder),
+        ]);
+    }
+
+    /**
+     * 记录支付失败类统计。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @return void
+     */
+    public function recordPayFailure(PayOrder $payOrder): void
+    {
+        $this->applyDelta($this->buildBaseDelta($payOrder) + [
+            'pay_success_count' => 0,
+            'pay_fail_count' => 1,
+            'pay_amount' => 0,
+            'refund_count' => 0,
+            'refund_amount' => 0,
+            'latency_ms' => 0,
+        ]);
+    }
+
+    /**
+     * 记录退款成功统计。
+     *
+     * @param RefundOrder $refundOrder 退款单
+     * @return void
+     */
+    public function recordRefundSuccess(RefundOrder $refundOrder): void
+    {
+        if ((int) $refundOrder->channel_id <= 0) {
+            return;
+        }
+
+        $this->applyDelta([
+            'merchant_id' => (int) $refundOrder->merchant_id,
+            'merchant_group_id' => (int) $refundOrder->merchant_group_id,
+            'channel_id' => (int) $refundOrder->channel_id,
+            'stat_date' => $this->resolveDate($refundOrder->succeeded_at ?: $refundOrder->updated_at ?: $refundOrder->created_at),
+            'pay_success_count' => 0,
+            'pay_fail_count' => 0,
+            'pay_amount' => 0,
+            'refund_count' => 1,
+            'refund_amount' => (int) $refundOrder->refund_amount,
+            'latency_ms' => 0,
+        ]);
+    }
+
+    /**
      * 格式化单条统计记录。
      *
      * @param object $row 查询结果对象
@@ -110,6 +174,128 @@ class ChannelDailyStatService extends BaseService
         $row->updated_at_text = $this->formatDateTime($row->updated_at ?? null);
 
         return $row;
+    }
+
+    /**
+     * 构建支付单统计基础维度。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @return array<string, mixed> 统计维度
+     */
+    private function buildBaseDelta(PayOrder $payOrder): array
+    {
+        return [
+            'merchant_id' => (int) $payOrder->merchant_id,
+            'merchant_group_id' => (int) $payOrder->merchant_group_id,
+            'channel_id' => (int) $payOrder->channel_id,
+            'stat_date' => $this->resolveDate($payOrder->paid_at ?: $payOrder->failed_at ?: $payOrder->closed_at ?: $payOrder->timeout_at ?: $payOrder->updated_at ?: $payOrder->created_at),
+        ];
+    }
+
+    /**
+     * 应用统计增量。
+     *
+     * @param array<string, mixed> $delta 统计增量
+     * @return void
+     */
+    private function applyDelta(array $delta): void
+    {
+        $channelId = (int) ($delta['channel_id'] ?? 0);
+        if ($channelId <= 0) {
+            return;
+        }
+
+        $this->transactionRetry(function () use ($delta, $channelId): void {
+            $statDate = (string) ($delta['stat_date'] ?? date('Y-m-d'));
+            $row = $this->channelDailyStatRepository->findForUpdateByChannelAndDate($channelId, $statDate);
+            if (!$row) {
+                $row = $this->channelDailyStatRepository->create([
+                    'merchant_id' => (int) ($delta['merchant_id'] ?? 0),
+                    'merchant_group_id' => (int) ($delta['merchant_group_id'] ?? 0),
+                    'channel_id' => $channelId,
+                    'stat_date' => $statDate,
+                    'pay_success_count' => 0,
+                    'pay_fail_count' => 0,
+                    'pay_amount' => 0,
+                    'refund_count' => 0,
+                    'refund_amount' => 0,
+                    'avg_latency_ms' => 0,
+                    'success_rate_bp' => 0,
+                    'health_score' => 0,
+                ]);
+                $row = $this->channelDailyStatRepository->findForUpdateByChannelAndDate($channelId, $statDate) ?: $row;
+            }
+
+            $previousSuccess = (int) $row->pay_success_count;
+            $successDelta = (int) ($delta['pay_success_count'] ?? 0);
+            $latencyMs = (int) ($delta['latency_ms'] ?? 0);
+
+            $row->merchant_id = (int) ($row->merchant_id ?: ($delta['merchant_id'] ?? 0));
+            $row->merchant_group_id = (int) ($row->merchant_group_id ?: ($delta['merchant_group_id'] ?? 0));
+            $row->pay_success_count = $previousSuccess + $successDelta;
+            $row->pay_fail_count = (int) $row->pay_fail_count + (int) ($delta['pay_fail_count'] ?? 0);
+            $row->pay_amount = (int) $row->pay_amount + (int) ($delta['pay_amount'] ?? 0);
+            $row->refund_count = (int) $row->refund_count + (int) ($delta['refund_count'] ?? 0);
+            $row->refund_amount = (int) $row->refund_amount + (int) ($delta['refund_amount'] ?? 0);
+
+            if ($successDelta > 0 && $latencyMs > 0) {
+                $row->avg_latency_ms = $previousSuccess > 0
+                    ? (int) floor(((int) $row->avg_latency_ms * $previousSuccess + $latencyMs) / max(1, $previousSuccess + $successDelta))
+                    : $latencyMs;
+            }
+
+            $this->refreshQualityFields($row);
+            $row->save();
+        });
+    }
+
+    /**
+     * 刷新成功率和健康分。
+     *
+     * 成功率以万分比保存，健康分以成功率百分制为基础，并按平均耗时做轻量扣分。
+     *
+     * @param ChannelDailyStat $row 统计记录
+     * @return void
+     */
+    private function refreshQualityFields(ChannelDailyStat $row): void
+    {
+        $successCount = (int) $row->pay_success_count;
+        $failCount = (int) $row->pay_fail_count;
+        $total = $successCount + $failCount;
+
+        $row->success_rate_bp = $total > 0 ? (int) floor($successCount * 10000 / $total) : 0;
+        $latencyPenalty = min(30, (int) floor((int) $row->avg_latency_ms / 1000));
+        $row->health_score = $total > 0 ? max(0, min(100, (int) floor($row->success_rate_bp / 100) - $latencyPenalty)) : 0;
+    }
+
+    /**
+     * 计算支付成功耗时。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @return int 耗时毫秒数
+     */
+    private function resolvePayLatencyMs(PayOrder $payOrder): int
+    {
+        $start = strtotime((string) ($payOrder->request_at ?: $payOrder->created_at));
+        $end = strtotime((string) ($payOrder->paid_at ?: $payOrder->updated_at));
+        if (!$start || !$end || $end < $start) {
+            return 0;
+        }
+
+        return (int) (($end - $start) * 1000);
+    }
+
+    /**
+     * 解析统计日期。
+     *
+     * @param mixed $value 时间值
+     * @return string 日期，格式 Y-m-d
+     */
+    private function resolveDate(mixed $value): string
+    {
+        $timestamp = strtotime((string) $value);
+
+        return $timestamp ? date('Y-m-d', $timestamp) : date('Y-m-d');
     }
 
     /**
@@ -150,7 +336,4 @@ class ChannelDailyStatService extends BaseService
     }
 
 }
-
-
-
 

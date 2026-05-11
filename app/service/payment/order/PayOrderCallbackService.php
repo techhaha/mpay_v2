@@ -5,15 +5,18 @@ namespace app\service\payment\order;
 use app\common\base\BaseService;
 use app\common\constant\NotifyConstant;
 use app\common\constant\PaymentPluginStatusConstant;
+use app\common\interface\ChannelNotifyInterface;
+use app\common\interface\ChannelNotifyPayloadInterface;
 use app\exception\PaymentException;
 use app\exception\ResourceNotFoundException;
-use app\exception\ValidationException;
 use app\model\payment\PayOrder;
+use app\repository\payment\config\PaymentChannelRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\service\payment\runtime\NotifyService;
 use app\service\payment\runtime\PaymentPluginManager;
 use support\Request;
 use support\Response;
+use Throwable;
 
 /**
  * 支付单回调服务。
@@ -22,6 +25,7 @@ use support\Response;
  *
  * @property NotifyService $notifyService 通知服务
  * @property PaymentPluginManager $paymentPluginManager 支付插件管理器
+ * @property PaymentChannelRepository $paymentChannelRepository 支付通道仓库
  * @property PayOrderRepository $payOrderRepository 支付单仓库
  * @property PayOrderLifecycleService $payOrderLifecycleService 支付单生命周期服务
  */
@@ -32,49 +36,17 @@ class PayOrderCallbackService extends BaseService
      *
      * @param NotifyService $notifyService 通知服务
      * @param PaymentPluginManager $paymentPluginManager 支付插件管理器
+     * @param PaymentChannelRepository $paymentChannelRepository 支付通道仓库
      * @param PayOrderRepository $payOrderRepository 支付单仓库
      * @param PayOrderLifecycleService $payOrderLifecycleService 支付单生命周期服务
      */
     public function __construct(
         protected NotifyService $notifyService,
         protected PaymentPluginManager $paymentPluginManager,
+        protected PaymentChannelRepository $paymentChannelRepository,
         protected PayOrderRepository $payOrderRepository,
         protected PayOrderLifecycleService $payOrderLifecycleService
     ) {
-    }
-
-    /**
-     * 处理渠道回调载荷并推进支付状态。
-     *
-     * @param array $input 回调载荷
-     * @return PayOrder 支付订单模型
-     * @throws ValidationException
-     */
-    public function handleChannelCallback(array $input): PayOrder
-    {
-        $payNo = trim((string) ($input['pay_no'] ?? ''));
-        if ($payNo === '') {
-            throw new ValidationException('pay_no 不能为空', ['pay_no' => $payNo]);
-        }
-
-        // 先落回调日志，后续无论成功还是失败，都可以从统一表里排查。
-        $this->notifyService->recordPayCallback([
-            'pay_no' => $payNo,
-            'channel_id' => (int) ($input['channel_id'] ?? 0),
-            'callback_type' => (int) ($input['callback_type'] ?? NotifyConstant::CALLBACK_TYPE_ASYNC),
-            'request_data' => $input['request_data'] ?? [],
-            'verify_status' => (int) ($input['verify_status'] ?? NotifyConstant::VERIFY_STATUS_UNKNOWN),
-            'process_status' => (int) ($input['process_status'] ?? NotifyConstant::PROCESS_STATUS_PENDING),
-            'process_result' => $input['process_result'] ?? [],
-        ]);
-
-        $success = (bool) ($input['success'] ?? false);
-        // 回调链路只根据插件/渠道给出的结果收口支付单状态。
-        if ($success) {
-            return $this->payOrderLifecycleService->markPaySuccess($payNo, $input);
-        }
-
-        return $this->payOrderLifecycleService->markPayFailed($payNo, $input);
     }
 
     /**
@@ -89,172 +61,252 @@ class PayOrderCallbackService extends BaseService
      */
     public function handlePluginCallback(string $payNo, Request $request): string|Response
     {
-        // 回调必须能定位到具体支付单，找不到就直接终止。
         $payOrder = $this->payOrderRepository->findByPayNo($payNo);
         if (!$payOrder) {
             throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
         }
 
-        $plugin = $this->paymentPluginManager->createByPayOrder($payOrder, true);
-
+        $plugin = null;
+        $callbackPayload = null;
         try {
-            // 插件必须直接返回标准结构，系统层只负责校验，不再兼容旧字段别名。
-            $result = $this->validatePluginNotifyResult($plugin->notify($request));
-            $status = (string) $result['status'];
-
-            // 将插件返回值归一化为生命周期服务可消费的回调载荷。
-            /** @var array<string, mixed> $callbackPayload */
-            $callbackPayload = [
-                'pay_no' => $payNo,
-                'success' => $status === PaymentPluginStatusConstant::SUCCESS,
-                'channel_id' => (int) $payOrder->channel_id,
-                'callback_type' => NotifyConstant::CALLBACK_TYPE_ASYNC,
-                'request_data' => $request->all(),
-                'verify_status' => NotifyConstant::VERIFY_STATUS_SUCCESS,
-                'process_status' => $this->resolveProcessStatus($status),
-                'process_result' => $result,
-                'channel_trade_no' => (string) ($result['channel_trade_no'] ?? ''),
-                'channel_order_no' => (string) ($result['channel_order_no'] ?? ''),
-                'paid_at' => $result['paid_at'] ?? null,
-                'failed_at' => $result['failed_at'] ?? null,
-                'channel_error_code' => (string) ($result['channel_error_code'] ?? ''),
-                'channel_error_msg' => (string) ($result['channel_error_msg'] ?? ''),
-                // 回调原文和插件解析结果只进入 ma_pay_callback_log；
-                // 支付单本身只更新状态、渠道单号和错误字段，避免 ext_json 变成通知历史桶。
-                'ext_json' => [],
-            ];
-            // 部分渠道会返回实际手续费，补充进回调载荷，便于后续清算和对账。
-            if ($result['fee_actual_amount'] !== null) {
-                $callbackPayload['fee_actual_amount'] = (int) $result['fee_actual_amount'];
-            }
-            if ($status === PaymentPluginStatusConstant::PENDING) {
-                // 渠道通知已通过验签但尚未终态时，只记录日志，不提前推进支付单状态。
-                $this->notifyService->recordPayCallback($callbackPayload);
-                return $plugin->notifySuccess();
-            }
-
-            // 回调终态统一交给生命周期服务落库，避免状态推进分散在不同分支里。
-            $this->handleChannelCallback($callbackPayload);
-
-            // 只要验签通过且已被系统处理，统一回成功响应，避免渠道对失败终态反复重推。
-            return $plugin->notifySuccess();
-        } catch (PaymentException $e) {
-            // 验签失败或插件解析失败时，记录失败日志并返回失败响应，允许渠道按自身策略重推。
-            $this->notifyService->recordPayCallback([
-                'pay_no' => $payNo,
-                'channel_id' => (int) $payOrder->channel_id,
-                'callback_type' => NotifyConstant::CALLBACK_TYPE_ASYNC,
-                'request_data' => array_merge($request->get(), $request->post()),
-                'verify_status' => NotifyConstant::VERIFY_STATUS_FAILED,
-                'process_status' => NotifyConstant::PROCESS_STATUS_FAILED,
-                'process_result' => [
-                    'message' => $e->getMessage(),
-                    'code' => $e->getCode(),
-                ],
-            ]);
-
-            return $plugin->notifyFail();
-        } catch (\Throwable $e) {
-            // 非业务异常同样记为失败，避免渠道重复推送造成状态抖动。
-            $this->notifyService->recordPayCallback([
-                'pay_no' => $payNo,
-                'channel_id' => (int) $payOrder->channel_id,
-                'callback_type' => NotifyConstant::CALLBACK_TYPE_ASYNC,
-                'request_data' => array_merge($request->get(), $request->post()),
-                'verify_status' => NotifyConstant::VERIFY_STATUS_FAILED,
-                'process_status' => NotifyConstant::PROCESS_STATUS_FAILED,
-                'process_result' => [
-                    'message' => $e->getMessage(),
-                    'code' => 'PLUGIN_NOTIFY_ERROR',
-                ],
-            ]);
-
-            return $plugin->notifyFail();
-        }
-    }
-
-    /**
-     * 校验插件回调结果。
-     *
-     * 插件 `notify()` 必须直接返回当前系统约定的标准字段；
-     * 服务层不再做字段别名兼容或自动补齐。
-     *
-     * @param array<string, mixed> $result 插件返回值
-     * @return array<string, mixed>
-     * @throws PaymentException
-     */
-    private function validatePluginNotifyResult(array $result): array
-    {
-        $requiredKeys = [
-            'status',
-        ];
-
-        foreach ($requiredKeys as $key) {
-            if (!array_key_exists($key, $result)) {
-                throw new PaymentException('插件回调返回缺少标准字段', 40200, [
-                    'missing_key' => $key,
+            $plugin = $this->paymentPluginManager->createByPayOrder($payOrder, true);
+            $notifyResult = PaymentPluginNotifyResultValidator::make($plugin->notify($request))
+                ->withScene('notify_result')
+                ->withException(PaymentException::class)
+                ->validate();
+            $notifyPayNo = trim((string) ($notifyResult['pay_no'] ?? ''));
+            if ($notifyPayNo !== '' && $notifyPayNo !== (string) $payOrder->pay_no) {
+                throw new PaymentException('插件回调定位的支付单与当前支付单不一致', 40200, [
+                    'callback_pay_no' => (string) $payOrder->pay_no,
+                    'notify_pay_no' => $notifyPayNo,
                 ]);
             }
-        }
+            $callbackPayload = $this->buildCallbackPayload($payOrder, $request->all(), $notifyResult);
+            $this->applyNotifyResult($payOrder, $notifyResult, $callbackPayload);
 
-        $status = strtolower(trim((string) $result['status']));
-        if (!in_array($status, PaymentPluginStatusConstant::notifyStatuses(), true)) {
-            throw new PaymentException('插件回调返回的状态不合法', 40200, [
-                'status' => $status,
-            ]);
-        }
+            return $plugin->notifySuccess();
+        } catch (PaymentException $e) {
+            $exception = (int) $e->getCode() === 400
+                ? new PaymentException($e->getMessage(), 40200, $e->getData())
+                : $e;
+            $this->recordCallbackFailure($payOrder, $request->all(), $exception, $callbackPayload);
 
-        $channelOrderNo = trim((string) ($result['channel_order_no'] ?? ''));
-        $channelTradeNo = trim((string) ($result['channel_trade_no'] ?? ''));
-        if ($channelOrderNo === '' && $channelTradeNo === '') {
-            throw new PaymentException('插件回调必须返回 channel_order_no 或 channel_trade_no', 40200);
-        }
-        if ($channelOrderNo === '') {
-            $channelOrderNo = $channelTradeNo;
-        }
-        if ($channelTradeNo === '') {
-            $channelTradeNo = $channelOrderNo;
-        }
+            return $plugin ? $plugin->notifyFail() : 'fail';
+        } catch (Throwable $e) {
+            $this->recordCallbackFailure($payOrder, $request->all(), $e, $callbackPayload);
 
-        if (array_key_exists('ext_json', $result) && !is_array($result['ext_json'])) {
-            throw new PaymentException('插件回调 ext_json 必须为数组', 40200);
+            return $plugin ? $plugin->notifyFail() : 'fail';
         }
-
-        $feeActualAmount = null;
-        if (array_key_exists('fee_actual_amount', $result) && $result['fee_actual_amount'] !== null) {
-            if (!is_numeric($result['fee_actual_amount'])) {
-                throw new PaymentException('插件回调 fee_actual_amount 必须为数字', 40200);
-            }
-            $feeActualAmount = (int) $result['fee_actual_amount'];
-        }
-
-        return [
-            'status' => $status,
-            'message' => trim((string) ($result['message'] ?? '')),
-            'channel_order_no' => $channelOrderNo,
-            'channel_trade_no' => $channelTradeNo,
-            'channel_status' => trim((string) ($result['channel_status'] ?? '')),
-            'channel_error_code' => trim((string) ($result['channel_error_code'] ?? '')),
-            'channel_error_msg' => trim((string) ($result['channel_error_msg'] ?? '')),
-            'paid_at' => $result['paid_at'] ?? null,
-            'failed_at' => $result['failed_at'] ?? null,
-            'fee_actual_amount' => $feeActualAmount,
-            'ext_json' => (array) ($result['ext_json'] ?? []),
-        ];
     }
 
     /**
-     * 根据插件标准状态映射日志处理状态。
+     * 按通道处理不携带支付单号的 HTTP 通知。
      *
-     * @param string $status 标准状态
-     * @return int
+     * 服务层只让插件定位 pay_no，定位成功后继续走标准插件 notify() 回调流程。
+     *
+     * @param int $channelId 通道ID
+     * @param Request $request 请求对象
+     * @return string|Response 字符串或响应对象
+     * @throws ResourceNotFoundException
      */
-    private function resolveProcessStatus(string $status): int
+    public function handleChannelNotify(int $channelId, Request $request): string|Response
     {
-        return match ($status) {
-            PaymentPluginStatusConstant::SUCCESS => NotifyConstant::PROCESS_STATUS_SUCCESS,
-            PaymentPluginStatusConstant::FAILED => NotifyConstant::PROCESS_STATUS_FAILED,
-            default => NotifyConstant::PROCESS_STATUS_PENDING,
-        };
+        $channel = $this->paymentChannelRepository->find($channelId);
+        if (!$channel) {
+            throw new ResourceNotFoundException('支付通道不存在', ['channel_id' => $channelId]);
+        }
+
+        $plugin = $this->paymentPluginManager->createByChannel($channel, (int) $channel->pay_type_id, true);
+        if (!$plugin instanceof ChannelNotifyInterface) {
+            throw new PaymentException('当前通道不支持通道通知入口', 40200, [
+                'channel_id' => $channelId,
+                'plugin_code' => (string) $channel->plugin_code,
+            ]);
+        }
+
+        try {
+            $result = $plugin->channelNotify($request);
+            $payNo = trim((string) ($result['pay_no'] ?? ''));
+            if ($payNo === '') {
+                throw new PaymentException('通道通知未定位到支付单', 40200, [
+                    'channel_id' => $channelId,
+                    'result' => $result,
+                ]);
+            }
+
+            return $this->handlePluginCallback($payNo, $request);
+        } catch (Throwable $e) {
+            return $plugin->notifyFail();
+        }
+    }
+
+    /**
+     * 按通道处理 Redis 队列投递的归一化流水载荷。
+     *
+     * 该入口不依赖 Request。插件先通过数组载荷定位 pay_no，再通过 notifyPayload()
+     * 返回标准通知结果，服务层复用订单状态推进、回调日志和商户通知链路。
+     *
+     * @param int $channelId 通道ID
+     * @param array<string, mixed> $payload 已归一化的流水载荷
+     * @return array<string, mixed> 渠道回调日志载荷
+     */
+    public function handleChannelNotifyPayload(int $channelId, array $payload): array
+    {
+        $channel = $this->paymentChannelRepository->find($channelId);
+        if (!$channel) {
+            throw new ResourceNotFoundException('支付通道不存在', ['channel_id' => $channelId]);
+        }
+
+        $plugin = $this->paymentPluginManager->createByChannel($channel, (int) $channel->pay_type_id, true);
+        if (!$plugin instanceof ChannelNotifyPayloadInterface) {
+            throw new PaymentException('当前通道不支持数组载荷通知入口', 40200, [
+                'channel_id' => $channelId,
+                'plugin_code' => (string) $channel->plugin_code,
+            ]);
+        }
+
+        $result = $plugin->channelNotifyPayload($payload);
+        $payNo = trim((string) ($result['pay_no'] ?? ''));
+        if ($payNo === '') {
+            throw new PaymentException('通道通知未定位到支付单', 40200, [
+                'channel_id' => $channelId,
+                'result' => $result,
+            ]);
+        }
+
+        $payOrder = $this->payOrderRepository->findByPayNo($payNo);
+        if (!$payOrder) {
+            throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
+        }
+
+        $callbackPayload = null;
+        try {
+            $notifyResult = PaymentPluginNotifyResultValidator::make($plugin->notifyPayload($payload))
+                ->withScene('notify_result')
+                ->withException(PaymentException::class)
+                ->validate();
+            $notifyPayNo = trim((string) ($notifyResult['pay_no'] ?? ''));
+            if ($notifyPayNo !== '' && $notifyPayNo !== (string) $payOrder->pay_no) {
+                throw new PaymentException('插件回调定位的支付单与当前支付单不一致', 40200, [
+                    'callback_pay_no' => (string) $payOrder->pay_no,
+                    'notify_pay_no' => $notifyPayNo,
+                ]);
+            }
+
+            $callbackPayload = $this->buildCallbackPayload($payOrder, $payload, $notifyResult);
+            $this->applyNotifyResult($payOrder, $notifyResult, $callbackPayload);
+
+            return $callbackPayload;
+        } catch (PaymentException $e) {
+            $exception = (int) $e->getCode() === 400
+                ? new PaymentException($e->getMessage(), 40200, $e->getData())
+                : $e;
+            $this->recordCallbackFailure($payOrder, $payload, $exception, $callbackPayload);
+            throw $exception;
+        } catch (Throwable $e) {
+            $this->recordCallbackFailure($payOrder, $payload, $e, $callbackPayload);
+            throw $e;
+        }
+    }
+
+    /**
+     * 构建生命周期服务可消费的回调载荷。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @param array<string, mixed> $requestData 请求或队列载荷
+     * @param array<string, mixed> $notifyResult 插件回调结果
+     * @return array<string, mixed>
+     */
+    private function buildCallbackPayload(PayOrder $payOrder, array $requestData, array $notifyResult): array
+    {
+        $status = (string) $notifyResult['status'];
+        $payload = [
+            'pay_no' => (string) $payOrder->pay_no,
+            'success' => $status === PaymentPluginStatusConstant::SUCCESS,
+            'channel_id' => (int) $payOrder->channel_id,
+            'callback_type' => NotifyConstant::CALLBACK_TYPE_ASYNC,
+            'request_data' => $requestData,
+            'verify_status' => NotifyConstant::VERIFY_STATUS_SUCCESS,
+            'process_status' => match ($status) {
+                PaymentPluginStatusConstant::SUCCESS => NotifyConstant::PROCESS_STATUS_SUCCESS,
+                PaymentPluginStatusConstant::FAILED => NotifyConstant::PROCESS_STATUS_FAILED,
+                default => NotifyConstant::PROCESS_STATUS_PENDING,
+            },
+            'process_result' => $notifyResult,
+            'channel_order_no' => (string) $notifyResult['channel_order_no'],
+            'channel_trade_no' => (string) $notifyResult['channel_trade_no'],
+        ];
+
+        foreach (['paid_at', 'failed_at', 'channel_error_code', 'channel_error_msg'] as $key) {
+            if (($notifyResult[$key] ?? null) !== null && $notifyResult[$key] !== '') {
+                $payload[$key] = $notifyResult[$key];
+            }
+        }
+
+        return $payload;
+    }
+
+    /**
+     * 按插件通知结果推进支付单并记录回调日志。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @param array<string, mixed> $notifyResult 插件回调结果
+     * @param array<string, mixed> $callbackPayload 渠道回调日志载荷
+     * @return void
+     */
+    private function applyNotifyResult(PayOrder $payOrder, array $notifyResult, array $callbackPayload): void
+    {
+        $status = (string) $notifyResult['status'];
+        if ($status === PaymentPluginStatusConstant::PENDING) {
+            $this->notifyService->recordPayCallback($callbackPayload);
+            return;
+        }
+
+        if ($status === PaymentPluginStatusConstant::SUCCESS) {
+            $this->payOrderLifecycleService->markPaySuccess((string) $payOrder->pay_no, $callbackPayload);
+        } else {
+            $this->payOrderLifecycleService->markPayFailed((string) $payOrder->pay_no, $callbackPayload);
+        }
+
+        $this->notifyService->recordPayCallback($callbackPayload);
+    }
+
+    /**
+     * 记录回调处理失败。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @param array<string, mixed> $requestData 请求或队列载荷
+     * @param Throwable $e 异常
+     * @param array<string, mixed>|null $callbackPayload 已通过插件解析的回调载荷
+     * @return void
+     */
+    private function recordCallbackFailure(PayOrder $payOrder, array $requestData, Throwable $e, ?array $callbackPayload = null): void
+    {
+        $exceptionResult = [
+            'message' => $e->getMessage(),
+            'code' => $e instanceof PaymentException ? $e->getCode() : 'PLUGIN_NOTIFY_ERROR',
+        ];
+
+        if ($callbackPayload !== null) {
+            $this->notifyService->recordPayCallback(array_replace($callbackPayload, [
+                'verify_status' => NotifyConstant::VERIFY_STATUS_SUCCESS,
+                'process_status' => NotifyConstant::PROCESS_STATUS_FAILED,
+                'process_result' => [
+                    'notify_result' => $callbackPayload['process_result'] ?? [],
+                    'exception' => $exceptionResult,
+                ],
+            ]));
+            return;
+        }
+
+        $this->notifyService->recordPayCallback([
+            'pay_no' => (string) $payOrder->pay_no,
+            'channel_id' => (int) $payOrder->channel_id,
+            'callback_type' => NotifyConstant::CALLBACK_TYPE_ASYNC,
+            'request_data' => $requestData,
+            'verify_status' => NotifyConstant::VERIFY_STATUS_FAILED,
+            'process_status' => NotifyConstant::PROCESS_STATUS_FAILED,
+            'process_result' => $exceptionResult,
+        ]);
     }
 }

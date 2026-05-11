@@ -15,7 +15,7 @@ final class RouteConstant
     public const CHANNEL_TYPE_PLATFORM_COLLECT = 0;
 
     /**
-     * 商户自有通道类型。
+     * 商户自收通道类型。
      */
     public const CHANNEL_TYPE_MERCHANT_SELF = 1;
 
@@ -53,7 +53,7 @@ final class RouteConstant
     {
         return [
             self::CHANNEL_TYPE_PLATFORM_COLLECT => '平台代收',
-            self::CHANNEL_TYPE_MERCHANT_SELF => '商户自有',
+            self::CHANNEL_TYPE_MERCHANT_SELF => '商户自收',
         ];
     }
 
@@ -84,6 +84,5 @@ final class RouteConstant
         ];
     }
 }
-
 
 

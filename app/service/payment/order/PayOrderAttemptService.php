@@ -7,12 +7,14 @@ use app\common\constant\CommonConstant;
 use app\common\constant\NotifyConstant;
 use app\common\constant\RouteConstant;
 use app\common\constant\TradeConstant;
+use app\common\util\FormatHelper;
 use app\exception\BusinessStateException;
 use app\exception\ConflictException;
 use app\exception\ValidationException;
 use app\model\merchant\Merchant;
 use app\model\payment\BizOrder;
 use app\model\payment\PayOrder;
+use app\model\payment\PaymentChannel;
 use app\repository\payment\config\PaymentTypeRepository;
 use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
@@ -23,7 +25,7 @@ use app\service\payment\runtime\PaymentRouteService;
 /**
  * 支付单发起服务。
  *
- * 负责支付单预创建、通道路由选择、第三方装单和首轮状态落库。
+ * 负责商户校验、选路、业务单复用、支付单创建和首轮插件拉起。
  *
  * @property MerchantService $merchantService 商户服务
  * @property PaymentRouteService $paymentRouteService 支付路由服务
@@ -31,7 +33,6 @@ use app\service\payment\runtime\PaymentRouteService;
  * @property BizOrderRepository $bizOrderRepository 业务订单仓库
  * @property PayOrderRepository $payOrderRepository 支付单仓库
  * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
- * @property PaymentOrderInputAssembler $orderInputAssembler 支付入参组装器
  * @property PayOrderChannelDispatchService $payOrderChannelDispatchService 支付单渠道派发服务
  */
 class PayOrderAttemptService extends BaseService
@@ -45,7 +46,6 @@ class PayOrderAttemptService extends BaseService
      * @param BizOrderRepository $bizOrderRepository 业务订单仓库
      * @param PayOrderRepository $payOrderRepository 支付订单仓库
      * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
-     * @param PaymentOrderInputAssembler $orderInputAssembler 支付入参组装器
      * @param PayOrderChannelDispatchService $payOrderChannelDispatchService 支付单渠道派发服务
      */
     public function __construct(
@@ -55,15 +55,11 @@ class PayOrderAttemptService extends BaseService
         protected BizOrderRepository $bizOrderRepository,
         protected PayOrderRepository $payOrderRepository,
         protected PaymentTypeRepository $paymentTypeRepository,
-        protected PaymentOrderInputAssembler $orderInputAssembler,
         protected PayOrderChannelDispatchService $payOrderChannelDispatchService
-    ) {
-    }
+    ) {}
 
     /**
      * 预创建支付尝试。
-     *
-     * 该方法会完成商户、支付方式、路由、通道限额、串行尝试和自有通道手续费预占的完整预检查。
      *
      * @param array $input 支付预创建参数
      * @return array 发起结果
@@ -73,32 +69,125 @@ class PayOrderAttemptService extends BaseService
      */
     public function preparePayAttempt(array $input): array
     {
-        $merchantId = (int) ($input['merchant_id'] ?? 0);
-        $merchantOrderNo = trim((string) ($input['merchant_order_no'] ?? ''));
-        $payTypeId = (int) ($input['pay_type_id'] ?? 0);
-        $payAmount = (int) ($input['pay_amount'] ?? 0);
-
-        if ($merchantId <= 0 || $merchantOrderNo === '' || $payTypeId <= 0 || $payAmount <= 0) {
-            throw new ValidationException('支付入参不完整');
-        }
-
+        $merchantId = (int) $input['merchant_id'];
+        $payTypeId = (int) $input['pay_type_id'];
+        $payAmount = (int) $input['pay_amount'];
+        $this->assertPayAmountAllowed($payAmount);
         [$merchant, $merchantGroupId] = $this->resolveMerchantContext($merchantId);
 
-        /** @var PaymentType|null $paymentType */
-        $paymentType = $this->paymentTypeRepository->find($payTypeId);
-        if (!$paymentType || (int) $paymentType->status !== CommonConstant::STATUS_ENABLED) {
-            throw new BusinessStateException('支付方式不支持', ['pay_type_id' => $payTypeId]);
+        $this->ensurePaymentTypeEnabled($payTypeId);
+        $route = $this->paymentRouteService->resolveByMerchantGroup($merchantGroupId, $payTypeId, $payAmount, $input);
+        /** @var PaymentChannel $channel */
+        $channel = $route['selected_channel']['channel'];
+
+        return $this->createAndDispatchPayAttempt(
+            $input,
+            $merchant,
+            $merchantGroupId,
+            $channel,
+            (int) $route['poll_group']->id,
+            $route
+        );
+    }
+
+    /**
+     * 预创建指定通道支付尝试。
+     *
+     * 后台通道测试不参与商户路由选择，但仍走真实订单创建和插件拉起链路。
+     *
+     * @param array $input 支付预创建参数
+     * @param PaymentChannel $channel 指定支付通道
+     * @return array 发起结果
+     * @throws ValidationException
+     * @throws BusinessStateException
+     * @throws ConflictException
+     */
+    public function preparePayAttemptByChannel(array $input, PaymentChannel $channel): array
+    {
+        $merchantId = (int) $input['merchant_id'];
+        $payTypeId = (int) $input['pay_type_id'];
+        $payAmount = (int) $input['pay_amount'];
+        $this->assertPayAmountAllowed($payAmount);
+        [$merchant, $merchantGroupId] = $this->resolveDirectMerchantContext($merchantId);
+
+        if ((int) $channel->pay_type_id !== $payTypeId) {
+            throw new ValidationException('指定通道与支付方式不匹配', [
+                'channel_id' => (int) $channel->id,
+                'channel_pay_type_id' => (int) $channel->pay_type_id,
+                'pay_type_id' => $payTypeId,
+            ]);
         }
 
-        // 已选支付方式的直连支付才会进入正式选路。
-        $route = $this->paymentRouteService->resolveByMerchantGroup($merchantGroupId, $payTypeId, $payAmount, $input);
-        $selected = $route['selected_channel'];
-        /** @var PaymentChannel $channel */
-        $channel = $selected['channel'];
-        $bizFields = $this->buildBizOrderFields($input);
+        $this->ensurePaymentTypeEnabled($payTypeId);
 
-        $payNo = $this->generateNo('PAY');
-        $channelRequestNo = $this->generateNo('REQ');
+        return $this->createAndDispatchPayAttempt($input, $merchant, $merchantGroupId, $channel, 0, [
+            'poll_group' => null,
+            'candidates' => [],
+            'selected_channel' => [
+                'channel' => $channel,
+                'direct' => true,
+            ],
+        ]);
+    }
+
+    /**
+     * 预创建收银台业务单。
+     *
+     * 该方法只创建或复用业务单，不选路、不创建支付单。
+     *
+     * @param array $input 收银台参数
+     * @return array 发起结果
+     * @throws ValidationException
+     * @throws BusinessStateException
+     * @throws ConflictException
+     */
+    public function prepareCashierBizOrder(array $input): array
+    {
+        $merchantId = (int) $input['merchant_id'];
+        $merchantOrderNo = trim((string) $input['merchant_order_no']);
+        $payAmount = (int) $input['pay_amount'];
+        $this->assertPayAmountAllowed($payAmount);
+        [$merchant] = $this->resolveMerchantContext($merchantId);
+        $bizFields = $input;
+        $bizFields['ext_json'] = (array) ($bizFields['ext_json'] ?? []);
+        unset($bizFields['ext_json']['payment'], $bizFields['ext_json']['presentation']);
+
+        $bizOrder = $this->transactionRetry(function () use ($merchantId, $merchantOrderNo, $payAmount, $bizFields) {
+            return $this->prepareCashierBizOrderInCurrentTransaction($merchantId, $merchantOrderNo, $payAmount, $bizFields);
+        });
+
+        return [
+            'merchant' => $merchant,
+            'biz_order' => $bizOrder,
+            'cashier_url' => $this->buildCashierPageUrl((string) $bizOrder->biz_no),
+        ];
+    }
+
+    /**
+     * 创建支付单并拉起支付插件。
+     *
+     * @param array $input 支付预创建参数
+     * @param Merchant $merchant 商户模型
+     * @param int $merchantGroupId 商户分组ID快照
+     * @param PaymentChannel $channel 已选支付通道
+     * @param int $pollGroupId 轮询组ID快照，指定通道测试时为 0
+     * @param array $route 路由上下文
+     * @return array 发起结果
+     */
+    private function createAndDispatchPayAttempt(
+        array $input,
+        Merchant $merchant,
+        int $merchantGroupId,
+        PaymentChannel $channel,
+        int $pollGroupId,
+        array $route
+    ): array {
+        $merchantId = (int) $input['merchant_id'];
+        $merchantOrderNo = trim((string) $input['merchant_order_no']);
+        $payAmount = (int) $input['pay_amount'];
+        $bizFields = $input;
+        $bizFields['ext_json'] = (array) ($bizFields['ext_json'] ?? []);
+        unset($bizFields['ext_json']['payment'], $bizFields['ext_json']['presentation']);
 
         $prepared = $this->transactionRetry(function () use (
             $input,
@@ -106,161 +195,37 @@ class PayOrderAttemptService extends BaseService
             $merchantId,
             $merchantGroupId,
             $merchantOrderNo,
-            $payTypeId,
             $payAmount,
-            $route,
             $channel,
-            $payNo,
-            $channelRequestNo,
+            $pollGroupId,
+            $route,
             $bizFields
         ) {
-            // 在事务中完成业务单和支付单的原子创建，保证幂等与状态一致。
-            $existingBizOrder = $this->bizOrderRepository->findForUpdateByMerchantAndOrderNo($merchantId, $merchantOrderNo);
-            $bizTraceNo = '';
-
-            if ($existingBizOrder) {
-                // 同一商户订单号只能复用原业务单，且金额必须完全一致。
-                if ((int) $existingBizOrder->order_amount !== $payAmount) {
-                    throw new ValidationException('同一商户订单号金额不一致', [
-                        'merchant_id' => $merchantId,
-                        'merchant_order_no' => $merchantOrderNo,
-                    ]);
-                }
-
-                if (in_array((int) $existingBizOrder->status, [
-                    TradeConstant::ORDER_STATUS_SUCCESS,
-                    TradeConstant::ORDER_STATUS_CLOSED,
-                    TradeConstant::ORDER_STATUS_TIMEOUT,
-                ], true)) {
-                    throw new BusinessStateException('支付单状态不允许重复创建', [
-                        'biz_no' => (string) $existingBizOrder->biz_no,
-                        'status' => (int) $existingBizOrder->status,
-                    ]);
-                }
-
-                if (!empty($existingBizOrder->active_pay_no)) {
-                    $activePayOrder = $this->payOrderRepository->findForUpdateByPayNo((string) $existingBizOrder->active_pay_no);
-                    if ($activePayOrder && in_array((int) $activePayOrder->status, [TradeConstant::ORDER_STATUS_CREATED, TradeConstant::ORDER_STATUS_PAYING], true)) {
-                        throw new ConflictException('重复请求', [
-                            'biz_no' => (string) $existingBizOrder->biz_no,
-                            'active_pay_no' => (string) $existingBizOrder->active_pay_no,
-                        ]);
-                    }
-                }
-
-                // 业务单一旦生成，订单展示字段与回调地址就不能在后续支付尝试里漂移。
-                $this->assertBizOrderConsistency($existingBizOrder, $bizFields);
-                $bizOrder = $existingBizOrder;
-                $bizTraceNo = trim((string) ($bizOrder->trace_no ?? ''));
-                $dirty = false;
-                if ($bizTraceNo === '') {
-                    // 旧单如果没有 trace_no，就补成业务单号，方便后续串起来查。
-                    $bizTraceNo = (string) $bizOrder->biz_no;
-                    $bizOrder->trace_no = $bizTraceNo;
-                    $dirty = true;
-                }
-                if ($dirty) {
-                    $bizOrder->save();
-                }
-                $attemptNo = (int) $bizOrder->attempt_count + 1;
-            } else {
-                $bizOrder = $this->bizOrderRepository->create([
-                    'biz_no' => $this->generateNo('BIZ'),
-                    'trace_no' => $this->generateNo('TRC'),
-                    'merchant_id' => $merchantId,
-                    'merchant_order_no' => $merchantOrderNo,
-                    'subject' => $bizFields['subject'],
-                    'body' => $bizFields['body'],
-                    'notify_url' => $bizFields['notify_url'],
-                    'return_url' => $bizFields['return_url'],
-                    'client_ip' => $bizFields['client_ip'],
-                    'device' => $bizFields['device'],
-                    'order_amount' => $payAmount,
-                    'paid_amount' => 0,
-                    'refund_amount' => 0,
-                    'status' => TradeConstant::ORDER_STATUS_CREATED,
-                    'attempt_count' => 0,
-                    'ext_json' => $bizFields['ext_json'],
-                ]);
-                $bizTraceNo = (string) $bizOrder->trace_no;
-                $attemptNo = 1;
-            }
-
-            // 支付单快照要以“当前请求 + 已确认业务单”为准，避免复用旧业务单时把上下文写空。
-            $payOrderSeedExtJson = array_replace_recursive(
-                (array) ($bizOrder->ext_json ?? []),
-                (array) ($input['ext_json'] ?? [])
+            $expireAt = $this->resolvePayOrderExpireAt();
+            $bizContext = $this->preparePayAttemptBizOrder(
+                $merchantId,
+                $merchantOrderNo,
+                $payAmount,
+                $bizFields,
+                $expireAt
             );
-            $payOrderFields = $this->orderInputAssembler->buildOrderFields(
+
+            /** @var BizOrder $bizOrder */
+            $bizOrder = $bizContext['biz_order'];
+            $payNo = $this->generateNo('PAY');
+            $payOrder = $this->createPayOrderForAttempt(
                 $input,
-                null,
                 $bizOrder,
-                $payOrderSeedExtJson
+                (string) $bizContext['trace_no'],
+                (int) $bizContext['attempt_no'],
+                $merchantGroupId,
+                $channel,
+                $pollGroupId,
+                $payNo,
+                $expireAt
             );
 
-            $feeRateBp = (int) $channel->cost_rate_bp;
-            $splitRateBp = (int) $channel->split_rate_bp ?: 10000;
-            // 手续费和分账费率都按快照落库，后续配置变化不会影响这笔单的口径。
-            $feeEstimated = $this->calculateAmountByBp($payAmount, $feeRateBp);
-
-            if ((int) $channel->channel_mode === RouteConstant::CHANNEL_MODE_SELF && $feeEstimated > 0) {
-                // 自有通道先冻结预估手续费，避免后续余额不足。
-                $this->merchantAccountService->freezeAmountInCurrentTransaction(
-                    $merchantId,
-                    $feeEstimated,
-                    $payNo,
-                    'PAY_FREEZE:' . $payNo,
-                    [
-                        'merchant_order_no' => $merchantOrderNo,
-                        'pay_type_id' => $payTypeId,
-                        'channel_id' => (int) $channel->id,
-                        'remark' => '自有通道手续费预占',
-                    ],
-                    $bizTraceNo
-                );
-            }
-
-            $payOrder = $this->payOrderRepository->create([
-                // 路由与通道快照只落在支付单里，业务单保持纯业务事实。
-                'pay_no' => $payNo,
-                'biz_no' => (string) $bizOrder->biz_no,
-                'trace_no' => $bizTraceNo,
-                'merchant_id' => $merchantId,
-                'merchant_group_id' => $merchantGroupId,
-                'poll_group_id' => (int) $route['poll_group']->id,
-                'attempt_no' => (int) $attemptNo,
-                'channel_id' => (int) $channel->id,
-                'pay_type_id' => $payTypeId,
-                'plugin_code' => (string) $channel->plugin_code,
-                'channel_type' => (int) $channel->channel_mode,
-                'channel_mode' => (int) $channel->channel_mode,
-                'pay_amount' => $payAmount,
-                'notify_url' => (string) $payOrderFields['notify_url'],
-                'return_url' => (string) $payOrderFields['return_url'],
-                'client_ip' => (string) $payOrderFields['client_ip'],
-                'device' => (string) $payOrderFields['device'],
-                'fee_rate_bp_snapshot' => $feeRateBp,
-                'split_rate_bp_snapshot' => $splitRateBp,
-                'fee_estimated_amount' => $feeEstimated,
-                'fee_actual_amount' => 0,
-                'status' => TradeConstant::ORDER_STATUS_PAYING,
-                'fee_status' => (int) $channel->channel_mode === RouteConstant::CHANNEL_MODE_SELF ? TradeConstant::FEE_STATUS_FROZEN : TradeConstant::FEE_STATUS_NONE,
-                'settlement_status' => TradeConstant::SETTLEMENT_STATUS_NONE,
-                'channel_request_no' => $channelRequestNo,
-                'request_at' => $this->now(),
-                'callback_status' => NotifyConstant::PROCESS_STATUS_PENDING,
-                'callback_times' => 0,
-                'ext_json' => (array) $payOrderFields['ext_json'],
-            ]);
-
-            $bizOrder->active_pay_no = (string) $payOrder->pay_no;
-            $bizOrder->attempt_count = (int) $attemptNo;
-            $bizOrder->status = TradeConstant::ORDER_STATUS_PAYING;
-            if ($bizTraceNo !== '' && (string) ($bizOrder->trace_no ?? '') === '') {
-                // 把追踪号回写到业务单上，后续查单和对账能串到同一条链路。
-                $bizOrder->trace_no = $bizTraceNo;
-            }
-            $bizOrder->save();
+            $this->markBizOrderPaying($bizOrder, $payOrder, (int) $bizContext['attempt_no']);
 
             return [
                 'merchant' => $merchant,
@@ -274,12 +239,6 @@ class PayOrderAttemptService extends BaseService
         $payOrder = $prepared['pay_order'];
         /** @var BizOrder $bizOrder */
         $bizOrder = $prepared['biz_order'];
-        /** @var \app\model\payment\PaymentChannel $channel */
-        $channel = $prepared['route']['selected_channel']['channel'];
-
-        // 支付单落库后立即拉起渠道订单，补全渠道返回的单号和参数快照。
-        /** @var \app\model\merchant\Merchant $merchant */
-        $merchant = $prepared['merchant'];
         $channelDispatchResult = $this->payOrderChannelDispatchService->dispatch($payOrder, $bizOrder, $channel, $merchant);
 
         $prepared['pay_order'] = $channelDispatchResult['pay_order'];
@@ -287,110 +246,6 @@ class PayOrderAttemptService extends BaseService
         $prepared['pay_params'] = $channelDispatchResult['pay_params'];
 
         return $prepared;
-    }
-
-    /**
-     * 预创建收银台业务单。
-     *
-     * 该方法只负责业务单创建或复用，不创建支付单，供 `type` 为空的收银台入口使用。
-     *
-     * @param array $input 收银台参数
-     * @return array 发起结果
-     * @throws ValidationException
-     * @throws BusinessStateException
-     * @throws ConflictException
-     */
-    public function prepareCashierBizOrder(array $input): array
-    {
-        $merchantId = (int) ($input['merchant_id'] ?? 0);
-        $merchantOrderNo = trim((string) ($input['merchant_order_no'] ?? ''));
-        $payAmount = (int) ($input['pay_amount'] ?? 0);
-
-        if ($merchantId <= 0 || $merchantOrderNo === '' || $payAmount <= 0) {
-            throw new ValidationException('支付入参不完整');
-        }
-
-        [$merchant, $merchantGroupId] = $this->resolveMerchantContext($merchantId);
-        $bizFields = $this->buildBizOrderFields($input);
-
-        $prepared = $this->transactionRetry(function () use (
-            $merchant,
-            $merchantId,
-            $merchantGroupId,
-            $merchantOrderNo,
-            $payAmount,
-            $bizFields
-        ) {
-            // 收银台预创建只关心业务单，不创建支付单，也不提前选通道。
-            $existingBizOrder = $this->bizOrderRepository->findForUpdateByMerchantAndOrderNo($merchantId, $merchantOrderNo);
-            if ($existingBizOrder) {
-                if ((int) $existingBizOrder->order_amount !== $payAmount) {
-                    throw new ValidationException('同一商户订单号金额不一致', [
-                        'merchant_id' => $merchantId,
-                        'merchant_order_no' => $merchantOrderNo,
-                    ]);
-                }
-
-                if (in_array((int) $existingBizOrder->status, [
-                    TradeConstant::ORDER_STATUS_SUCCESS,
-                    TradeConstant::ORDER_STATUS_CLOSED,
-                    TradeConstant::ORDER_STATUS_TIMEOUT,
-                ], true)) {
-                    throw new BusinessStateException('支付单状态不允许重复创建', [
-                        'biz_no' => (string) $existingBizOrder->biz_no,
-                        'status' => (int) $existingBizOrder->status,
-                    ]);
-                }
-
-                // 收银台预创建重复请求时，必须沿用首单快照，不能把订单文案或回调地址改掉。
-                $this->assertBizOrderConsistency($existingBizOrder, $bizFields);
-                $bizOrder = $existingBizOrder;
-                $dirty = false;
-                if ((string) ($bizOrder->trace_no ?? '') === '') {
-                    // 老业务单如果没有追踪号，补成业务单号，方便后续串联查询。
-                    $bizOrder->trace_no = (string) $bizOrder->biz_no;
-                    $dirty = true;
-                }
-                if ($dirty) {
-                    $bizOrder->save();
-                }
-            } else {
-                // 新收银台单直接作为业务锚点，支付单留到确认时再创建。
-                $bizOrder = $this->bizOrderRepository->create([
-                    'biz_no' => $this->generateNo('BIZ'),
-                    'trace_no' => $this->generateNo('TRC'),
-                    'merchant_id' => $merchantId,
-                    'merchant_order_no' => $merchantOrderNo,
-                    'subject' => $bizFields['subject'],
-                    'body' => $bizFields['body'],
-                    'notify_url' => $bizFields['notify_url'],
-                    'return_url' => $bizFields['return_url'],
-                    'client_ip' => $bizFields['client_ip'],
-                    'device' => $bizFields['device'],
-                    'order_amount' => $payAmount,
-                    'paid_amount' => 0,
-                    'refund_amount' => 0,
-                    'status' => TradeConstant::ORDER_STATUS_CREATED,
-                    'active_pay_no' => '',
-                    'attempt_count' => 0,
-                    'ext_json' => $bizFields['ext_json'],
-                ]);
-            }
-
-            return [
-                'merchant' => $merchant,
-                'biz_order' => $bizOrder->refresh(),
-            ];
-        });
-
-        /** @var BizOrder $bizOrder */
-        $bizOrder = $prepared['biz_order'];
-
-        return [
-            'merchant' => $prepared['merchant'],
-            'biz_order' => $bizOrder,
-            'cashier_url' => $this->buildCashierPageUrl((string) $bizOrder->biz_no),
-        ];
     }
 
     /**
@@ -414,23 +269,440 @@ class PayOrderAttemptService extends BaseService
     }
 
     /**
-     * 归一化业务单字段。
+     * 解析指定通道支付使用的商户上下文。
      *
-     * @param array $input 统一入参
-     * @return array<string, mixed> 业务单字段
+     * 指定通道测试不依赖商户分组路由，商户没有分组时也允许创建支付单。
+     *
+     * @param int $merchantId 商户ID
+     * @return array{0: Merchant, 1: int} 商户和商户分组ID
      */
-    private function buildBizOrderFields(array $input): array
+    private function resolveDirectMerchantContext(int $merchantId): array
     {
-        // 业务单只保存商户业务上下文；支付载体上下文留给 PayOrder，避免同一业务单多次尝试时互相污染。
-        $fields = $this->orderInputAssembler->buildOrderFields(
-            $input,
-            null,
-            null,
+        $merchant = $this->merchantService->ensureMerchantPayEnabled($merchantId);
+        $merchantGroupId = (int) $merchant->group_id;
+
+        if ($merchantGroupId > 0) {
+            $this->merchantService->ensureMerchantGroupEnabled($merchantGroupId);
+        }
+
+        return [$merchant, $merchantGroupId];
+    }
+
+    /**
+     * 确认支付方式可用。
+     *
+     * @param int $payTypeId 支付方式ID
+     * @return void
+     * @throws BusinessStateException
+     */
+    private function ensurePaymentTypeEnabled(int $payTypeId): void
+    {
+        $paymentType = $this->paymentTypeRepository->find($payTypeId);
+        if (!$paymentType || (int) $paymentType->status !== CommonConstant::STATUS_ENABLED) {
+            throw new BusinessStateException('支付方式不支持', ['pay_type_id' => $payTypeId]);
+        }
+    }
+
+    /**
+     * 准备支付尝试使用的业务单。
+     *
+     * @param int $merchantId 商户ID
+     * @param string $merchantOrderNo 商户订单号
+     * @param int $payAmount 支付金额
+     * @param array<string, mixed> $bizFields 业务单字段
+     * @param string|null $expireAt 过期时间
+     * @return array{biz_order: BizOrder, attempt_no: int, trace_no: string}
+     */
+    private function preparePayAttemptBizOrder(
+        int $merchantId,
+        string $merchantOrderNo,
+        int $payAmount,
+        array $bizFields,
+        ?string $expireAt
+    ): array {
+        $bizOrder = $this->bizOrderRepository->findForUpdateByMerchantAndOrderNo($merchantId, $merchantOrderNo);
+        if ($bizOrder) {
+            $this->assertBizOrderReusable($bizOrder, $merchantId, $merchantOrderNo, $payAmount);
+            $this->assertNoActivePayAttempt($bizOrder);
+            $this->assertBizOrderConsistency($bizOrder, $bizFields);
+            $attemptNo = (int) $bizOrder->attempt_count + 1;
+            $this->assertPayAttemptAllowed($bizOrder, $attemptNo);
+
+            return [
+                'biz_order' => $bizOrder,
+                'attempt_no' => $attemptNo,
+                'trace_no' => (string) $bizOrder->trace_no,
+            ];
+        }
+
+        $bizOrder = $this->createBizOrder($merchantId, $merchantOrderNo, $payAmount, $bizFields, $expireAt);
+
+        return [
+            'biz_order' => $bizOrder,
+            'attempt_no' => 1,
+            'trace_no' => (string) $bizOrder->trace_no,
+        ];
+    }
+
+    /**
+     * 在事务内创建或复用收银台业务单。
+     *
+     * @param int $merchantId 商户ID
+     * @param string $merchantOrderNo 商户订单号
+     * @param int $payAmount 支付金额
+     * @param array<string, mixed> $bizFields 业务单字段
+     * @return BizOrder 业务单
+     */
+    private function prepareCashierBizOrderInCurrentTransaction(
+        int $merchantId,
+        string $merchantOrderNo,
+        int $payAmount,
+        array $bizFields
+    ): BizOrder {
+        $bizOrder = $this->bizOrderRepository->findForUpdateByMerchantAndOrderNo($merchantId, $merchantOrderNo);
+        if ($bizOrder) {
+            $this->assertBizOrderReusable($bizOrder, $merchantId, $merchantOrderNo, $payAmount);
+            $this->assertBizOrderConsistency($bizOrder, $bizFields);
+
+            return $bizOrder->refresh();
+        }
+
+        return $this->createBizOrder(
+            $merchantId,
+            $merchantOrderNo,
+            $payAmount,
+            $bizFields,
+            $this->resolvePayOrderExpireAt()
+        )->refresh();
+    }
+
+    /**
+     * 创建业务单。
+     *
+     * @param int $merchantId 商户ID
+     * @param string $merchantOrderNo 商户订单号
+     * @param int $payAmount 支付金额
+     * @param array<string, mixed> $bizFields 业务单字段
+     * @param string|null $expireAt 过期时间
+     * @return BizOrder 业务单
+     */
+    private function createBizOrder(
+        int $merchantId,
+        string $merchantOrderNo,
+        int $payAmount,
+        array $bizFields,
+        ?string $expireAt
+    ): BizOrder {
+        return $this->bizOrderRepository->create([
+            'biz_no' => $this->generateNo('BIZ'),
+            'trace_no' => $this->generateNo('TRC'),
+            'merchant_id' => $merchantId,
+            'merchant_order_no' => $merchantOrderNo,
+            'subject' => $bizFields['subject'],
+            'body' => $bizFields['body'],
+            'notify_url' => $bizFields['notify_url'],
+            'return_url' => $bizFields['return_url'],
+            'client_ip' => $bizFields['client_ip'],
+            'device' => $bizFields['device'],
+            'order_amount' => $payAmount,
+            'paid_amount' => 0,
+            'refund_amount' => 0,
+            'status' => TradeConstant::ORDER_STATUS_CREATED,
+            'active_pay_no' => '',
+            'attempt_count' => 0,
+            'expire_at' => $expireAt,
+            'ext_json' => $bizFields['ext_json'],
+        ]);
+    }
+
+    /**
+     * 创建支付单。
+     *
+     * @param array $input 支付预创建参数
+     * @param BizOrder $bizOrder 业务单
+     * @param string $traceNo 追踪号
+     * @param int $attemptNo 尝试序号
+     * @param int $merchantGroupId 商户分组ID
+     * @param PaymentChannel $channel 支付通道
+     * @param int $pollGroupId 轮询组ID
+     * @param string $payNo 支付单号
+     * @param string|null $expireAt 过期时间
+     * @return PayOrder 支付单
+     */
+    private function createPayOrderForAttempt(
+        array $input,
+        BizOrder $bizOrder,
+        string $traceNo,
+        int $attemptNo,
+        int $merchantGroupId,
+        PaymentChannel $channel,
+        int $pollGroupId,
+        string $payNo,
+        ?string $expireAt
+    ): PayOrder {
+        $merchantId = (int) $input['merchant_id'];
+        $merchantOrderNo = trim((string) $input['merchant_order_no']);
+        $payTypeId = (int) $input['pay_type_id'];
+        $payAmount = (int) $input['pay_amount'];
+        $payOrderExtJson = array_replace_recursive(
+            (array) ($bizOrder->ext_json ?? []),
             (array) ($input['ext_json'] ?? [])
         );
-        unset($fields['ext_json']['payment'], $fields['ext_json']['presentation'], $fields['ext_json']['plugin']);
+        $splitRateBp = (int) $channel->split_rate_bp;
+        $merchantShareAmount = $this->calculateAmountByBp($payAmount, $splitRateBp);
+        $serviceFeeAmount = max(0, $payAmount - $merchantShareAmount);
 
-        return $fields;
+        $this->freezeSelfChannelFee(
+            $channel,
+            $merchantId,
+            $merchantOrderNo,
+            $payTypeId,
+            $payNo,
+            $traceNo,
+            $serviceFeeAmount
+        );
+
+        return $this->payOrderRepository->create([
+            'pay_no' => $payNo,
+            'biz_no' => (string) $bizOrder->biz_no,
+            'trace_no' => $traceNo,
+            'merchant_id' => $merchantId,
+            'merchant_group_id' => $merchantGroupId,
+            'poll_group_id' => $pollGroupId,
+            'attempt_no' => $attemptNo,
+            'channel_id' => (int) $channel->id,
+            'pay_type_id' => $payTypeId,
+            'plugin_code' => (string) $channel->plugin_code,
+            'channel_type' => (int) $channel->channel_mode,
+            'channel_mode' => (int) $channel->channel_mode,
+            'pay_amount' => $payAmount,
+            'notify_url' => (string) $input['notify_url'],
+            'return_url' => (string) $input['return_url'],
+            'client_ip' => (string) $input['client_ip'],
+            'device' => (string) $input['device'],
+            'split_rate_bp_snapshot' => $splitRateBp,
+            'service_fee_amount' => $serviceFeeAmount,
+            'status' => TradeConstant::ORDER_STATUS_PAYING,
+            'service_fee_status' => (int) $channel->channel_mode === RouteConstant::CHANNEL_MODE_SELF && $serviceFeeAmount > 0
+                ? TradeConstant::SERVICE_FEE_STATUS_FROZEN
+                : TradeConstant::SERVICE_FEE_STATUS_NONE,
+            'settlement_status' => TradeConstant::SETTLEMENT_STATUS_NONE,
+            'channel_request_no' => $this->generateNo('REQ'),
+            'request_at' => $this->now(),
+            'expire_at' => $expireAt,
+            'callback_status' => NotifyConstant::PROCESS_STATUS_PENDING,
+            'callback_times' => 0,
+            'ext_json' => $payOrderExtJson,
+        ]);
+    }
+
+    /**
+     * 激活业务单上的当前支付尝试。
+     *
+     * @param BizOrder $bizOrder 业务单
+     * @param PayOrder $payOrder 支付单
+     * @param int $attemptNo 尝试序号
+     * @return void
+     */
+    private function markBizOrderPaying(BizOrder $bizOrder, PayOrder $payOrder, int $attemptNo): void
+    {
+        $bizOrder->active_pay_no = (string) $payOrder->pay_no;
+        $bizOrder->attempt_count = $attemptNo;
+        $bizOrder->status = TradeConstant::ORDER_STATUS_PAYING;
+        $bizOrder->save();
+    }
+
+    /**
+     * 自收通道预冻结平台服务费。
+     *
+     * @param PaymentChannel $channel 支付通道
+     * @param int $merchantId 商户ID
+     * @param string $merchantOrderNo 商户订单号
+     * @param int $payTypeId 支付方式ID
+     * @param string $payNo 支付单号
+     * @param string $traceNo 追踪号
+     * @param int $serviceFeeAmount 平台服务费
+     * @return void
+     */
+    private function freezeSelfChannelFee(
+        PaymentChannel $channel,
+        int $merchantId,
+        string $merchantOrderNo,
+        int $payTypeId,
+        string $payNo,
+        string $traceNo,
+        int $serviceFeeAmount
+    ): void {
+        if ((int) $channel->channel_mode !== RouteConstant::CHANNEL_MODE_SELF || $serviceFeeAmount <= 0) {
+            return;
+        }
+
+        $this->merchantAccountService->freezeAmountInCurrentTransaction(
+            $merchantId,
+            $serviceFeeAmount,
+            $payNo,
+            'PAY_FREEZE:' . $payNo,
+            [
+                'merchant_order_no' => $merchantOrderNo,
+                'pay_type_id' => $payTypeId,
+                'channel_id' => (int) $channel->id,
+                'remark' => '自收通道服务费预占',
+            ],
+            $traceNo
+        );
+    }
+
+    /**
+     * 校验业务单可以继续发起支付。
+     *
+     * @param BizOrder $bizOrder 业务单
+     * @param int $merchantId 商户ID
+     * @param string $merchantOrderNo 商户订单号
+     * @param int $payAmount 支付金额
+     * @return void
+     */
+    private function assertBizOrderReusable(BizOrder $bizOrder, int $merchantId, string $merchantOrderNo, int $payAmount): void
+    {
+        if ((int) $bizOrder->order_amount !== $payAmount) {
+            throw new ValidationException('同一商户订单号金额不一致', [
+                'merchant_id' => $merchantId,
+                'merchant_order_no' => $merchantOrderNo,
+            ]);
+        }
+
+        if (in_array((int) $bizOrder->status, [
+            TradeConstant::ORDER_STATUS_SUCCESS,
+            TradeConstant::ORDER_STATUS_CLOSED,
+            TradeConstant::ORDER_STATUS_TIMEOUT,
+        ], true)) {
+            throw new BusinessStateException('支付单状态不允许重复创建', [
+                'biz_no' => (string) $bizOrder->biz_no,
+                'status' => (int) $bizOrder->status,
+            ]);
+        }
+
+        if ((int) $bizOrder->status === TradeConstant::ORDER_STATUS_FAILED
+            && !$this->boolConfig('pay_order_failed_retry_enabled', true)
+        ) {
+            throw new BusinessStateException('支付失败后不允许重新发起支付', [
+                'biz_no' => (string) $bizOrder->biz_no,
+            ]);
+        }
+    }
+
+    /**
+     * 校验同一业务单的支付尝试次数。
+     *
+     * @param BizOrder $bizOrder 业务单
+     * @param int $attemptNo 本次尝试序号
+     * @return void
+     */
+    private function assertPayAttemptAllowed(BizOrder $bizOrder, int $attemptNo): void
+    {
+        if (!$this->boolConfig('pay_order_attempt_limit_enabled', true)) {
+            return;
+        }
+
+        $limit = max(1, (int) sys_config('pay_order_attempt_limit', 5));
+        if ($attemptNo <= $limit) {
+            return;
+        }
+
+        throw new BusinessStateException('支付尝试次数已达上限', [
+            'biz_no' => (string) $bizOrder->biz_no,
+            'attempt_limit' => $limit,
+        ]);
+    }
+
+    /**
+     * 校验全局支付金额边界。
+     *
+     * @param int $payAmount 支付金额，单位分
+     * @return void
+     */
+    private function assertPayAmountAllowed(int $payAmount): void
+    {
+        if (!$this->boolConfig('pay_order_amount_limit_enabled', false)) {
+            return;
+        }
+
+        $minAmount = $this->moneyConfigToCents('pay_order_min_amount_yuan', 1);
+        $maxAmount = $this->moneyConfigToCents('pay_order_max_amount_yuan', 0);
+
+        if ($minAmount > 0 && $payAmount < $minAmount) {
+            throw new ValidationException('支付金额低于系统最小限制', [
+                'min_amount' => FormatHelper::amount($minAmount),
+            ]);
+        }
+
+        if ($maxAmount > 0 && $payAmount > $maxAmount) {
+            throw new ValidationException('支付金额高于系统最大限制', [
+                'max_amount' => FormatHelper::amount($maxAmount),
+            ]);
+        }
+    }
+
+    /**
+     * 读取布尔配置。
+     *
+     * @param string $key 配置键
+     * @param bool $default 默认值
+     * @return bool 布尔值
+     */
+    private function boolConfig(string $key, bool $default): bool
+    {
+        $value = strtolower(trim((string) sys_config($key, $default ? '1' : '0')));
+
+        return in_array($value, ['1', 'true', 'yes', 'on', 'enabled'], true);
+    }
+
+    /**
+     * 读取元金额配置并转换为分。
+     *
+     * @param string $key 配置键
+     * @param int $defaultCents 默认金额，单位分
+     * @return int 金额，单位分
+     */
+    private function moneyConfigToCents(string $key, int $defaultCents): int
+    {
+        $money = trim((string) sys_config($key, FormatHelper::amount($defaultCents)));
+        if ($money === '') {
+            return $defaultCents;
+        }
+
+        if (!preg_match('/^\d+(?:\.\d{1,2})?$/', $money)) {
+            return $defaultCents;
+        }
+
+        [$integer, $fraction] = array_pad(explode('.', $money, 2), 2, '');
+        $fraction = str_pad($fraction, 2, '0');
+
+        return ((int) $integer) * 100 + (int) substr($fraction, 0, 2);
+    }
+
+    /**
+     * 防止同一业务单并发创建多个支付中订单。
+     *
+     * @param BizOrder $bizOrder 业务单
+     * @return void
+     * @throws ConflictException
+     */
+    private function assertNoActivePayAttempt(BizOrder $bizOrder): void
+    {
+        if (empty($bizOrder->active_pay_no)) {
+            return;
+        }
+
+        $activePayOrder = $this->payOrderRepository->findForUpdateByPayNo((string) $bizOrder->active_pay_no);
+        if ($activePayOrder && in_array((int) $activePayOrder->status, [
+            TradeConstant::ORDER_STATUS_CREATED,
+            TradeConstant::ORDER_STATUS_PAYING,
+        ], true)) {
+            throw new ConflictException('重复请求', [
+                'biz_no' => (string) $bizOrder->biz_no,
+                'active_pay_no' => (string) $bizOrder->active_pay_no,
+            ]);
+        }
     }
 
     /**
@@ -446,7 +718,7 @@ class PayOrderAttemptService extends BaseService
         foreach (['subject', 'body', 'notify_url', 'return_url', 'client_ip', 'device'] as $field) {
             $current = trim((string) ($bizOrder->{$field} ?? ''));
             $incoming = trim((string) ($fields[$field] ?? ''));
-            if ($current !== '' && $incoming !== '' && $current !== $incoming) {
+            if ($current !== $incoming) {
                 throw new ConflictException('商户订单信息不一致', [
                     'biz_no' => (string) $bizOrder->biz_no,
                     'field' => $field,
@@ -454,37 +726,13 @@ class PayOrderAttemptService extends BaseService
             }
         }
 
-        $currentExtJson = $this->stableBizExtJson((array) ($bizOrder->ext_json ?? []));
-        $incomingExtJson = $this->stableBizExtJson((array) ($fields['ext_json'] ?? []));
-        if (!empty($currentExtJson) && !empty($incomingExtJson) && $currentExtJson != $incomingExtJson) {
+        $currentExtJson = (array) ($bizOrder->ext_json ?? []);
+        $incomingExtJson = (array) ($fields['ext_json'] ?? []);
+        if ($currentExtJson != $incomingExtJson) {
             throw new ConflictException('商户订单扩展信息不一致', [
                 'biz_no' => (string) $bizOrder->biz_no,
             ]);
         }
-    }
-
-    /**
-     * 只比较业务单真正稳定的扩展字段。
-     *
-     * `payment`、`presentation`、`plugin` 都属于支付尝试快照，不参与业务单幂等比较。
-     *
-     * @param array<string, mixed> $extJson 扩展字段
-     * @return array<string, mixed>
-     */
-    private function stableBizExtJson(array $extJson): array
-    {
-        $stable = [];
-        foreach (['_protocol_version'] as $key) {
-            if (array_key_exists($key, $extJson)) {
-                $stable[$key] = $extJson[$key];
-            }
-        }
-
-        if (isset($extJson['merchant']) && is_array($extJson['merchant'])) {
-            $stable['merchant'] = $extJson['merchant'];
-        }
-
-        return $stable;
     }
 
     /**
@@ -499,11 +747,33 @@ class PayOrderAttemptService extends BaseService
     }
 
     /**
-     * 计算手续费金额。
+     * 根据后台配置解析支付单过期时间。
+     *
+     * @return string|null 过期时间，关闭超时时返回 null
+     */
+    private function resolvePayOrderExpireAt(): ?string
+    {
+        $enabled = in_array(
+            strtolower(trim((string) sys_config('pay_order_timeout_enabled', '1'))),
+            ['1', 'true', 'yes', 'on', 'enabled'],
+            true
+        );
+
+        if (!$enabled) {
+            return null;
+        }
+
+        $minutes = max(1, (int) sys_config('pay_order_expire_minutes', 30));
+
+        return date('Y-m-d H:i:s', time() + $minutes * 60);
+    }
+
+    /**
+     * 按基点计算金额。
      *
      * @param int $amount 金额（分）
      * @param int $bp 费率基点，`10000` 表示 100%
-     * @return int 手续费金额（分）
+     * @return int 金额（分）
      */
     private function calculateAmountByBp(int $amount, int $bp): int
     {
@@ -511,7 +781,6 @@ class PayOrderAttemptService extends BaseService
             return 0;
         }
 
-        // 基点换算统一向下取整，避免手续费计算时出现超扣。
         return (int) floor($amount * $bp / 10000);
     }
 }

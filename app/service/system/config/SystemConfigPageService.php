@@ -76,31 +76,9 @@ class SystemConfigPageService extends BaseService
             throw new ValidationException('系统配置标签不存在');
         }
 
-        $keys = [];
-        foreach ((array) ($tab['rules'] ?? []) as $rule) {
-            if (!is_array($rule)) {
-                continue;
-            }
-
-            $field = strtolower(trim((string) ($rule['field'] ?? '')));
-            if ($field !== '' && !str_starts_with($field, '__')) {
-                $keys[] = $field;
-            }
-        }
-
-        $keys = array_values(array_unique($keys));
-        if ($keys === []) {
-            $rowMap = [];
-        } else {
-            $rows = $this->systemConfigRepository->query()
-                ->whereIn('config_key', $keys)
-                ->get(['config_key', 'config_value']);
-
-            $rowMap = [];
-            foreach ($rows as $row) {
-                $rowMap[strtolower((string) $row->config_key)] = (string) ($row->config_value ?? '');
-            }
-        }
+        $rowMap = $this->systemConfigRepository->valueMapByKeys(
+            $this->systemConfigDefinitionService->fields($tab)
+        );
 
         $tab['rules'] = $this->systemConfigDefinitionService->hydrateRules($tab, $rowMap);
         $tab['formData'] = $this->systemConfigDefinitionService->extractFormData($tab, $rowMap);
@@ -127,17 +105,8 @@ class SystemConfigPageService extends BaseService
         $this->validateRequiredValues($tab, $formData);
 
         $this->transaction(function () use ($tab, $formData): void {
-            foreach ((array) ($tab['rules'] ?? []) as $rule) {
-                if (!is_array($rule)) {
-                    continue;
-                }
-
-                $field = strtolower(trim((string) ($rule['field'] ?? '')));
-                if ($field === '' || str_starts_with($field, '__')) {
-                    continue;
-                }
-
-                $value = $this->stringifyValue($formData[$field] ?? '');
+            foreach ($this->systemConfigDefinitionService->fields($tab) as $field) {
+                $value = $this->systemConfigDefinitionService->stringifyValue($formData[$field] ?? '');
                 $this->systemConfigRepository->updateOrCreate(
                     ['config_key' => $field],
                     [
@@ -194,23 +163,4 @@ class SystemConfigPageService extends BaseService
         return $value === null || $value === '';
     }
 
-    /**
-     * 将配置值转换为可保存字符串。
-     *
-     * @param array|object|bool|float|int|string|null $value 配置值
-     * @return string 可保存字符串
-     * @throws ValidationException
-     */
-    protected function stringifyValue(array|object|bool|float|int|string|null $value): string
-    {
-        if (is_bool($value)) {
-            return $value ? '1' : '0';
-        }
-
-        if (is_array($value) || is_object($value)) {
-            throw new ValidationException('系统配置值暂不支持复杂类型');
-        }
-
-        return (string) $value;
-    }
 }

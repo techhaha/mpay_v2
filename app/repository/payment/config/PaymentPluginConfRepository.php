@@ -53,8 +53,26 @@ class PaymentPluginConfRepository extends BaseRepository
             ->whereKey($id)
             ->first($columns);
     }
-}
 
+    /**
+     * 根据配置 ID 批量查询插件配置。
+     *
+     * @param array<int, int> $ids 配置 ID 列表
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, PaymentPluginConf> 插件配置列表
+     */
+    public function listByIds(array $ids, array $columns = ['*'])
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if ($ids === []) {
+            return $this->model->newCollection();
+        }
+
+        return $this->model->newQuery()
+            ->whereIn('id', $ids)
+            ->get($columns);
+    }
+}
 
 
 

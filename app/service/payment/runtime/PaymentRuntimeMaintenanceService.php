@@ -4,12 +4,13 @@ namespace app\service\payment\runtime;
 
 use app\common\base\BaseService;
 use app\common\constant\PaymentPluginStatusConstant;
-use app\common\constant\TradeConstant;
 use app\exception\PaymentException;
+use app\exception\ResourceNotFoundException;
 use app\model\payment\PayOrder;
 use app\repository\payment\trade\PayOrderRepository;
 use app\service\payment\config\PaymentTypeService;
 use app\service\payment\order\PayOrderLifecycleService;
+use app\service\payment\order\PayOrderRiskControlService;
 use support\Log;
 
 /**
@@ -27,13 +28,15 @@ class PaymentRuntimeMaintenanceService extends BaseService
      * @param PayOrderLifecycleService $payOrderLifecycleService 支付单生命周期服务
      * @param PaymentPluginManager $paymentPluginManager 支付插件管理器
      * @param PaymentTypeService $paymentTypeService 支付方式服务
+     * @param PayOrderRiskControlService $payOrderRiskControlService 支付单风控服务
      */
     public function __construct(
         protected MerchantNotifyDispatcherService $merchantNotifyDispatcherService,
         protected PayOrderRepository $payOrderRepository,
         protected PayOrderLifecycleService $payOrderLifecycleService,
         protected PaymentPluginManager $paymentPluginManager,
-        protected PaymentTypeService $paymentTypeService
+        protected PaymentTypeService $paymentTypeService,
+        protected PayOrderRiskControlService $payOrderRiskControlService
     ) {
     }
 
@@ -71,11 +74,6 @@ class PaymentRuntimeMaintenanceService extends BaseService
             try {
                 $this->payOrderLifecycleService->timeoutPayOrder((string) $payOrder->pay_no, [
                     'reason' => '系统定时任务检测到支付单已过期',
-                    'ext_json' => [
-                        'lifecycle' => [
-                            'timeout_source' => 'runtime_process',
-                        ],
-                    ],
                 ]);
                 $summary['timeout']++;
             } catch (\Throwable $e) {
@@ -107,74 +105,131 @@ class PaymentRuntimeMaintenanceService extends BaseService
             'failed' => 0,
             'closed' => 0,
             'pending' => 0,
+            'skipped' => 0,
             'error' => 0,
         ];
 
         foreach ($this->payOrderRepository->listPayingForActiveQuery($before, $limit) as $payOrder) {
             $summary['scanned']++;
-
-            try {
-                $plugin = $this->paymentPluginManager->createByPayOrder($payOrder, true);
-                $result = $plugin->query($this->buildQueryOrder($payOrder));
-                $normalized = $this->normalizeQueryResult($payOrder, $result);
-
-                if ($normalized['status'] === PaymentPluginStatusConstant::SUCCESS) {
-                    $this->payOrderLifecycleService->markPaySuccess((string) $payOrder->pay_no, [
-                        'channel_order_no' => $normalized['channel_order_no'],
-                        'channel_trade_no' => $normalized['channel_trade_no'],
-                        'paid_at' => $normalized['paid_at'] ?: null,
-                        'ext_json' => [
-                            'plugin' => [
-                                'active_query' => $this->buildQuerySnapshot($normalized, $result),
-                            ],
-                        ],
-                    ]);
-                    $summary['success']++;
-                    continue;
-                }
-
-                if ($normalized['status'] === PaymentPluginStatusConstant::CLOSED) {
-                    $this->payOrderLifecycleService->closePayOrder((string) $payOrder->pay_no, [
-                        'reason' => '主动查单返回渠道已关闭',
-                        'ext_json' => [
-                            'plugin' => [
-                                'active_query' => $this->buildQuerySnapshot($normalized, $result),
-                            ],
-                        ],
-                    ]);
-                    $summary['closed']++;
-                    continue;
-                }
-
-                if ($normalized['status'] === PaymentPluginStatusConstant::FAILED) {
-                    $this->payOrderLifecycleService->markPayFailed((string) $payOrder->pay_no, [
-                        'channel_order_no' => $normalized['channel_order_no'],
-                        'channel_trade_no' => $normalized['channel_trade_no'],
-                        'channel_error_code' => $normalized['channel_error_code'],
-                        'channel_error_msg' => $normalized['channel_error_msg'],
-                        'failed_at' => $normalized['failed_at'] ?: null,
-                        'ext_json' => [
-                            'plugin' => [
-                                'active_query' => $this->buildQuerySnapshot($normalized, $result),
-                            ],
-                        ],
-                    ]);
-                    $summary['failed']++;
-                    continue;
-                }
-
-                $this->recordQuerySnapshot($payOrder, $this->buildQuerySnapshot($normalized, $result));
-                $summary['pending']++;
-            } catch (PaymentException $e) {
-                $this->recordQueryError($payOrder, $e->getMessage(), (string) $e->getCode());
-                $summary['error']++;
-            } catch (\Throwable $e) {
-                $this->recordQueryError($payOrder, $e->getMessage(), 'QUERY_ERROR');
+            $result = $this->syncOnePayOrderByQuery($payOrder, 'runtime_active_query');
+            $status = (string) ($result['status'] ?? 'error');
+            if (array_key_exists($status, $summary)) {
+                $summary[$status]++;
+            } else {
                 $summary['error']++;
             }
         }
 
         return $summary;
+    }
+
+    /**
+     * 主动查询单笔支付单。
+     *
+     * 后台人工查单允许查询非支付中订单，用于处理本地失败/关闭/超时后上游实际成功的情况；
+     * 查询结果仍然会通过支付单生命周期服务推进，避免绕开平台服务费和业务单同步逻辑。
+     *
+     * @param string $payNo 支付单号
+     * @param string $source 查单来源
+     * @return array<string, mixed> 查单结果
+     */
+    public function syncPayOrderByQuery(string $payNo, string $source = 'admin_manual_query'): array
+    {
+        $payNo = trim($payNo);
+        $payOrder = $payNo !== '' ? $this->payOrderRepository->findByPayNo($payNo) : null;
+        if (!$payOrder) {
+            throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
+        }
+
+        return $this->syncOnePayOrderByQuery($payOrder, $source);
+    }
+
+    /**
+     * 查询单笔支付单并按结果推进状态。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @param string $source 查单来源
+     * @return array<string, mixed> 查单结果
+     */
+    private function syncOnePayOrderByQuery(PayOrder $payOrder, string $source = 'runtime_active_query'): array
+    {
+        $payNo = (string) $payOrder->pay_no;
+        if ($this->payOrderRiskControlService->isFrozen($payOrder)) {
+            return [
+                'pay_no' => $payNo,
+                'status' => 'skipped',
+                'message' => '支付单已冻结，跳过主动查单',
+            ];
+        }
+
+        try {
+            $plugin = $this->paymentPluginManager->createByPayOrder($payOrder, true);
+            $result = $plugin->query($this->buildQueryOrder($payOrder));
+            $normalized = $this->normalizeQueryResult($payOrder, $result);
+            $snapshot = $this->buildQuerySnapshot($normalized, $result, $source);
+
+            if ($normalized['status'] === PaymentPluginStatusConstant::SUCCESS) {
+                $this->payOrderLifecycleService->markPaySuccess($payNo, [
+                    'channel_order_no' => $normalized['channel_order_no'],
+                    'channel_trade_no' => $normalized['channel_trade_no'],
+                    'paid_at' => $normalized['paid_at'] ?: null,
+                ]);
+
+                return [
+                    'pay_no' => $payNo,
+                    'status' => 'success',
+                    'snapshot' => $snapshot,
+                ];
+            }
+
+            if ($normalized['status'] === PaymentPluginStatusConstant::CLOSED) {
+                $this->payOrderLifecycleService->closePayOrder($payNo, [
+                    'reason' => '主动查单返回渠道已关闭',
+                ]);
+
+                return [
+                    'pay_no' => $payNo,
+                    'status' => 'closed',
+                    'snapshot' => $snapshot,
+                ];
+            }
+
+            if ($normalized['status'] === PaymentPluginStatusConstant::FAILED) {
+                $this->payOrderLifecycleService->markPayFailed($payNo, [
+                    'channel_order_no' => $normalized['channel_order_no'],
+                    'channel_trade_no' => $normalized['channel_trade_no'],
+                    'channel_error_code' => $normalized['channel_error_code'],
+                    'channel_error_msg' => $normalized['channel_error_msg'],
+                    'failed_at' => $normalized['failed_at'] ?: null,
+                ]);
+
+                return [
+                    'pay_no' => $payNo,
+                    'status' => 'failed',
+                    'snapshot' => $snapshot,
+                ];
+            }
+
+            return [
+                'pay_no' => $payNo,
+                'status' => 'pending',
+                'snapshot' => $snapshot,
+            ];
+        } catch (PaymentException $e) {
+            $snapshot = $this->recordQueryError($payOrder, $e->getMessage(), (string) $e->getCode(), $source);
+            return [
+                'pay_no' => $payNo,
+                'status' => 'error',
+                'snapshot' => $snapshot,
+            ];
+        } catch (\Throwable $e) {
+            $snapshot = $this->recordQueryError($payOrder, $e->getMessage(), 'QUERY_ERROR', $source);
+            return [
+                'pay_no' => $payNo,
+                'status' => 'error',
+                'snapshot' => $snapshot,
+            ];
+        }
     }
 
     /**
@@ -244,16 +299,18 @@ class PaymentRuntimeMaintenanceService extends BaseService
     }
 
     /**
-     * 构建支付单内保存的轻量查单快照。
+     * 构建本次主动查单的返回快照。
      *
      * @param array<string, mixed> $normalized 归一化结果
      * @param array<string, mixed> $result 插件原始结果
+     * @param string $source 查单来源
      * @return array<string, mixed> 快照
      */
-    private function buildQuerySnapshot(array $normalized, array $result): array
+    private function buildQuerySnapshot(array $normalized, array $result, string $source = 'runtime_active_query'): array
     {
         return [
             'queried_at' => $this->now(),
+            'source' => $source,
             'status' => (string) $normalized['status'],
             'raw_status' => (string) ($normalized['raw_status'] ?? ''),
             'channel_status' => (string) ($normalized['channel_status'] ?? ''),
@@ -265,42 +322,15 @@ class PaymentRuntimeMaintenanceService extends BaseService
     }
 
     /**
-     * 记录支付中订单的查单快照。
-     *
-     * @param PayOrder $payOrder 支付单
-     * @param array<string, mixed> $snapshot 查单快照
-     * @return void
-     */
-    private function recordQuerySnapshot(PayOrder $payOrder, array $snapshot): void
-    {
-        $this->transactionRetry(function () use ($payOrder, $snapshot): void {
-            $latest = $this->payOrderRepository->findForUpdateByPayNo((string) $payOrder->pay_no);
-            if (!$latest || (int) $latest->status !== TradeConstant::ORDER_STATUS_PAYING) {
-                return;
-            }
-
-            $extJson = (array) ($latest->ext_json ?? []);
-            $plugin = (array) ($extJson['plugin'] ?? []);
-            $previous = (array) ($plugin['active_query'] ?? []);
-            $snapshot['query_count'] = (int) ($previous['query_count'] ?? 0) + 1;
-
-            $extJson['plugin'] = array_replace_recursive($plugin, [
-                'active_query' => $snapshot,
-            ]);
-            $latest->ext_json = $extJson;
-            $latest->save();
-        });
-    }
-
-    /**
-     * 记录主动查单异常，异常不推进支付状态。
+     * 构建主动查单异常快照，异常不推进支付状态。
      *
      * @param PayOrder $payOrder 支付单
      * @param string $message 错误信息
      * @param string $code 错误码
-     * @return void
+     * @param string $source 查单来源
+     * @return array<string, mixed> 异常快照
      */
-    private function recordQueryError(PayOrder $payOrder, string $message, string $code): void
+    private function recordQueryError(PayOrder $payOrder, string $message, string $code, string $source = 'runtime_active_query'): array
     {
         Log::warning(sprintf(
             '[PaymentRuntimeMaintenance] 主动查单失败 pay_no=%s code=%s error=%s',
@@ -309,8 +339,9 @@ class PaymentRuntimeMaintenanceService extends BaseService
             $message
         ));
 
-        $this->recordQuerySnapshot($payOrder, [
+        $snapshot = [
             'queried_at' => $this->now(),
+            'source' => $source,
             'status' => 'error',
             'raw_status' => '',
             'channel_status' => '',
@@ -319,7 +350,8 @@ class PaymentRuntimeMaintenanceService extends BaseService
             'error_code' => $code,
             'channel_order_no' => (string) ($payOrder->channel_order_no ?? ''),
             'channel_trade_no' => (string) ($payOrder->channel_trade_no ?? ''),
-        ]);
+        ];
+        return $snapshot;
     }
 
     /**

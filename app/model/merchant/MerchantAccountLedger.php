@@ -44,7 +44,6 @@ class MerchantAccountLedger extends BaseModel
         'frozen_after',
         'idempotency_key',
         'remark',
-        'ext_json',
     ];
 
     /**
@@ -62,11 +61,9 @@ class MerchantAccountLedger extends BaseModel
         'available_after' => 'integer',
         'frozen_before' => 'integer',
         'frozen_after' => 'integer',
-        'ext_json' => 'array',
         'created_at' => 'datetime',
     ];
 }
-
 
 
 

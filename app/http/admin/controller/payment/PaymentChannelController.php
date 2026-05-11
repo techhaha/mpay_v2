@@ -5,6 +5,7 @@ namespace app\http\admin\controller\payment;
 use app\common\base\BaseController;
 use app\http\admin\validation\PaymentChannelValidator;
 use app\service\payment\config\PaymentChannelService;
+use app\service\payment\config\PaymentChannelTestService;
 use support\Request;
 use support\Response;
 
@@ -14,6 +15,7 @@ use support\Response;
  * 负责支付通道的列表、详情、新增、修改和删除。
  *
  * @property PaymentChannelService $paymentChannelService 支付渠道服务
+ * @property PaymentChannelTestService $paymentChannelTestService 支付通道测试服务
  */
 class PaymentChannelController extends BaseController
 {
@@ -21,10 +23,12 @@ class PaymentChannelController extends BaseController
      * 构造方法。
      *
      * @param PaymentChannelService $paymentChannelService 支付渠道服务
+     * @param PaymentChannelTestService $paymentChannelTestService 支付通道测试服务
      * @return void
      */
     public function __construct(
-        protected PaymentChannelService $paymentChannelService
+        protected PaymentChannelService $paymentChannelService,
+        protected PaymentChannelTestService $paymentChannelTestService
     ) {
     }
 
@@ -156,6 +160,25 @@ class PaymentChannelController extends BaseController
         $pageSize = min(50, max(1, (int) $request->input('page_size', 20)));
 
         return $this->success($this->paymentChannelService->searchOptions($request->all(), $page, $pageSize));
+    }
+
+    /**
+     * 发起当前通道测试支付。
+     *
+     * @param Request $request 请求对象
+     * @param string $id 支付渠道ID
+     * @return Response 响应对象
+     */
+    public function test(Request $request, string $id): Response
+    {
+        $data = $this->validated(
+            array_merge($request->all(), ['id' => (int) $id]),
+            PaymentChannelValidator::class,
+            'test'
+        );
+        $data['client_ip'] = (string) $request->getRealIp();
+
+        return $this->success($this->paymentChannelTestService->submit((int) $data['id'], $data));
     }
 }
 

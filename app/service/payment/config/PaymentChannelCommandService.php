@@ -4,12 +4,14 @@ namespace app\service\payment\config;
 
 use app\common\base\BaseService;
 use app\common\constant\CommonConstant;
+use app\common\constant\EventConstant;
 use app\exception\PaymentException;
 use app\model\payment\PaymentChannel;
 use app\repository\merchant\base\MerchantRepository;
 use app\repository\payment\config\PaymentChannelRepository;
 use app\repository\payment\config\PaymentPluginRepository;
 use app\repository\payment\config\PaymentTypeRepository;
+use Webman\Event\Event;
 
 /**
  * 支付通道命令服务。
@@ -65,7 +67,10 @@ class PaymentChannelCommandService extends BaseService
         $this->assertMerchantExists($data);
         $this->assertPluginSupportsPayType($data);
 
-        return $this->paymentChannelRepository->create($data);
+        $channel = $this->paymentChannelRepository->create($data);
+        $this->dispatchWatcherConfigChanged('create', $channel);
+
+        return $channel;
     }
 
     /**
@@ -87,7 +92,12 @@ class PaymentChannelCommandService extends BaseService
             return null;
         }
 
-        return $this->paymentChannelRepository->find($id);
+        $channel = $this->paymentChannelRepository->find($id);
+        if ($channel) {
+            $this->dispatchWatcherConfigChanged('update', $channel);
+        }
+
+        return $channel;
     }
 
     /**
@@ -98,7 +108,13 @@ class PaymentChannelCommandService extends BaseService
      */
     public function delete(int $id): bool
     {
-        return $this->paymentChannelRepository->deleteById($id);
+        $channel = $this->paymentChannelRepository->find($id);
+        $deleted = $this->paymentChannelRepository->deleteById($id);
+        if ($deleted && $channel) {
+            $this->dispatchWatcherConfigChanged('delete', $channel);
+        }
+
+        return $deleted;
     }
 
     /**
@@ -186,6 +202,23 @@ class PaymentChannelCommandService extends BaseService
             ]);
         }
     }
-}
 
+    /**
+     * 发送网页流水监听配置刷新事件。
+     *
+     * @param string $action 操作
+     * @param PaymentChannel $channel 支付通道
+     * @return void
+     */
+    private function dispatchWatcherConfigChanged(string $action, PaymentChannel $channel): void
+    {
+        Event::dispatch(EventConstant::PAYMENT_RECEIPT_WATCHER_CONFIG_CHANGED, [
+            'source' => 'payment_channel',
+            'action' => $action,
+            'channel_id' => (int) $channel->id,
+            'plugin_code' => (string) $channel->plugin_code,
+            'api_config_id' => (int) $channel->api_config_id,
+        ]);
+    }
+}
 

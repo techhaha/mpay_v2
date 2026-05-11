@@ -125,7 +125,6 @@ class MerchantOverviewQueryService extends BaseService
                 'has_credential' => $credential !== null,
                 'credential_enabled' => (int) ($credential->status ?? 0) === CommonConstant::STATUS_ENABLED,
                 'credential_status_text' => (int) ($credential->status ?? 0) === CommonConstant::STATUS_ENABLED ? '已开通' : '未开通',
-                'sign_type_text' => $this->textFromMap((int) ($credential->sign_type ?? 0), \app\common\constant\AuthConstant::signTypeMap()),
                 'credential_last_used_at' => $this->formatDateTime($credential->last_used_at ?? null),
             ],
             'route' => [
@@ -151,6 +150,5 @@ class MerchantOverviewQueryService extends BaseService
         ];
     }
 }
-
 
 

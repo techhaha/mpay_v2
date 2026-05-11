@@ -36,6 +36,11 @@ final class EventConstant
     public const PAYMENT_PAY_ORDER_TIMEOUT = 'payment.pay_order.timeout';
 
     /**
+     * 网页流水监听相关配置已变更。
+     */
+    public const PAYMENT_RECEIPT_WATCHER_CONFIG_CHANGED = 'payment.receipt_watcher.config.changed';
+
+    /**
      * 退款单进入成功态。
      */
     public const REFUND_ORDER_SUCCEEDED = 'payment.refund_order.succeeded';

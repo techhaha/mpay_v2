@@ -114,7 +114,6 @@ class MerchantAccountLedgerService extends BaseService
         $row->frozen_before_text = $this->formatAmount((int) $row->frozen_before);
         $row->frozen_after_text = $this->formatAmount((int) $row->frozen_after);
         $row->created_at_text = $this->formatDateTime($row->created_at ?? null);
-        $row->ext_json_text = $this->formatJson($row->ext_json ?? null);
 
         return $row;
     }
@@ -146,7 +145,6 @@ class MerchantAccountLedgerService extends BaseService
                 'l.frozen_after',
                 'l.idempotency_key',
                 'l.remark',
-                'l.ext_json',
                 'l.created_at',
             ])
             ->selectRaw("COALESCE(m.merchant_no, '') AS merchant_no")
@@ -156,6 +154,5 @@ class MerchantAccountLedgerService extends BaseService
     }
 
 }
-
 
 

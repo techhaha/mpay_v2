@@ -105,6 +105,22 @@ class MerchantAccountService extends BaseService
     }
 
     /**
+     * 在当前事务中冻结风控资金。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function freezeRiskAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->commandService->freezeRiskAmountInCurrentTransaction($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo);
+    }
+
+    /**
      * 扣减冻结余额。
      *
      * @param int $merchantId 商户ID
@@ -166,6 +182,22 @@ class MerchantAccountService extends BaseService
     public function releaseFrozenAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
         return $this->commandService->releaseFrozenAmountInCurrentTransaction($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo);
+    }
+
+    /**
+     * 在当前事务中释放风控冻结资金。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function releaseRiskFrozenAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->commandService->releaseRiskFrozenAmountInCurrentTransaction($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo);
     }
 
     /**
@@ -233,6 +265,70 @@ class MerchantAccountService extends BaseService
     }
 
     /**
+     * 在当前事务中扣减自收通道支付平台服务费。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function debitPayFeeAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->commandService->debitPayFeeAmountInCurrentTransaction($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo);
+    }
+
+    /**
+     * 在当前事务中扣减转账本金。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function debitTransferAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->commandService->debitTransferAmountInCurrentTransaction($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo);
+    }
+
+    /**
+     * 在当前事务中扣减转账手续费。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function debitTransferFeeInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->commandService->debitTransferFeeInCurrentTransaction($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo);
+    }
+
+    /**
+     * 在当前事务中释放失败转账已扣金额。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $amount 金额（分）
+     * @param string $bizNo 业务单号
+     * @param string $idempotencyKey 幂等键
+     * @param array $extJson 扩展字段
+     * @param string $traceNo 追踪号
+     * @return MerchantAccountLedger 流水记录
+     */
+    public function releaseTransferAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
+    {
+        return $this->commandService->releaseTransferAmountInCurrentTransaction($merchantId, $amount, $bizNo, $idempotencyKey, $extJson, $traceNo);
+    }
+
+    /**
      * 获取余额快照。
      *
      * @param int $merchantId 商户ID
@@ -254,5 +350,3 @@ class MerchantAccountService extends BaseService
         return $this->queryService->findById($id);
     }
 }
-
-

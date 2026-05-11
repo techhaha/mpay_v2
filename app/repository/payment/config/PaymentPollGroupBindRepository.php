@@ -61,12 +61,12 @@ class PaymentPollGroupBindRepository extends BaseRepository
                 'b.remark',
                 't.code as pay_type_code',
                 't.name as pay_type_name',
+                't.icon as pay_type_icon',
                 'p.group_name as poll_group_name',
                 'p.route_mode',
             ]);
     }
 }
-
 
 
 
