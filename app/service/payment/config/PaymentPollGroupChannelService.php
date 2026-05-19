@@ -3,6 +3,7 @@
 namespace app\service\payment\config;
 
 use app\common\base\BaseService;
+use app\common\constant\RouteConstant;
 use app\exception\PaymentException;
 use app\model\payment\PaymentPollGroupChannel;
 use app\repository\payment\config\PaymentChannelRepository;
@@ -245,6 +246,16 @@ class PaymentPollGroupChannelService extends BaseService
             return;
         }
 
+        // 管理后台的轮询组是商户分组级平台路由，只能编排平台代收通道。
+        // 商户自建通道只允许在当前商户发起支付时进入二次候选，不能被分配给其他商户。
+        if ((int) $channel->merchant_id !== 0 || (int) $channel->channel_mode !== RouteConstant::CHANNEL_MODE_COLLECT) {
+            throw new PaymentException('轮询组只能配置平台代收通道，不能分配商户自建通道', 40232, [
+                'poll_group_id' => $pollGroupId,
+                'channel_id' => $channelId,
+                'merchant_id' => (int) $channel->merchant_id,
+            ]);
+        }
+
         // 轮询组和通道必须属于同一支付方式，否则排序再正确也会在运行时被路由规则拦下。
         if ((int) $pollGroup->pay_type_id !== (int) $channel->pay_type_id) {
             throw new PaymentException('轮询组与支付通道的支付方式不一致', 40231, [
@@ -254,6 +265,5 @@ class PaymentPollGroupChannelService extends BaseService
         }
     }
 }
-
 
 

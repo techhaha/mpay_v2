@@ -177,8 +177,24 @@ class PaymentChannelController extends BaseController
             'test'
         );
         $data['client_ip'] = (string) $request->getRealIp();
+        $data['user_agent'] = (string) $request->header('user-agent', '');
 
         return $this->success($this->paymentChannelTestService->submit((int) $data['id'], $data));
+    }
+
+    /**
+     * 查询通道测试记录。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function testRecords(Request $request): Response
+    {
+        return $this->page($this->paymentChannelTestService->records(
+            $request->all(),
+            (int) $request->input('page', 1),
+            (int) $request->input('page_size', 10)
+        ));
     }
 }
 

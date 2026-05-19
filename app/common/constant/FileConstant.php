@@ -94,10 +94,6 @@ final class FileConstant
      */
     public const CONFIG_REMOTE_DOWNLOAD_LIMIT_MB = 'file_storage_remote_download_limit_mb';
     /**
-     * 允许上传扩展名配置 key。
-     */
-    public const CONFIG_ALLOWED_EXTENSIONS = 'file_storage_allowed_extensions';
-    /**
      * 阿里云 OSS Endpoint 配置 key。
      */
     public const CONFIG_OSS_ENDPOINT = 'file_storage_aliyun_oss_endpoint';
@@ -278,6 +274,5 @@ final class FileConstant
         return array_keys(self::imageExtensionMap() + self::certificateExtensionMap() + self::textExtensionMap());
     }
 }
-
 
 

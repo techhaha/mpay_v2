@@ -6,6 +6,7 @@ use app\common\base\BaseService;
 use app\common\constant\AuthConstant;
 use app\common\constant\CommonConstant;
 use app\common\constant\EpayProtocolConstant;
+use app\common\constant\PaymentIdentityConstant;
 use app\common\constant\TradeConstant;
 use app\common\util\FormatHelper;
 use app\exception\ValidationException;
@@ -103,6 +104,10 @@ class EpayV1ProtocolService extends BaseService
                 $request,
                 EpayProtocolConstant::SUBMIT_TYPE_PAGE
             );
+
+            if (($attempt['status'] ?? '') === PaymentIdentityConstant::STATUS_REQUIRED) {
+                return redirect((string) $attempt[PaymentIdentityConstant::FIELD_IDENTITY_URL]);
+            }
 
             return redirect((string) $attempt['payment_page_url']);
         } catch (Throwable $e) {
@@ -356,6 +361,10 @@ class EpayV1ProtocolService extends BaseService
 
         $normalized = $this->buildSubmitPayload($payload, $request, $merchantId, $submitType, $paymentType);
         $result = $this->payOrderService->preparePayAttempt($normalized);
+        if (($result['status'] ?? '') === PaymentIdentityConstant::STATUS_REQUIRED) {
+            return $result;
+        }
+
         $payOrder = $result['pay_order'];
         $payParams = (array) ($result['pay_params'] ?? []);
 
@@ -454,6 +463,7 @@ class EpayV1ProtocolService extends BaseService
             'client_ip' => (string) $orderFields['client_ip'],
             'device' => (string) $orderFields['device'],
             'ext_json' => (array) $orderFields['ext_json'],
+            'identity_flow' => true,
         ];
 
         if ($paymentType) {
@@ -493,6 +503,20 @@ class EpayV1ProtocolService extends BaseService
      */
     private function buildMapiResponse(array $attempt): array
     {
+        if (($attempt['status'] ?? '') === PaymentIdentityConstant::STATUS_REQUIRED) {
+            $identityUrl = (string) ($attempt[PaymentIdentityConstant::FIELD_IDENTITY_URL] ?? '');
+
+            return [
+                'code' => self::SUCCESS_CODE,
+                'msg' => '需要用户授权',
+                'trade_no' => '',
+                'payurl' => $identityUrl,
+                'url' => $identityUrl,
+                PaymentIdentityConstant::FIELD_REQUIRED => 1,
+                PaymentIdentityConstant::FIELD_RESUME_TOKEN => (string) ($attempt[PaymentIdentityConstant::FIELD_RESUME_TOKEN] ?? ''),
+            ];
+        }
+
         /** @var PayOrder $payOrder */
         $payOrder = $attempt['pay_order'];
         $payParams = (array) ($attempt['pay_params'] ?? []);

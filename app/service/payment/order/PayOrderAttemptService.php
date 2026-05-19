@@ -20,6 +20,7 @@ use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\service\account\funds\MerchantAccountService;
 use app\service\merchant\MerchantService;
+use app\service\payment\identity\PaymentIdentityService;
 use app\service\payment\runtime\PaymentRouteService;
 
 /**
@@ -33,6 +34,7 @@ use app\service\payment\runtime\PaymentRouteService;
  * @property BizOrderRepository $bizOrderRepository 业务订单仓库
  * @property PayOrderRepository $payOrderRepository 支付单仓库
  * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+ * @property PaymentIdentityService $paymentIdentityService 支付身份流程服务
  * @property PayOrderChannelDispatchService $payOrderChannelDispatchService 支付单渠道派发服务
  */
 class PayOrderAttemptService extends BaseService
@@ -46,6 +48,7 @@ class PayOrderAttemptService extends BaseService
      * @param BizOrderRepository $bizOrderRepository 业务订单仓库
      * @param PayOrderRepository $payOrderRepository 支付订单仓库
      * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+     * @param PaymentIdentityService $paymentIdentityService 支付身份流程服务
      * @param PayOrderChannelDispatchService $payOrderChannelDispatchService 支付单渠道派发服务
      */
     public function __construct(
@@ -55,6 +58,7 @@ class PayOrderAttemptService extends BaseService
         protected BizOrderRepository $bizOrderRepository,
         protected PayOrderRepository $payOrderRepository,
         protected PaymentTypeRepository $paymentTypeRepository,
+        protected PaymentIdentityService $paymentIdentityService,
         protected PayOrderChannelDispatchService $payOrderChannelDispatchService
     ) {}
 
@@ -79,13 +83,17 @@ class PayOrderAttemptService extends BaseService
         $route = $this->paymentRouteService->resolveByMerchantGroup($merchantGroupId, $payTypeId, $payAmount, $input);
         /** @var PaymentChannel $channel */
         $channel = $route['selected_channel']['channel'];
+        $identityFlow = $this->paymentIdentityService->inspect($input, $merchant, $channel, $route);
+        if ($identityFlow !== null) {
+            return $identityFlow;
+        }
 
         return $this->createAndDispatchPayAttempt(
             $input,
             $merchant,
             $merchantGroupId,
             $channel,
-            (int) $route['poll_group']->id,
+            (int) ($route['poll_group']->id ?? 0),
             $route
         );
     }
@@ -120,14 +128,20 @@ class PayOrderAttemptService extends BaseService
 
         $this->ensurePaymentTypeEnabled($payTypeId);
 
-        return $this->createAndDispatchPayAttempt($input, $merchant, $merchantGroupId, $channel, 0, [
+        $route = [
             'poll_group' => null,
             'candidates' => [],
             'selected_channel' => [
                 'channel' => $channel,
                 'direct' => true,
             ],
-        ]);
+        ];
+        $identityFlow = $this->paymentIdentityService->inspect($input, $merchant, $channel, $route);
+        if ($identityFlow !== null) {
+            return $identityFlow;
+        }
+
+        return $this->createAndDispatchPayAttempt($input, $merchant, $merchantGroupId, $channel, 0, $route);
     }
 
     /**

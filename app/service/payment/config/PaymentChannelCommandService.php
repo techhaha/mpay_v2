@@ -3,8 +3,8 @@
 namespace app\service\payment\config;
 
 use app\common\base\BaseService;
-use app\common\constant\CommonConstant;
 use app\common\constant\EventConstant;
+use app\common\constant\RouteConstant;
 use app\exception\PaymentException;
 use app\model\payment\PaymentChannel;
 use app\repository\merchant\base\MerchantRepository;
@@ -63,6 +63,7 @@ class PaymentChannelCommandService extends BaseService
     public function create(array $data): PaymentChannel
     {
         // 新增通道前先校验名称、商户归属和插件支付方式兼容性。
+        $this->assertPlatformPayload($data);
         $this->assertChannelNameUnique((string) ($data['name'] ?? ''));
         $this->assertMerchantExists($data);
         $this->assertPluginSupportsPayType($data);
@@ -83,7 +84,14 @@ class PaymentChannelCommandService extends BaseService
      */
     public function update(int $id, array $data): ?PaymentChannel
     {
+        $current = $this->paymentChannelRepository->find($id);
+        if (!$current) {
+            return null;
+        }
+
         // 更新通道时同样要先拦住冲突配置，避免保存后才发现路由不可用。
+        $this->assertPlatformChannel($current);
+        $this->assertPlatformPayload($data, false);
         $this->assertChannelNameUnique((string) ($data['name'] ?? ''), $id);
         $this->assertMerchantExists($data);
         $this->assertPluginSupportsPayType($data);
@@ -109,12 +117,57 @@ class PaymentChannelCommandService extends BaseService
     public function delete(int $id): bool
     {
         $channel = $this->paymentChannelRepository->find($id);
+        if (!$channel) {
+            return false;
+        }
+        $this->assertPlatformChannel($channel);
+
         $deleted = $this->paymentChannelRepository->deleteById($id);
         if ($deleted && $channel) {
             $this->dispatchWatcherConfigChanged('delete', $channel);
         }
 
         return $deleted;
+    }
+
+    /**
+     * 校验后台写入的通道归属只能是平台通道。
+     *
+     * @param array $data 写入数据
+     * @param bool $requireFields 是否要求携带完整归属字段
+     * @return void
+     * @throws PaymentException
+     */
+    private function assertPlatformPayload(array $data, bool $requireFields = true): void
+    {
+        if ($requireFields || array_key_exists('merchant_id', $data)) {
+            if ((int) ($data['merchant_id'] ?? 0) !== 0) {
+                throw new PaymentException('管理后台只能维护平台通道，商户自建通道请到商户后台处理', 40216);
+            }
+        }
+
+        if ($requireFields || array_key_exists('channel_mode', $data)) {
+            if ((int) ($data['channel_mode'] ?? RouteConstant::CHANNEL_MODE_COLLECT) !== RouteConstant::CHANNEL_MODE_COLLECT) {
+                throw new PaymentException('管理后台路由通道必须是平台代收通道', 40217);
+            }
+        }
+    }
+
+    /**
+     * 校验已有通道是否允许被管理后台写操作修改。
+     *
+     * @param PaymentChannel $channel 支付通道
+     * @return void
+     * @throws PaymentException
+     */
+    private function assertPlatformChannel(PaymentChannel $channel): void
+    {
+        if ((int) $channel->merchant_id !== 0 || (int) $channel->channel_mode !== RouteConstant::CHANNEL_MODE_COLLECT) {
+            throw new PaymentException('商户自建通道只允许查看，不能在管理后台修改', 40218, [
+                'channel_id' => (int) $channel->id,
+                'merchant_id' => (int) $channel->merchant_id,
+            ]);
+        }
     }
 
     /**
@@ -221,4 +274,3 @@ class PaymentChannelCommandService extends BaseService
         ]);
     }
 }
-

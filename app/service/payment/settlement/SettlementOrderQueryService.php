@@ -48,40 +48,7 @@ class SettlementOrderQueryService extends BaseService
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10, ?int $merchantId = null)
     {
-        $query = $this->baseQuery($merchantId);
-
-        $keyword = trim((string) ($filters['keyword'] ?? ''));
-        if ($keyword !== '') {
-            // 关键词同时命中清算单、追踪号、商户和通道，方便按任一线索回查批次。
-            $query->where(function ($builder) use ($keyword) {
-                $builder->where('s.settle_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('s.trace_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('g.group_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('c.name', 'like', '%' . $keyword . '%');
-            });
-        }
-
-        $merchantId = (string) ($filters['merchant_id'] ?? '');
-        if ($merchantId !== '') {
-            $query->where('s.merchant_id', (int) $merchantId);
-        }
-
-        $channelId = (string) ($filters['channel_id'] ?? '');
-        if ($channelId !== '') {
-            $query->where('s.channel_id', (int) $channelId);
-        }
-
-        $status = (string) ($filters['status'] ?? '');
-        if ($status !== '') {
-            $query->where('s.status', (int) $status);
-        }
-
-        $cycleType = (string) ($filters['cycle_type'] ?? '');
-        if ($cycleType !== '') {
-            $query->where('s.cycle_type', (int) $cycleType);
-        }
+        $query = $this->applyFilters($this->baseQuery($merchantId), $filters);
 
         $paginator = $query
             ->orderByDesc('s.id')
@@ -93,6 +60,68 @@ class SettlementOrderQueryService extends BaseService
         });
 
         return $paginator;
+    }
+
+    /**
+     * 统计清算异常处理摘要。
+     *
+     * 摘要只应用商户、通道和周期筛选，不应用状态筛选，方便页面切换状态时仍能看到全局待处理量。
+     *
+     * @param array $filters 筛选条件
+     * @param int|null $merchantId 商户ID
+     * @return array<string, mixed> 摘要结构
+     */
+    public function summary(array $filters = [], ?int $merchantId = null): array
+    {
+        $summaryFilters = $filters;
+        unset($summaryFilters['status'], $summaryFilters['page'], $summaryFilters['page_size']);
+
+        $base = $this->applyFilters($this->baseFilterQuery($merchantId), $summaryFilters);
+        $rows = $base
+            ->selectRaw('s.status AS group_status')
+            ->selectRaw('COUNT(*) AS count_value')
+            ->selectRaw('COALESCE(SUM(s.net_amount), 0) AS net_amount_value')
+            ->selectRaw('COALESCE(SUM(s.accounted_amount), 0) AS accounted_amount_value')
+            ->groupBy('s.status')
+            ->get();
+
+        $result = [
+            'pending_count' => 0,
+            'pending_net_amount' => 0,
+            'pending_net_amount_text' => $this->formatAmount(0),
+            'settled_count' => 0,
+            'settled_accounted_amount' => 0,
+            'settled_accounted_amount_text' => $this->formatAmount(0),
+            'reversed_count' => 0,
+            'reversed_net_amount' => 0,
+            'reversed_net_amount_text' => $this->formatAmount(0),
+            'abnormal_count' => 0,
+        ];
+
+        foreach ($rows as $row) {
+            $status = (int) $row->group_status;
+            $count = (int) $row->count_value;
+            $netAmount = (int) $row->net_amount_value;
+            $accountedAmount = (int) $row->accounted_amount_value;
+
+            if ($status === TradeConstant::SETTLEMENT_STATUS_PENDING) {
+                $result['pending_count'] = $count;
+                $result['pending_net_amount'] = $netAmount;
+                $result['pending_net_amount_text'] = $this->formatAmount($netAmount);
+            } elseif ($status === TradeConstant::SETTLEMENT_STATUS_SETTLED) {
+                $result['settled_count'] = $count;
+                $result['settled_accounted_amount'] = $accountedAmount;
+                $result['settled_accounted_amount_text'] = $this->formatAmount($accountedAmount);
+            } elseif ($status === TradeConstant::SETTLEMENT_STATUS_REVERSED) {
+                $result['reversed_count'] = $count;
+                $result['reversed_net_amount'] = $netAmount;
+                $result['reversed_net_amount_text'] = $this->formatAmount($netAmount);
+            }
+        }
+
+        $result['abnormal_count'] = $result['pending_count'] + $result['reversed_count'];
+
+        return $result;
     }
 
     /**
@@ -259,6 +288,72 @@ class SettlementOrderQueryService extends BaseService
 
         if ($merchantId !== null && $merchantId > 0) {
             $query->where('s.merchant_id', $merchantId);
+        }
+
+        return $query;
+    }
+
+    /**
+     * 构建只用于筛选和统计的基础查询。
+     *
+     * @param int|null $merchantId 商户ID
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
+     */
+    private function baseFilterQuery(?int $merchantId = null)
+    {
+        $query = $this->settlementOrderRepository->query()
+            ->from('ma_settlement_order as s')
+            ->leftJoin('ma_merchant as m', 's.merchant_id', '=', 'm.id')
+            ->leftJoin('ma_merchant_group as g', 'm.group_id', '=', 'g.id')
+            ->leftJoin('ma_payment_channel as c', 's.channel_id', '=', 'c.id');
+
+        if ($merchantId !== null && $merchantId > 0) {
+            $query->where('s.merchant_id', $merchantId);
+        }
+
+        return $query;
+    }
+
+    /**
+     * 应用清算订单筛选条件。
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query 查询构造器
+     * @param array $filters 筛选条件
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
+     */
+    private function applyFilters($query, array $filters)
+    {
+        $keyword = trim((string) ($filters['keyword'] ?? ''));
+        if ($keyword !== '') {
+            // 关键词同时命中清算单、追踪号、商户和通道，方便按任一线索回查批次。
+            $query->where(function ($builder) use ($keyword) {
+                $builder->where('s.settle_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('s.trace_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
+                    ->orWhere('g.group_name', 'like', '%' . $keyword . '%')
+                    ->orWhere('c.name', 'like', '%' . $keyword . '%');
+            });
+        }
+
+        $merchantId = (string) ($filters['merchant_id'] ?? '');
+        if ($merchantId !== '') {
+            $query->where('s.merchant_id', (int) $merchantId);
+        }
+
+        $channelId = (string) ($filters['channel_id'] ?? '');
+        if ($channelId !== '') {
+            $query->where('s.channel_id', (int) $channelId);
+        }
+
+        $status = (string) ($filters['status'] ?? '');
+        if ($status !== '') {
+            $query->where('s.status', (int) $status);
+        }
+
+        $cycleType = (string) ($filters['cycle_type'] ?? '');
+        if ($cycleType !== '') {
+            $query->where('s.cycle_type', (int) $cycleType);
         }
 
         return $query;

@@ -42,12 +42,20 @@ class SettlementOrderController extends BaseController
     {
         $data = $this->validated($request->all(), SettlementOrderValidator::class, 'index');
 
-        return $this->page(
-            $this->settlementOrderQueryService->paginate(
-                $data,
-                (int) ($data['page'] ?? 1),
-                (int) ($data['page_size'] ?? 10)
-            )
+        $paginator = $this->settlementOrderQueryService->paginate(
+            $data,
+            (int) ($data['page'] ?? 1),
+            (int) ($data['page_size'] ?? 10)
+        );
+
+        return $this->success(
+            [
+                'list' => $paginator->items(),
+                'total' => $paginator->total(),
+                'page' => $paginator->currentPage(),
+                'size' => $paginator->perPage(),
+                'summary' => $this->settlementOrderQueryService->summary($data),
+            ]
         );
     }
 

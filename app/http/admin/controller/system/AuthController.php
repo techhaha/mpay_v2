@@ -6,6 +6,7 @@ use app\common\base\BaseController;
 use app\http\admin\validation\AuthValidator;
 use app\service\system\access\AdminAuthService;
 use app\service\system\user\AdminUserService;
+use support\limiter\Limiter;
 use support\Request;
 use support\Response;
 
@@ -38,7 +39,11 @@ class AuthController extends BaseController
      */
     public function login(Request $request): Response
     {
+        $ip = $request->getRealIp();
+        Limiter::check('admin-login-ip:' . $ip, 10, 60, '登录请求过于频繁，请稍后再试');
+
         $data = $this->validated($request->all(), AuthValidator::class, 'login');
+        Limiter::check('admin-login-account:' . md5($ip . ':' . strtolower((string) $data['username'])), 5, 300, '账号登录尝试过于频繁，请稍后再试');
 
         return $this->success($this->adminAuthService->authenticateCredentials(
             (string) $data['username'],

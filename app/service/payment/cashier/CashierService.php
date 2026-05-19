@@ -4,6 +4,7 @@ namespace app\service\payment\cashier;
 
 use app\common\base\BaseService;
 use app\common\constant\CommonConstant;
+use app\common\constant\PaymentIdentityConstant;
 use app\common\constant\TradeConstant;
 use app\common\util\FormatHelper;
 use app\exception\BusinessStateException;
@@ -12,14 +13,18 @@ use app\exception\ValidationException;
 use app\model\merchant\Merchant;
 use app\model\payment\BizOrder;
 use app\model\payment\PayOrder;
+use app\model\payment\PaymentChannel;
+use app\repository\payment\config\PaymentChannelRepository;
 use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\service\merchant\MerchantService;
 use app\service\payment\config\PaymentTypeService;
+use app\service\payment\identity\PaymentIdentityService;
 use app\service\payment\order\PayOrderService;
 use app\service\payment\runtime\PaymentRouteService;
 use app\service\system\config\SystemPublicConfigService;
 use support\Request;
+use support\Response;
 
 /**
  * 收银台服务。
@@ -32,9 +37,11 @@ class CashierService extends BaseService
         protected MerchantService $merchantService,
         protected PaymentTypeService $paymentTypeService,
         protected PaymentRouteService $paymentRouteService,
+        protected PaymentChannelRepository $paymentChannelRepository,
         protected BizOrderRepository $bizOrderRepository,
         protected PayOrderRepository $payOrderRepository,
         protected PayOrderService $payOrderService,
+        protected PaymentIdentityService $paymentIdentityService,
         protected SystemPublicConfigService $systemPublicConfigService
     ) {
     }
@@ -78,7 +85,7 @@ class CashierService extends BaseService
             ? $this->paymentRouteService->previewAvailablePayTypes(
                 (int) $merchant->group_id,
                 (int) $bizOrder->order_amount,
-                ['stat_date' => FormatHelper::timestamp(time(), 'Y-m-d')]
+                ['stat_date' => FormatHelper::timestamp(time(), 'Y-m-d'), 'merchant_id' => (int) $merchant->id]
             )
             : [];
 
@@ -146,7 +153,117 @@ class CashierService extends BaseService
             'client_ip' => (string) $bizOrder->client_ip,
             'device' => (string) $bizOrder->device,
             'ext_json' => (array) ($bizOrder->ext_json ?? []),
+            'identity_flow' => true,
         ]);
+
+        return $this->formatConfirmAttempt($attempt, $bizOrder);
+    }
+
+    /**
+     * 使用已获取的用户身份继续收银台支付。
+     *
+     * @param array<string, mixed> $input 请求参数
+     * @param Request $request 请求对象
+     * @return array<string, mixed> 支付发起结果
+     */
+    public function resumeIdentity(array $input, Request $request): array
+    {
+        $this->assertCashierEnabled();
+
+        $token = trim((string) ($input['token'] ?? $input[PaymentIdentityConstant::FIELD_RESUME_TOKEN] ?? ''));
+        $context = $this->paymentIdentityService->context($token);
+        $identity = $this->paymentIdentityService->identityFromInput($input, $context);
+
+        return $this->continueIdentityPayment($token, $context, $identity);
+    }
+
+    /**
+     * 查询支付身份承接页上下文。
+     *
+     * @param string $token 身份流程 token
+     * @return array<string, mixed> 身份流程上下文
+     */
+    public function identityContext(string $token): array
+    {
+        $this->assertCashierEnabled();
+
+        return $this->paymentIdentityService->publicContext($token);
+    }
+
+    /**
+     * 微信网页授权回调后继续收银台支付。
+     *
+     * @param array<string, mixed> $input 回调参数
+     * @param Request $request 请求对象
+     * @return Response 跳转响应
+     */
+    public function wechatIdentityCallback(array $input, Request $request): Response
+    {
+        $this->assertCashierEnabled();
+
+        $token = trim((string) ($input['state'] ?? ''));
+        $code = trim((string) ($input['code'] ?? ''));
+        $identity = $this->paymentIdentityService->wechatIdentity($token, $code);
+        $result = $this->continueIdentityPayment($token, $identity['context'], $identity['identity']);
+
+        return redirect((string) ($result['payment_page_url'] ?? $this->buildSiteUrl('/cashier')));
+    }
+
+    /**
+     * 按身份流程缓存上下文继续创建支付单。
+     *
+     * @param string $token 身份流程 token
+     * @param array<string, mixed> $context 身份流程缓存上下文
+     * @param array<string, string> $identity 用户身份字段
+     * @return array<string, mixed> 支付发起结果
+     */
+    private function continueIdentityPayment(string $token, array $context, array $identity): array
+    {
+        $input = $this->paymentIdentityService->restoreInput($context, $identity);
+        $channelId = (int) ($context['channel_id'] ?? 0);
+        /** @var PaymentChannel|null $channel */
+        $channel = $this->paymentChannelRepository->find($channelId);
+        if (!$channel || (int) $channel->status !== CommonConstant::STATUS_ENABLED) {
+            throw new ValidationException('身份流程对应的支付通道不可用', ['channel_id' => $channelId]);
+        }
+
+        $bizOrder = $this->bizOrderRepository->findByMerchantAndOrderNo(
+            (int) $input['merchant_id'],
+            (string) $input['merchant_order_no']
+        );
+        if ($bizOrder) {
+            $activePayOrder = $this->resolveActivePayOrder($bizOrder);
+            if ($activePayOrder && in_array((int) $activePayOrder->status, [
+                TradeConstant::ORDER_STATUS_CREATED,
+                TradeConstant::ORDER_STATUS_PAYING,
+            ], true)) {
+                throw new ValidationException('当前订单已有进行中的支付尝试');
+            }
+        }
+
+        $attempt = $this->payOrderService->preparePayAttemptByChannel($input, $channel);
+        if (($attempt['status'] ?? '') !== PaymentIdentityConstant::STATUS_REQUIRED) {
+            $this->paymentIdentityService->forget($token);
+        }
+
+        return $this->formatConfirmAttempt($attempt, $attempt['biz_order'] ?? $bizOrder);
+    }
+
+    /**
+     * 格式化收银台确认支付结果。
+     *
+     * @param array<string, mixed> $attempt 支付尝试结果
+     * @param BizOrder|null $bizOrder 业务单模型
+     * @return array<string, mixed> 前端响应
+     */
+    private function formatConfirmAttempt(array $attempt, ?BizOrder $bizOrder): array
+    {
+        if (($attempt['status'] ?? '') === PaymentIdentityConstant::STATUS_REQUIRED) {
+            return [
+                'biz_no' => (string) ($bizOrder->biz_no ?? ''),
+                ...$attempt,
+            ];
+        }
 
         /** @var PayOrder $payOrder */
         $payOrder = $attempt['pay_order'];

@@ -7,6 +7,7 @@
 
 namespace app\process;
 
+use app\service\system\ops\SystemOpsHeartbeatService;
 use FilesystemIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -94,6 +95,34 @@ class Monitor
     }
 
     /**
+     * 上报文件监听心跳。
+     *
+     * 文件监听是开发和运维辅助能力，心跳失败不能影响 Webman 自身的文件监控逻辑。
+     *
+     * @param string $summary 摘要
+     * @return void
+     */
+    protected function reportHeartbeat(string $summary): void
+    {
+        try {
+            if (!function_exists('container_get')) {
+                return;
+            }
+
+            /** @var SystemOpsHeartbeatService $service */
+            $service = container_get(SystemOpsHeartbeatService::class);
+            $service->report('monitor', [
+                'summary' => $summary,
+                'watched_count' => count($this->paths),
+                'extensions' => $this->extensions,
+                'paused' => static::isPaused(),
+            ]);
+        } catch (\Throwable) {
+            // 监控写入失败时静默降级，文件监听进程继续执行原有职责。
+        }
+    }
+
+    /**
      * 构造文件监控器。
      *
      * @param mixed $monitorDir 监控目录或文件路径
@@ -116,6 +145,11 @@ class Monitor
         if (!Worker::getAllWorkers()) {
             return;
         }
+        // 启动时先写一次心跳，避免监控页在首次 Timer tick 前显示“未上报”。
+        $this->reportHeartbeat('文件监听进程已启动');
+        Timer::add(5, function (): void {
+            $this->reportHeartbeat('文件监听运行中');
+        });
         $disableFunctions = explode(',', ini_get('disable_functions'));
         if (in_array('exec', $disableFunctions, true)) {
                     echo "\n由于 php.ini 的 disable_functions 禁用了 exec()，文件监控已关闭：" . PHP_CONFIG_FILE_PATH . "/php.ini\n";
@@ -324,5 +358,3 @@ class Monitor
     }
 
 }
-
-

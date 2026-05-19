@@ -10,10 +10,15 @@ use app\exception\ValidationException;
 use app\model\payment\PayOrder;
 use app\model\payment\PaymentType;
 use app\repository\account\ledger\MerchantAccountLedgerRepository;
+use app\repository\ops\log\ChannelNotifyLogRepository;
+use app\repository\ops\log\PayCallbackLogRepository;
+use app\repository\ops\log\PayOrderOperationLogRepository;
 use app\repository\payment\config\PaymentTypeRepository;
 use app\repository\payment\notify\NotifyTaskRepository;
+use app\repository\payment\settlement\SettlementOrderRepository;
 use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
+use app\repository\payment\trade\RefundOrderRepository;
 
 /**
  * 支付单查询与展示拼装服务。
@@ -23,6 +28,11 @@ use app\repository\payment\trade\PayOrderRepository;
  * @property PayOrderRepository $payOrderRepository 支付单仓库
  * @property BizOrderRepository $bizOrderRepository 业务订单仓库
  * @property MerchantAccountLedgerRepository $merchantAccountLedgerRepository 商户账户流水仓库
+ * @property ChannelNotifyLogRepository $channelNotifyLogRepository 渠道通知日志仓库
+ * @property PayCallbackLogRepository $payCallbackLogRepository 支付回调日志仓库
+ * @property PayOrderOperationLogRepository $operationLogRepository 支付单后台操作日志仓库
+ * @property RefundOrderRepository $refundOrderRepository 退款单仓库
+ * @property SettlementOrderRepository $settlementOrderRepository 清算单仓库
  * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
  * @property NotifyTaskRepository $notifyTaskRepository 通知任务仓库
  * @property PayOrderReportService $payOrderReportService 支付单报表服务
@@ -36,6 +46,11 @@ class PayOrderQueryService extends BaseService
      * @param PayOrderRepository $payOrderRepository 支付订单仓库
      * @param BizOrderRepository $bizOrderRepository 业务订单仓库
      * @param MerchantAccountLedgerRepository $merchantAccountLedgerRepository 商户账户流水仓库
+     * @param ChannelNotifyLogRepository $channelNotifyLogRepository 渠道通知日志仓库
+     * @param PayCallbackLogRepository $payCallbackLogRepository 支付回调日志仓库
+     * @param PayOrderOperationLogRepository $operationLogRepository 支付单后台操作日志仓库
+     * @param RefundOrderRepository $refundOrderRepository 退款单仓库
+     * @param SettlementOrderRepository $settlementOrderRepository 清算单仓库
      * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
      * @param NotifyTaskRepository $notifyTaskRepository 通知任务仓库
      * @param PayOrderReportService $payOrderReportService 支付单报表服务
@@ -46,6 +61,11 @@ class PayOrderQueryService extends BaseService
         protected PayOrderRepository $payOrderRepository,
         protected BizOrderRepository $bizOrderRepository,
         protected MerchantAccountLedgerRepository $merchantAccountLedgerRepository,
+        protected ChannelNotifyLogRepository $channelNotifyLogRepository,
+        protected PayCallbackLogRepository $payCallbackLogRepository,
+        protected PayOrderOperationLogRepository $operationLogRepository,
+        protected RefundOrderRepository $refundOrderRepository,
+        protected SettlementOrderRepository $settlementOrderRepository,
         protected PaymentTypeRepository $paymentTypeRepository,
         protected NotifyTaskRepository $notifyTaskRepository,
         protected PayOrderReportService $payOrderReportService,
@@ -140,7 +160,7 @@ class PayOrderQueryService extends BaseService
      * @param string $payNo 支付单号
      * @param int|null $merchantId 商户ID
      * @param bool $includeActions 是否返回后台可操作项
-     * @return array{pay_order: PayOrder, biz_order: \app\model\payment\BizOrder|null, pay_order_view: array<string, mixed>|null, timeline: array<int, array<string, mixed>>, account_ledgers: iterable, account_ledgers_view: array<int, array<string, mixed>>, notify_tasks: array<int, array<string, mixed>>} 支付详情结构
+     * @return array{pay_order: PayOrder, biz_order: \app\model\payment\BizOrder|null, pay_order_view: array<string, mixed>|null, timeline: array<int, array<string, mixed>>, account_ledgers: iterable, account_ledgers_view: array<int, array<string, mixed>>, notify_tasks: array<int, array<string, mixed>>, callback_logs: array<int, array<string, mixed>>} 支付详情结构
      * @throws ValidationException
      * @throws ResourceNotFoundException
      */
@@ -165,12 +185,26 @@ class PayOrderQueryService extends BaseService
         $detailRow = $this->buildPayOrderQuery($merchantId, $includeActions)
             ->where('po.pay_no', $payNo)
             ->first();
-        $timeline = $this->payOrderReportService->buildPayTimeline($payOrder);
         $accountLedgers = $this->loadPayLedgers($payOrder);
         $accountLedgerRows = [];
         foreach ($accountLedgers as $ledger) {
             $accountLedgerRows[] = $this->payOrderReportService->formatLedgerRow($ledger->toArray());
         }
+        $notifyTasks = $this->loadNotifyTasks($payNo);
+        $callbackLogs = $this->loadCallbackLogs($payNo);
+        $channelQueryLogs = $this->loadChannelQueryLogs($payNo);
+        $operationLogs = $this->loadOperationLogs($payNo);
+        $timeline = $this->payOrderReportService->buildTroubleshootingTimeline(
+            $payOrder,
+            $bizOrder,
+            $this->loadRefundOrders($payOrder),
+            $this->loadSettlementOrders($payOrder),
+            $accountLedgers->all(),
+            $notifyTasks,
+            $callbackLogs,
+            $channelQueryLogs,
+            $operationLogs
+        );
         $payOrderView = $detailRow ? $this->payOrderReportService->formatPayOrderRow($detailRow->toArray()) : null;
         if ($includeActions && $payOrderView) {
             $payOrderView = $this->payOrderActionResolverService->resolveForRow($payOrderView);
@@ -185,7 +219,10 @@ class PayOrderQueryService extends BaseService
             'timeline' => $timeline,
             'account_ledgers' => $accountLedgers,
             'account_ledgers_view' => $accountLedgerRows,
-            'notify_tasks' => $this->loadNotifyTasks($payNo),
+            'notify_tasks' => $notifyTasks,
+            'callback_logs' => $callbackLogs,
+            'channel_query_logs' => $channelQueryLogs,
+            'operation_logs' => $operationLogs,
         ];
     }
 
@@ -210,6 +247,48 @@ class PayOrderQueryService extends BaseService
         }
 
         return $ledgers;
+    }
+
+    /**
+     * 加载支付单关联退款单。
+     *
+     * @param PayOrder $payOrder 支付订单
+     * @return array<int, \app\model\payment\RefundOrder>
+     */
+    private function loadRefundOrders(PayOrder $payOrder): array
+    {
+        $refundOrders = $this->refundOrderRepository->query()
+            ->where('pay_no', (string) $payOrder->pay_no)
+            ->orderByDesc('id')
+            ->get()
+            ->all();
+
+        if (!empty($refundOrders)) {
+            return $refundOrders;
+        }
+
+        $traceNo = trim((string) ($payOrder->trace_no ?: $payOrder->biz_no));
+        if ($traceNo === '') {
+            return [];
+        }
+
+        return $this->refundOrderRepository->listByTraceNo($traceNo)->all();
+    }
+
+    /**
+     * 加载支付单关联清算单。
+     *
+     * @param PayOrder $payOrder 支付订单
+     * @return array<int, \app\model\payment\SettlementOrder>
+     */
+    private function loadSettlementOrders(PayOrder $payOrder): array
+    {
+        $traceNo = trim((string) ($payOrder->trace_no ?: $payOrder->biz_no));
+        if ($traceNo === '') {
+            return [];
+        }
+
+        return $this->settlementOrderRepository->listByTraceNo($traceNo)->all();
     }
 
     /**
@@ -339,13 +418,123 @@ class PayOrderQueryService extends BaseService
                 'last_notify_at_text' => $this->formatDateTime($task->last_notify_at, '—'),
                 'next_retry_at_text' => $this->formatDateTime($task->next_retry_at, '—'),
                 'last_response' => (string) ($task->last_response ?? ''),
-                'notify_data' => (array) ($task->notify_data ?? []),
+                'notify_data' => $this->maskSensitiveData((array) ($task->notify_data ?? [])),
                 'created_at_text' => $this->formatDateTime($task->created_at, '—'),
                 'updated_at_text' => $this->formatDateTime($task->updated_at, '—'),
             ];
         }
 
         return $rows;
+    }
+
+    /**
+     * 加载并格式化支付回调日志。
+     *
+     * @param string $payNo 支付单号
+     * @return array<int, array<string, mixed>>
+     */
+    private function loadCallbackLogs(string $payNo): array
+    {
+        $rows = [];
+        foreach ($this->payCallbackLogRepository->listByPayNo($payNo) as $log) {
+            $rows[] = [
+                'id' => (int) $log->id,
+                'pay_no' => (string) $log->pay_no,
+                'channel_id' => (int) $log->channel_id,
+                'callback_type' => (int) $log->callback_type,
+                'callback_type_text' => (string) (NotifyConstant::callbackTypeMap()[(int) $log->callback_type] ?? '未知'),
+                'request_hash' => (string) ($log->request_hash ?? ''),
+                'verify_status' => (int) $log->verify_status,
+                'verify_status_text' => (string) (NotifyConstant::verifyStatusMap()[(int) $log->verify_status] ?? '未知'),
+                'process_status' => (int) $log->process_status,
+                'process_status_text' => (string) (NotifyConstant::processStatusMap()[(int) $log->process_status] ?? '未知'),
+                'request_data' => $this->maskSensitiveData((array) ($log->request_data ?? [])),
+                'process_result' => $this->maskSensitiveData((array) ($log->process_result ?? [])),
+                'created_at_text' => $this->formatDateTime($log->created_at, '—'),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * 加载并格式化主动查单日志。
+     *
+     * @param string $payNo 支付单号
+     * @return array<int, array<string, mixed>>
+     */
+    private function loadChannelQueryLogs(string $payNo): array
+    {
+        $rows = [];
+        foreach ($this->channelNotifyLogRepository->listByPayNoAndType($payNo, NotifyConstant::NOTIFY_TYPE_QUERY) as $log) {
+            $rows[] = [
+                'id' => (int) $log->id,
+                'notify_no' => (string) $log->notify_no,
+                'channel_id' => (int) $log->channel_id,
+                'pay_no' => (string) $log->pay_no,
+                'biz_no' => (string) $log->biz_no,
+                'channel_request_no' => (string) ($log->channel_request_no ?? ''),
+                'channel_trade_no' => (string) ($log->channel_trade_no ?? ''),
+                'raw_payload' => $this->maskSensitiveData((array) ($log->raw_payload ?? [])),
+                'verify_status' => (int) $log->verify_status,
+                'verify_status_text' => (string) (NotifyConstant::verifyStatusMap()[(int) $log->verify_status] ?? '未知'),
+                'process_status' => (int) $log->process_status,
+                'process_status_text' => (string) (NotifyConstant::processStatusMap()[(int) $log->process_status] ?? '未知'),
+                'retry_count' => (int) $log->retry_count,
+                'last_error' => (string) ($log->last_error ?? ''),
+                'created_at_text' => $this->formatDateTime($log->created_at, '—'),
+                'updated_at_text' => $this->formatDateTime($log->updated_at, '—'),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * 加载并格式化后台操作日志。
+     *
+     * @param string $payNo 支付单号
+     * @return array<int, array<string, mixed>>
+     */
+    private function loadOperationLogs(string $payNo): array
+    {
+        $rows = [];
+        foreach ($this->operationLogRepository->listByPayNo($payNo) as $log) {
+            $rows[] = [
+                'id' => (int) $log->id,
+                'pay_no' => (string) $log->pay_no,
+                'biz_no' => (string) $log->biz_no,
+                'action' => (string) $log->action,
+                'action_text' => $this->operationActionText((string) $log->action),
+                'admin_id' => (int) $log->admin_id,
+                'reason' => (string) ($log->reason ?? ''),
+                'result_status' => (string) ($log->result_status ?? ''),
+                'result_message' => (string) ($log->result_message ?? ''),
+                'result_payload' => $this->maskSensitiveData((array) ($log->result_payload ?? [])),
+                'created_at_text' => $this->formatDateTime($log->created_at, '—'),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * 后台操作码文本。
+     *
+     * @param string $action 操作码
+     * @return string 操作名称
+     */
+    private function operationActionText(string $action): string
+    {
+        return [
+            'renotify' => '重新通知',
+            'active_query' => '主动查单',
+            'api_refund' => 'API退款',
+            'manual_refund' => '手动退款',
+            'manual_success' => '手动补单',
+            'freeze' => '冻结订单',
+            'unfreeze' => '解冻订单',
+        ][$action] ?? $action;
     }
 
     /**

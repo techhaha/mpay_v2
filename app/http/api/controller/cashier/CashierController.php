@@ -79,4 +79,47 @@ class CashierController extends BaseController
             $this->cashierService->payOrderStatus((string) ($payload['pay_no'] ?? ''))
         );
     }
+
+    /**
+     * 用户身份回填后继续支付。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function identityResume(Request $request): Response
+    {
+        $payload = $this->validated($request->all(), CashierValidator::class, 'identity_resume');
+
+        return $this->success(
+            $this->cashierService->resumeIdentity($payload, $request)
+        );
+    }
+
+    /**
+     * 查询用户身份承接页上下文。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function identityContext(Request $request): Response
+    {
+        $payload = $this->validated($request->all(), CashierValidator::class, 'identity_context');
+
+        return $this->success(
+            $this->cashierService->identityContext((string) ($payload['token'] ?? $payload['resume_token'] ?? ''))
+        );
+    }
+
+    /**
+     * 微信网页授权回调。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function identityWechatCallback(Request $request): Response
+    {
+        $payload = $this->validated($request->all(), CashierValidator::class, 'identity_wechat_callback');
+
+        return $this->cashierService->wechatIdentityCallback($payload, $request);
+    }
 }

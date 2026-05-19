@@ -79,9 +79,21 @@ class PaymentPluginConfService extends BaseService
             $query->where('c.merchant_id', (int) $merchantId);
         }
 
-        return $query
+        $paginator = $query
             ->orderByDesc('c.id')
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
+
+        $paginator->getCollection()->transform(function ($row) {
+            $row->is_writable = (int) $row->merchant_id === 0;
+            $row->source_type = (int) $row->merchant_id === 0 ? 'platform' : 'merchant';
+            $row->source_text = (int) $row->merchant_id === 0 ? '平台配置' : '商户自建';
+            $row->config_masked = $this->maskSensitiveData((array) ($row->config ?? []));
+            $row->config = $row->config_masked;
+
+            return $row;
+        });
+
+        return $paginator;
     }
 
     /**
@@ -92,7 +104,15 @@ class PaymentPluginConfService extends BaseService
      */
     public function findById(int $id): ?PaymentPluginConf
     {
-        return $this->paymentPluginConfRepository->find($id);
+        $row = $this->paymentPluginConfRepository->find($id);
+        if ($row) {
+            $row->is_writable = (int) $row->merchant_id === 0;
+            $row->source_type = (int) $row->merchant_id === 0 ? 'platform' : 'merchant';
+            $row->source_text = (int) $row->merchant_id === 0 ? '平台配置' : '商户自建';
+            $row->config_masked = $this->maskSensitiveData((array) ($row->config ?? []));
+        }
+
+        return $row;
     }
 
     /**
@@ -104,6 +124,7 @@ class PaymentPluginConfService extends BaseService
      */
     public function create(array $data): PaymentPluginConf
     {
+        $this->assertPlatformPayload($data);
         $payload = $this->normalizePayload($data);
         $this->assertPluginExists((string) $payload['plugin_code']);
 
@@ -123,6 +144,13 @@ class PaymentPluginConfService extends BaseService
      */
     public function update(int $id, array $data): ?PaymentPluginConf
     {
+        $current = $this->paymentPluginConfRepository->find($id);
+        if (!$current) {
+            return null;
+        }
+
+        $this->assertPlatformConfig($current);
+        $this->assertPlatformPayload($data, false);
         $payload = $this->normalizePayload($data);
         $this->assertPluginExists((string) $payload['plugin_code']);
 
@@ -147,6 +175,11 @@ class PaymentPluginConfService extends BaseService
     public function delete(int $id): bool
     {
         $config = $this->paymentPluginConfRepository->find($id);
+        if (!$config) {
+            return false;
+        }
+
+        $this->assertPlatformConfig($config);
         $deleted = $this->paymentPluginConfRepository->deleteById($id);
         if ($deleted && $config) {
             $this->dispatchWatcherConfigChanged('delete', $config);
@@ -173,6 +206,7 @@ class PaymentPluginConfService extends BaseService
                 'c.plugin_code',
             ])
             ->selectRaw("COALESCE(NULLIF(p.name, ''), c.plugin_code) AS plugin_name")
+            ->where('c.merchant_id', 0)
             ->orderByDesc('c.id');
 
         if ($pluginCode !== '') {
@@ -212,6 +246,7 @@ class PaymentPluginConfService extends BaseService
                 'c.plugin_code',
             ])
             ->selectRaw("COALESCE(NULLIF(p.name, ''), c.plugin_code) AS plugin_name")
+            ->where('c.merchant_id', 0)
             ->orderByDesc('c.id');
 
         $ids = $filters['ids'] ?? [];
@@ -271,7 +306,7 @@ class PaymentPluginConfService extends BaseService
     {
         return [
             'plugin_code' => trim((string) ($data['plugin_code'] ?? '')),
-            'merchant_id' => max(0, (int) ($data['merchant_id'] ?? 0)),
+            'merchant_id' => 0,
             // 配置内容统一按数组保存，外部传入非数组时直接回退为空数组。
             'config' => is_array($data['config'] ?? null) ? $data['config'] : [],
             // 默认结算周期按日配置，截止时间默认按当天 23:59:59 收口。
@@ -279,6 +314,38 @@ class PaymentPluginConfService extends BaseService
             'settlement_cutoff_time' => trim((string) ($data['settlement_cutoff_time'] ?? '23:59:59')) ?: '23:59:59',
             'remark' => trim((string) ($data['remark'] ?? '')),
         ];
+    }
+
+    /**
+     * 校验后台插件配置写入只能操作平台配置。
+     *
+     * @param array $data 写入数据
+     * @param bool $requireFields 是否要求完整字段
+     * @return void
+     * @throws PaymentException
+     */
+    private function assertPlatformPayload(array $data, bool $requireFields = true): void
+    {
+        if (($requireFields || array_key_exists('merchant_id', $data)) && (int) ($data['merchant_id'] ?? 0) !== 0) {
+            throw new PaymentException('管理后台只能维护平台插件配置，商户插件配置请到商户后台处理', 40232);
+        }
+    }
+
+    /**
+     * 校验插件配置是否允许被管理后台写操作修改。
+     *
+     * @param PaymentPluginConf $config 插件配置
+     * @return void
+     * @throws PaymentException
+     */
+    private function assertPlatformConfig(PaymentPluginConf $config): void
+    {
+        if ((int) $config->merchant_id !== 0) {
+            throw new PaymentException('商户插件配置只允许查看，不能在管理后台修改', 40233, [
+                'config_id' => (int) $config->id,
+                'merchant_id' => (int) $config->merchant_id,
+            ]);
+        }
     }
 
     /**

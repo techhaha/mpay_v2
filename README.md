@@ -1,151 +1,69 @@
+# mpay 后端
 
-
-# MPay V2 Webman
-
-基于 Webman 高性能 PHP 框架开发的支付系统后台管理 API。
-
-## 项目简介
-
-MPay V2 Webman 是一个采用 Webman 高性能 PHP 框架构建的支付系统后台管理接口，提供商户管理、支付通道配置、账户资金管理、订单交易、退款结算等核心功能。系统采用分层架构设计，包含完整的认证授权体系、权限管理、支付路由、通知回调等模块。
-
-## 说明
-
-Mpay V2 项目还在开发中，暂没有发布测试版本，欢迎收藏关注最新动态。<br>
-
-**个人乐观预计在 2026 年 高考前发布第一个版本，后端代码全开源，注释详细。**
-
-## 技术栈
-
-- **后端框架**: Webman
-- **PHP 版本**: PHP 8.0+
-- **数据库**: MySQL
-- **缓存**: Redis
-- **认证**: JWT
-- **架构模式**: MVC + Repository + Service
-
-## 图片预览
-<img src="doc/img/1.png" width=640 />
-<img src="doc/img/2.png" width=640 />
-<img src="doc/img/3.png" width=640 />
-<img src="doc/img/4.png" width=640 />
-<img src="doc/img/5.png" width=640 />
-<img src="doc/img/6.png" width=640 />
-<img src="doc/img/7.png" width=640 />
-<img src="doc/img/8.png" width=640 />
-<img src="doc/img/9.png" width=640 />
-<img src="doc/img/10.png" width=640 />
-<img src="doc/img/11.png" width=640 />
-<img src="doc/img/12.png" width=640 />
-<img src="doc/img/13.png" width=640 />
-<img src="doc/img/14.png" width=640 />
-<img src="doc/img/15.png" width=640 />
-<img src="doc/img/16.png" width=640 />
-
-## 项目结构
-
-```
-mpay_v2_webman/
-├── app/                          # 应用核心代码
-│   ├── command/                 # 命令行控制器
-│   ├── common/                  # 公共基础类
-│   │   ├── base/               # 基础类（Controller、Model、Service、Repository）
-│   │   ├── constant/           # 常量定义
-│   │   ├── enums/             # 枚举类
-│   │   ├── interface/         # 接口定义
-│   │   ├── middleware/       # 中间件
-│   │   ├── payment/         # 支付通道实现
-│   │   └── util/           # 工具类
-│   ├── exception/              # 异常类
-│   ├── http/                 # HTTP 控制器
-│   │   ├── admin/            # 后台管理接口
-│   │   ├── api/             # 商户API接口
-│   │   └── mer/            # 商户门户接口
-│   ├── listener/              # 事件监听
-│   ├── model/                # 数据模型
-│   ├── process/             # 进程管理
-│   ├── repository/           # 数据仓库层
-│   ├── route/              # 路由定义
-│   ├── service/            # 业务服务层
-│   └── validation/          # 验证器
-├── config/                     # 配置文件
-├── database/                  # 数据库脚本
-├── doc/                      # 文档资源
-├── public/                   # 公共资源
-└── support/                  # 框架支持类
-```
-
-## 核心功能
-
-### 商户管理
-- 商户信息管理
-- 商户分组配置
-- 商户策略管理
-- API 凭证管理
-
-### 支付通道
-- 支付通道配置
-- 支付类型管理
-- 支付插件管理
-- 轮询通道组
-- 支付路由解析
-
-### 资金账户
-- 账户余额查询
-- 账户流水明细
-- 冻结/解冻资金
-- 账户充值/扣款
-
-### 订单交易
-- 支付订单创建
-- 支付回调处理
-- 订单状态管理
-- 退款处理
-
-### 结算管理
-- 结算订单
-- 结算周期配置
-- 自动/手动结算
-
-### 认证授权
-- JWT Token 认证
-- 后台用户管理
-- 商户登录认证
-- 权限中间件
-
-### 系统配置
-- 系统参数配置
-- 字典管理
-- 菜单路由
-- 配置缓存
+`mpay` 是支付中台后端服务，基于 Webman，负责后台 API、商户 API、收银台、ePay 兼容协议、支付插件、路由、回调、退款、清算、资金、文件和系统配置。
 
 ## 快速开始
 
-### 环境要求
-
-- PHP >= 8.0
-- Composer
-- Redis
-- MySQL >= 5.7
-
-### 安装步骤
-
-1. 克隆项目
-```bash
-git clone https://gitee.com/technical-laohu/mpay_v2_webman.git
-cd mpay_v2_webman
-```
-
-2. 安装依赖
 ```bash
 composer install
+Copy-Item .env.example .env
+php webman start
 ```
 
-3. 配置数据库
-编辑 `config/database.php` 配置数据库连接信息。
+Windows 开发环境如需启动自定义进程：
 
-4. 配置 Redis
-编辑 `config/redis.php` 配置 Redis 连接信息。
-
-5. 导入数据库
 ```bash
-mysql -u用户名 -p 数据库名
+php windows.php
+```
+
+## 常用命令
+
+```bash
+php webman start
+php webman restart
+php webman mpay:test --all
+php webman epay:mapi
+php webman system:config-sync
+```
+
+## 目录概览
+
+```text
+app/command/      命令和烟雾测试
+app/common/       基类、常量、工具、中间件、支付插件
+app/http/         admin、mer、api 控制器与校验
+app/model/        模型
+app/repository/   仓库
+app/route/        显式路由
+app/service/      业务服务
+config/           Webman 与业务配置
+public/           静态资源和前端构建产物
+support/          Webman 支撑代码
+```
+
+## 入口
+
+- 管理后台：`/admin`、`/adminapi`
+- 商户后台：`/mer`、`/merapi`
+- 收银台：`/cashier`、`/payment`、`/api/cashier`
+- ePay V1：`/submit.php`、`/mapi.php`、`/api.php`
+- ePay V2：`/api/pay`、`/api/merchant`、`/api/transfer`
+- 通道级通知：`/api/pay/{chanId}/notify`，用于个人收款监听类插件先定位平台支付单，再进入标准支付回调流程。
+
+## 支付插件
+
+支付插件位于 `app/common/payment`。当前主要插件：
+
+- `EpayV1Payment`：ePay V1 协议对接。
+- `EpayV2Payment`：ePay V2 协议对接。
+- `AlipayReceiptPayment`：支付宝个人收款监听，不对接官方 API。
+- `WechatReceiptPayment`：微信个人收款监听，不对接官方 API。
+
+个人收款监听插件通过配置表单声明订单匹配模式：
+
+- 金额变动：下单时在支付单金额上做最小分级偏移，只用于通知定位订单；确认收款前会恢复原始订单金额，避免影响业务统计。
+- 付款备注：下单时生成 4 位备注码并写入缓存，通知时按备注码定位订单。
+
+监听工具当前按 SmsForwarder 签名规则校验 `timestamp`、`sign` 和通知内容。插件 `channelNotify()` 只返回 `pay_no`，后续验签、状态归一、回调日志和订单推进仍走标准 `notify()` 链路。
+
+更多说明见 `../docs/backend/README.md`。

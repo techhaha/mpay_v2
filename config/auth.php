@@ -15,12 +15,12 @@ return [
     'leeway' => (int) env('AUTH_JWT_LEEWAY', 30),
     'guards' => [
         'admin' => [
-            'secret' => env('AUTH_ADMIN_JWT_SECRET', env('AUTH_JWT_SECRET', 'change-me-jwt-secret-use-at-least-32-chars')),
+            'secret' => env('AUTH_ADMIN_JWT_SECRET', env('AUTH_JWT_SECRET', '')),
             'ttl' => (int) env('AUTH_ADMIN_JWT_TTL', 86400),
             'redis_prefix' => env('AUTH_ADMIN_JWT_REDIS_PREFIX', 'mpay:auth:admin:'),
         ],
         'merchant' => [
-            'secret' => env('AUTH_MERCHANT_JWT_SECRET', env('AUTH_JWT_SECRET', 'change-me-jwt-secret-use-at-least-32-chars')),
+            'secret' => env('AUTH_MERCHANT_JWT_SECRET', env('AUTH_JWT_SECRET', '')),
             'ttl' => (int) env('AUTH_MERCHANT_JWT_TTL', 86400),
             'redis_prefix' => env('AUTH_MERCHANT_JWT_REDIS_PREFIX', 'mpay:auth:merchant:'),
         ],

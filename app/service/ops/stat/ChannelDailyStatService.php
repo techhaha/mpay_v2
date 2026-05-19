@@ -38,35 +38,7 @@ class ChannelDailyStatService extends BaseService
      */
     public function paginate(array $filters = [], int $page = 1, int $pageSize = 10)
     {
-        $query = $this->baseQuery();
-
-        $keyword = trim((string) ($filters['keyword'] ?? ''));
-        if ($keyword !== '') {
-            $query->where(function ($builder) use ($keyword) {
-                $builder->where('s.stat_date', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_short_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('g.group_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('c.name', 'like', '%' . $keyword . '%')
-                    ->orWhere('c.plugin_code', 'like', '%' . $keyword . '%');
-            });
-        }
-
-        $merchantId = (string) ($filters['merchant_id'] ?? '');
-        if ($merchantId !== '') {
-            $query->where('s.merchant_id', (int) $merchantId);
-        }
-
-        $channelId = (string) ($filters['channel_id'] ?? '');
-        if ($channelId !== '') {
-            $query->where('s.channel_id', (int) $channelId);
-        }
-
-        $statDate = trim((string) ($filters['stat_date'] ?? ''));
-        if ($statDate !== '') {
-            $query->where('s.stat_date', $statDate);
-        }
+        $query = $this->applyFilters($this->baseQuery(), $filters);
 
         $paginator = $query
             ->orderByDesc('s.stat_date')
@@ -81,6 +53,85 @@ class ChannelDailyStatService extends BaseService
     }
 
     /**
+     * 汇总通道健康面板。
+     *
+     * @param array $filters 筛选条件
+     * @return array<string, mixed> 通道健康摘要
+     */
+    public function summary(array $filters = []): array
+    {
+        $query = $this->applyFilters($this->baseFilterQuery(), $filters);
+
+        $totalRow = (clone $query)
+            ->selectRaw('COUNT(*) AS stat_count')
+            ->selectRaw('COALESCE(SUM(s.pay_success_count), 0) AS total_success_count')
+            ->selectRaw('COALESCE(SUM(s.pay_fail_count), 0) AS total_fail_count')
+            ->selectRaw('COALESCE(SUM(s.pay_amount), 0) AS total_pay_amount')
+            ->selectRaw('COALESCE(SUM(s.pay_success_count + s.pay_fail_count), 0) AS total_pay_count')
+            ->selectRaw('COALESCE(SUM(s.avg_latency_ms * s.pay_success_count), 0) AS weighted_latency_sum')
+            ->selectRaw('COALESCE(SUM(s.pay_success_count), 0) AS latency_weight_count')
+            ->first();
+
+        $totalSuccessCount = (int) ($totalRow->total_success_count ?? 0);
+        $totalFailCount = (int) ($totalRow->total_fail_count ?? 0);
+        $totalPayCount = (int) ($totalRow->total_pay_count ?? 0);
+        $latencyWeightCount = (int) ($totalRow->latency_weight_count ?? 0);
+        $avgLatencyMs = $latencyWeightCount > 0
+            ? (int) floor((int) ($totalRow->weighted_latency_sum ?? 0) / $latencyWeightCount)
+            : 0;
+        $successRateBp = $totalPayCount > 0 ? (int) floor($totalSuccessCount * 10000 / $totalPayCount) : 0;
+
+        $poorCount = (clone $query)
+            ->whereRaw('(s.pay_success_count + s.pay_fail_count) > 0')
+            ->where('s.health_score', '<', 60)
+            ->count();
+        $warningCount = (clone $query)
+            ->whereRaw('(s.pay_success_count + s.pay_fail_count) > 0')
+            ->whereBetween('s.health_score', [60, 79])
+            ->count();
+        $limitWarningCount = (clone $query)
+            ->where(function ($builder) {
+                $builder->whereRaw('(c.daily_limit_amount > 0 AND s.pay_amount * 100 >= c.daily_limit_amount * 80)')
+                    ->orWhereRaw('(c.daily_limit_count > 0 AND (s.pay_success_count + s.pay_fail_count) * 100 >= c.daily_limit_count * 80)');
+            })
+            ->count();
+
+        $recentAbnormal = $this->applyFilters($this->baseQuery(), $filters)
+            ->where(function ($builder) {
+                $builder->where('s.health_score', '<', 60)
+                    ->orWhere('s.pay_fail_count', '>', 0)
+                    ->orWhere('s.avg_latency_ms', '>=', 3000)
+                    ->orWhereRaw('(c.daily_limit_amount > 0 AND s.pay_amount * 100 >= c.daily_limit_amount * 80)')
+                    ->orWhereRaw('(c.daily_limit_count > 0 AND (s.pay_success_count + s.pay_fail_count) * 100 >= c.daily_limit_count * 80)');
+            })
+            ->orderByDesc('s.stat_date')
+            ->orderByDesc('s.id')
+            ->limit(5)
+            ->get()
+            ->map(fn ($row) => $this->decorateRow($row))
+            ->values()
+            ->all();
+
+        return [
+            'stat_count' => (int) ($totalRow->stat_count ?? 0),
+            'healthy_count' => max(0, (int) ($totalRow->stat_count ?? 0) - (int) $poorCount - (int) $warningCount),
+            'warning_count' => (int) $warningCount,
+            'poor_count' => (int) $poorCount,
+            'limit_warning_count' => (int) $limitWarningCount,
+            'total_success_count' => $totalSuccessCount,
+            'total_fail_count' => $totalFailCount,
+            'total_pay_count' => $totalPayCount,
+            'total_pay_amount' => (int) ($totalRow->total_pay_amount ?? 0),
+            'total_pay_amount_text' => $this->formatAmount((int) ($totalRow->total_pay_amount ?? 0)),
+            'success_rate_bp' => $successRateBp,
+            'success_rate_text' => $this->formatRate($successRateBp),
+            'avg_latency_ms' => $avgLatencyMs,
+            'avg_latency_ms_text' => $this->formatLatency($avgLatencyMs),
+            'recent_abnormal' => $recentAbnormal,
+        ];
+    }
+
+    /**
      * 按 ID 查询渠道日统计详情。
      *
      * @param int $id 渠道日统计ID
@@ -92,7 +143,7 @@ class ChannelDailyStatService extends BaseService
             ->where('s.id', $id)
             ->first();
 
-        return $row ?: null;
+        return $row ? $this->decorateRow($row) : null;
     }
 
     /**
@@ -169,6 +220,13 @@ class ChannelDailyStatService extends BaseService
         $row->refund_amount_text = $this->formatAmount((int) $row->refund_amount);
         $row->success_rate_text = $this->formatRate((int) $row->success_rate_bp);
         $row->avg_latency_ms_text = $this->formatLatency((int) $row->avg_latency_ms);
+        $row->limit_amount_usage_text = $this->formatLimitAmountUsage((int) $row->pay_amount, (int) ($row->daily_limit_amount ?? 0));
+        $row->limit_count_usage_text = $this->formatLimitCountUsage(
+            (int) $row->pay_success_count + (int) $row->pay_fail_count,
+            (int) ($row->daily_limit_count ?? 0)
+        );
+        $row->failure_reason_text = $this->resolveFailureReason($row);
+        $row->health_status_text = $this->resolveHealthStatus((int) $row->health_score);
         $row->stat_date_text = $this->formatDate($row->stat_date ?? null);
         $row->created_at_text = $this->formatDateTime($row->created_at ?? null);
         $row->updated_at_text = $this->formatDateTime($row->updated_at ?? null);
@@ -332,8 +390,159 @@ class ChannelDailyStatService extends BaseService
             ->selectRaw("COALESCE(m.merchant_short_name, '') AS merchant_short_name")
             ->selectRaw("COALESCE(g.group_name, '') AS merchant_group_name")
             ->selectRaw("COALESCE(c.name, '') AS channel_name")
-            ->selectRaw("COALESCE(c.plugin_code, '') AS channel_plugin_code");
+            ->selectRaw("COALESCE(c.plugin_code, '') AS channel_plugin_code")
+            ->selectRaw('COALESCE(c.daily_limit_amount, 0) AS daily_limit_amount')
+            ->selectRaw('COALESCE(c.daily_limit_count, 0) AS daily_limit_count');
     }
 
-}
+    /**
+     * 构建只用于筛选和统计的基础查询。
+     *
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
+     */
+    private function baseFilterQuery()
+    {
+        return $this->channelDailyStatRepository->query()
+            ->from('ma_channel_daily_stat as s')
+            ->leftJoin('ma_merchant as m', 's.merchant_id', '=', 'm.id')
+            ->leftJoin('ma_merchant_group as g', 's.merchant_group_id', '=', 'g.id')
+            ->leftJoin('ma_payment_channel as c', 's.channel_id', '=', 'c.id');
+    }
 
+    /**
+     * 应用通道日统计筛选条件。
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query 查询构造器
+     * @param array $filters 筛选条件
+     * @return \Illuminate\Database\Eloquent\Builder 查询构造器
+     */
+    private function applyFilters($query, array $filters)
+    {
+        $keyword = trim((string) ($filters['keyword'] ?? ''));
+        if ($keyword !== '') {
+            $query->where(function ($builder) use ($keyword) {
+                $builder->where('s.stat_date', 'like', '%' . $keyword . '%')
+                    ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
+                    ->orWhere('m.merchant_short_name', 'like', '%' . $keyword . '%')
+                    ->orWhere('g.group_name', 'like', '%' . $keyword . '%')
+                    ->orWhere('c.name', 'like', '%' . $keyword . '%')
+                    ->orWhere('c.plugin_code', 'like', '%' . $keyword . '%');
+            });
+        }
+
+        $merchantId = (string) ($filters['merchant_id'] ?? '');
+        if ($merchantId !== '') {
+            $query->where('s.merchant_id', (int) $merchantId);
+        }
+
+        $channelId = (string) ($filters['channel_id'] ?? '');
+        if ($channelId !== '') {
+            $query->where('s.channel_id', (int) $channelId);
+        }
+
+        $statDate = trim((string) ($filters['stat_date'] ?? ''));
+        if ($statDate !== '') {
+            $query->where('s.stat_date', $statDate);
+        }
+
+        return $query;
+    }
+
+    /**
+     * 格式化金额限额使用。
+     *
+     * @param int $usedAmount 已用金额，单位分
+     * @param int $limitAmount 限额，单位分
+     * @return string 限额使用文案
+     */
+    private function formatLimitAmountUsage(int $usedAmount, int $limitAmount): string
+    {
+        if ($limitAmount <= 0) {
+            return '未配置';
+        }
+
+        return $this->formatAmount($usedAmount) . ' / ' . $this->formatAmount($limitAmount) . '（' . $this->formatUsageRate($usedAmount, $limitAmount) . '）';
+    }
+
+    /**
+     * 格式化笔数限额使用。
+     *
+     * @param int $usedCount 已用笔数
+     * @param int $limitCount 限笔
+     * @return string 限笔使用文案
+     */
+    private function formatLimitCountUsage(int $usedCount, int $limitCount): string
+    {
+        if ($limitCount <= 0) {
+            return '未配置';
+        }
+
+        return $usedCount . ' / ' . $limitCount . '（' . $this->formatUsageRate($usedCount, $limitCount) . '）';
+    }
+
+    /**
+     * 格式化使用率。
+     *
+     * @param int $used 已用值
+     * @param int $limit 限制值
+     * @return string 使用率文案
+     */
+    private function formatUsageRate(int $used, int $limit): string
+    {
+        if ($limit <= 0) {
+            return '0%';
+        }
+
+        return number_format(min(999.99, $used * 100 / $limit), 2) . '%';
+    }
+
+    /**
+     * 推断异常摘要。
+     *
+     * @param object $row 统计行
+     * @return string 异常摘要
+     */
+    private function resolveFailureReason(object $row): string
+    {
+        $payCount = (int) $row->pay_success_count + (int) $row->pay_fail_count;
+        if ((int) $row->pay_fail_count > 0 && (int) $row->pay_success_count <= 0) {
+            return '当日支付全部失败，优先检查上游状态和通道配置';
+        }
+        if ((int) $row->pay_fail_count > 0) {
+            return '存在失败订单，建议结合订单详情查看上游返回';
+        }
+        if ((int) $row->avg_latency_ms >= 3000) {
+            return '平均耗时偏高，可能存在上游响应慢';
+        }
+        if ($payCount > 0 && (int) $row->health_score < 60) {
+            return '健康分偏低，建议检查成功率和耗时';
+        }
+        if ((int) ($row->daily_limit_amount ?? 0) > 0 && (int) $row->pay_amount * 100 >= (int) $row->daily_limit_amount * 80) {
+            return '金额限额使用接近上限';
+        }
+        if ((int) ($row->daily_limit_count ?? 0) > 0 && $payCount * 100 >= (int) $row->daily_limit_count * 80) {
+            return '笔数限额使用接近上限';
+        }
+
+        return '暂无明显异常';
+    }
+
+    /**
+     * 根据健康分生成状态文案。
+     *
+     * @param int $score 健康分
+     * @return string 状态文案
+     */
+    private function resolveHealthStatus(int $score): string
+    {
+        if ($score >= 80) {
+            return '健康';
+        }
+        if ($score >= 60) {
+            return '关注';
+        }
+
+        return '异常';
+    }
+}

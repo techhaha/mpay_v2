@@ -67,6 +67,21 @@ class NotifyService extends BaseService
 
         // 同一业务单如果已经记录过相同类型的通知，就直接复用旧日志，避免重复落库。
         if ($duplicate = $this->channelNotifyLogRepository->findDuplicate($channelId, $notifyType, $bizNo)) {
+            if ($notifyType === NotifyConstant::NOTIFY_TYPE_QUERY) {
+                $duplicate->pay_no = (string) ($input['pay_no'] ?? $duplicate->pay_no ?? '');
+                $duplicate->channel_request_no = (string) ($input['channel_request_no'] ?? $duplicate->channel_request_no ?? '');
+                $duplicate->channel_trade_no = (string) ($input['channel_trade_no'] ?? $duplicate->channel_trade_no ?? '');
+                $duplicate->raw_payload = $input['raw_payload'] ?? [];
+                $duplicate->verify_status = (int) ($input['verify_status'] ?? NotifyConstant::VERIFY_STATUS_UNKNOWN);
+                $duplicate->process_status = (int) ($input['process_status'] ?? NotifyConstant::PROCESS_STATUS_PENDING);
+                $duplicate->retry_count = (int) $duplicate->retry_count + 1;
+                $duplicate->next_retry_at = $input['next_retry_at'] ?? null;
+                $duplicate->last_error = (string) ($input['last_error'] ?? '');
+                $duplicate->save();
+
+                return $duplicate->refresh();
+            }
+
             return $duplicate;
         }
 

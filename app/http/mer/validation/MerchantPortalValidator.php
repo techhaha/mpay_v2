@@ -46,6 +46,7 @@ class MerchantPortalValidator extends Validator
         'rotate_v1' => 'sometimes|integer|in:0,1',
         'rotate_v2' => 'sometimes|integer|in:0,1',
         'sort_no' => 'nullable|integer|min:0',
+        'items' => 'sometimes|array',
         'page' => 'sometimes|integer|min:1',
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
@@ -87,6 +88,7 @@ class MerchantPortalValidator extends Validator
         'rotate_v1' => 'V1 凭证',
         'rotate_v2' => 'V2 凭证',
         'sort_no' => '排序',
+        'items' => '路由配置',
         'page' => '页码',
         'page_size' => '每页条数',
     ];
@@ -110,12 +112,14 @@ class MerchantPortalValidator extends Validator
         'passwordUpdate' => ['current_password', 'password', 'password_confirm'],
         'routePreview' => ['pay_type_id', 'pay_amount', 'stat_date'],
         'pluginConfigIndex' => ['keyword', 'plugin_code', 'page', 'page_size'],
+        'pluginConfigShow' => ['id'],
         'pluginConfigStore' => ['plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
         'pluginConfigUpdate' => ['id', 'plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
         'pluginConfigDestroy' => ['id'],
         'channelStore' => ['name', 'pay_type_id', 'plugin_code', 'api_config_id', 'daily_limit_amount', 'daily_limit_count', 'min_amount', 'max_amount', 'remark', 'status', 'sort_no'],
         'channelUpdate' => ['id', 'name', 'pay_type_id', 'plugin_code', 'api_config_id', 'daily_limit_amount', 'daily_limit_count', 'min_amount', 'max_amount', 'remark', 'status', 'sort_no'],
         'channelDestroy' => ['id'],
+        'routeConfigUpdate' => ['items'],
         'issueCredential' => ['rotate_v1', 'rotate_v2', 'status'],
     ];
 
@@ -131,7 +135,7 @@ class MerchantPortalValidator extends Validator
                 'id' => 'required|integer|min:1',
                 'plugin_code' => 'required|string|alpha_dash|min:2|max:32',
             ]),
-            'pluginConfigDestroy', 'channelDestroy' => array_merge($rules, [
+            'pluginConfigShow', 'pluginConfigDestroy', 'channelDestroy' => array_merge($rules, [
                 'id' => 'required|integer|min:1',
             ]),
             'channelStore' => array_merge($rules, [

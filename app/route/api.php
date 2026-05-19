@@ -34,6 +34,9 @@ Route::group('/api/cashier', function () {
     Route::get('/config', [SystemPublicConfigController::class, 'cashier'])->name('cashierPublicConfig')->setParams(['real_name' => '收银台公开配置']);
     Route::get('/context', [CashierController::class, 'context'])->name('cashierContext')->setParams(['real_name' => '收银台上下文']);
     Route::post('/confirm', [CashierController::class, 'confirm'])->name('cashierConfirm')->setParams(['real_name' => '收银台确认支付']);
+    Route::get('/identity/context', [CashierController::class, 'identityContext'])->name('cashierIdentityContext')->setParams(['real_name' => '收银台身份承接页上下文']);
+    Route::post('/identity/resume', [CashierController::class, 'identityResume'])->name('cashierIdentityResume')->setParams(['real_name' => '收银台身份回填继续支付']);
+    Route::get('/identity/wechat-callback', [CashierController::class, 'identityWechatCallback'])->name('cashierIdentityWechatCallback')->setParams(['real_name' => '收银台微信网页授权回调']);
     Route::get('/pay-order', [CashierController::class, 'payOrder'])->name('cashierPayOrder')->setParams(['real_name' => '收银台支付单详情']);
     Route::get('/pay-order-status', [CashierController::class, 'payOrderStatus'])->name('cashierPayOrderStatus')->setParams(['real_name' => '收银台支付单状态']);
 })->middleware([Cors::class]);

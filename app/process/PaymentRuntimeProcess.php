@@ -4,6 +4,7 @@ namespace app\process;
 
 use app\service\payment\runtime\PaymentRuntimeMaintenanceService;
 use app\service\system\config\SystemConfigRuntimeService;
+use app\service\system\ops\SystemOpsHeartbeatService;
 use support\Log;
 use Workerman\Timer;
 use Workerman\Worker;
@@ -48,6 +49,11 @@ class PaymentRuntimeProcess
     public function onWorkerStart(Worker $worker): void
     {
         $heartbeat = $this->intOption('heartbeat_seconds', 5, 1, 60);
+        // 启动时先写一次心跳，避免监控页在首次 Timer tick 前显示“未上报”。
+        $this->reportHeartbeat([
+            'summary' => '支付运行时维护进程已启动',
+            'heartbeat_seconds' => $heartbeat,
+        ]);
 
         Timer::add($heartbeat, function (): void {
             $this->tick();
@@ -65,8 +71,17 @@ class PaymentRuntimeProcess
     {
         try {
             if (!$this->boolConfig('pay_runtime_enabled', true)) {
+                $this->reportHeartbeat([
+                    'summary' => '支付运行时维护已停用',
+                    'enabled' => false,
+                ]);
                 return;
             }
+
+            $this->reportHeartbeat([
+                'summary' => '支付运行时维护调度中',
+                'enabled' => true,
+            ]);
 
             $this->runIfDue(
                 'notify_retry',
@@ -97,6 +112,10 @@ class PaymentRuntimeProcess
                 );
             }
         } catch (\Throwable $e) {
+            $this->reportHeartbeat([
+                'summary' => '支付运行时维护调度异常',
+                'last_error' => $e->getMessage(),
+            ]);
             Log::warning('[PaymentRuntimeProcess] 心跳调度失败：' . $e->getMessage());
         }
     }
@@ -125,6 +144,11 @@ class PaymentRuntimeProcess
 
         try {
             $summary = $callback();
+            $this->reportHeartbeat([
+                'summary' => $key . ' 执行完成',
+                'current_task' => $key,
+                'task_summary' => $summary,
+            ]);
             if ($this->hasWork($summary)) {
                 Log::info(sprintf(
                     '[PaymentRuntimeProcess] %s 执行完成 %s',
@@ -133,6 +157,11 @@ class PaymentRuntimeProcess
                 ));
             }
         } catch (\Throwable $e) {
+            $this->reportHeartbeat([
+                'summary' => $key . ' 执行失败',
+                'current_task' => $key,
+                'last_error' => $e->getMessage(),
+            ]);
             Log::warning(sprintf('[PaymentRuntimeProcess] %s 执行失败：%s', $key, $e->getMessage()));
         } finally {
             $this->running[$key] = false;
@@ -219,5 +248,24 @@ class PaymentRuntimeProcess
     private function runtimeConfig(): SystemConfigRuntimeService
     {
         return container_get(SystemConfigRuntimeService::class);
+    }
+
+    /**
+     * 上报运维心跳。
+     *
+     * 心跳只服务管理后台运行监控，失败不能影响通知重试、订单超时和主动查单。
+     *
+     * @param array<string, mixed> $payload 心跳内容
+     * @return void
+     */
+    private function reportHeartbeat(array $payload): void
+    {
+        try {
+            /** @var SystemOpsHeartbeatService $service */
+            $service = container_get(SystemOpsHeartbeatService::class);
+            $service->report('payment-runtime', $payload);
+        } catch (\Throwable) {
+            // 监控写入失败时静默降级，业务维护任务继续运行。
+        }
     }
 }

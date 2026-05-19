@@ -3,6 +3,7 @@
 namespace app\process;
 
 use app\service\payment\receipt\ReceiptWatcherService;
+use app\service\system\ops\SystemOpsHeartbeatService;
 use support\Log;
 use Workerman\Timer;
 use Workerman\Worker;
@@ -29,6 +30,20 @@ class ReceiptWatcherProcess
     private array $running = [];
 
     /**
+     * 上次日志摘要。
+     *
+     * @var array<string, string>
+     */
+    private array $lastSummary = [];
+
+    /**
+     * 上次摘要日志时间。
+     *
+     * @var array<string, int>
+     */
+    private array $lastSummaryLoggedAt = [];
+
+    /**
      * 构造方法。
      *
      * @param array<string, mixed> $options 进程选项
@@ -53,6 +68,11 @@ class ReceiptWatcherProcess
         }
 
         $heartbeat = $this->intOption('heartbeat_seconds', 1, 1, 60);
+        // 启动时先写一次心跳，避免监控页在首次 Timer tick 前显示“未上报”。
+        $this->reportHeartbeat([
+            'summary' => '网页流水监听调度进程已启动',
+            'heartbeat_seconds' => $heartbeat,
+        ]);
         Timer::add($heartbeat, function (): void {
             $this->tick();
         });
@@ -68,6 +88,10 @@ class ReceiptWatcherProcess
     private function tick(): void
     {
         try {
+            $this->reportHeartbeat([
+                'summary' => '网页流水监听调度中',
+            ]);
+
             $this->runIfDue('refresh_channels', 60, function (): array {
                 return $this->watcherService()->refreshChannelCache();
             });
@@ -76,6 +100,10 @@ class ReceiptWatcherProcess
                 return $this->watcherService()->syncPendingOrders($this->scanBatchSize());
             });
         } catch (\Throwable $e) {
+            $this->reportHeartbeat([
+                'summary' => '网页流水监听调度异常',
+                'last_error' => $e->getMessage(),
+            ]);
             Log::warning('[ReceiptWatcherProcess] 心跳调度失败：' . $e->getMessage());
         }
     }
@@ -104,14 +132,24 @@ class ReceiptWatcherProcess
 
         try {
             $summary = $callback();
-            if ($this->hasWork($summary)) {
+            $this->reportHeartbeat([
+                'summary' => $key . ' 执行完成',
+                'current_task' => $key,
+                'task_summary' => $summary,
+            ]);
+            if ($this->shouldLogSummary($key, $summary)) {
                 Log::info(sprintf(
                     '[ReceiptWatcherProcess] %s 执行完成 %s',
                     $key,
-                    json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    $this->summaryText($summary)
                 ));
             }
         } catch (\Throwable $e) {
+            $this->reportHeartbeat([
+                'summary' => $key . ' 执行失败',
+                'current_task' => $key,
+                'last_error' => $e->getMessage(),
+            ]);
             Log::warning(sprintf('[ReceiptWatcherProcess] %s 执行失败：%s', $key, $e->getMessage()));
         } finally {
             $this->running[$key] = false;
@@ -131,6 +169,40 @@ class ReceiptWatcherProcess
         }
 
         return false;
+    }
+
+    /**
+     * 判断是否需要记录执行摘要。
+     *
+     * 有实际工作量时立即记录；没有工作量时按摘要变化或固定间隔记录，方便排查空转原因。
+     *
+     * @param string $key 任务键
+     * @param array<string, int> $summary 任务摘要
+     * @return bool 是否记录日志
+     */
+    private function shouldLogSummary(string $key, array $summary): bool
+    {
+        $text = $this->summaryText($summary);
+        $now = time();
+        $changed = ($this->lastSummary[$key] ?? '') !== $text;
+        $elapsed = $now - (int) ($this->lastSummaryLoggedAt[$key] ?? 0);
+
+        if ($this->hasWork($summary) || $changed || $elapsed >= 60) {
+            $this->lastSummary[$key] = $text;
+            $this->lastSummaryLoggedAt[$key] = $now;
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, int> $summary 任务摘要
+     * @return string JSON 文本
+     */
+    private function summaryText(array $summary): string
+    {
+        return json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
     }
 
     /**
@@ -169,5 +241,24 @@ class ReceiptWatcherProcess
     private function watcherService(): ReceiptWatcherService
     {
         return container_get(ReceiptWatcherService::class);
+    }
+
+    /**
+     * 上报运维心跳。
+     *
+     * 心跳只服务管理后台运行监控，失败不能影响网页流水监听任务同步。
+     *
+     * @param array<string, mixed> $payload 心跳内容
+     * @return void
+     */
+    private function reportHeartbeat(array $payload): void
+    {
+        try {
+            /** @var SystemOpsHeartbeatService $service */
+            $service = container_get(SystemOpsHeartbeatService::class);
+            $service->report('receipt-watcher', $payload);
+        } catch (\Throwable) {
+            // 监控写入失败时静默降级，监听调度继续运行。
+        }
     }
 }

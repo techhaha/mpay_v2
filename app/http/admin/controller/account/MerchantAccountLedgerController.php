@@ -46,6 +46,17 @@ class MerchantAccountLedgerController extends BaseController
     }
 
     /**
+     * 导出账户流水 CSV。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function export(Request $request): Response
+    {
+        return $this->merchantAccountLedgerService->exportCsv($request->all());
+    }
+
+    /**
      * 查询账户流水详情。
      *
      * @param Request $request 请求对象

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "fca3ef829e0c2987bb87656ddbd0a519",
+    "content-hash": "275092e31a38df9d03b60c70b84ecddd",
     "packages": [
         {
             "name": "alibabacloud/oss-v2",
@@ -5994,6 +5994,45 @@
             "time": "2023-12-04T09:22:12+00:00"
         },
         {
+            "name": "webman/limiter",
+            "version": "v2.2.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/webman-php/limiter.git",
+                "reference": "1ec4f7fd179952d321fd8de78a0427b06948b2be"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/webman-php/limiter/zipball/1ec4f7fd179952d321fd8de78a0427b06948b2be",
+                "reference": "1ec4f7fd179952d321fd8de78a0427b06948b2be",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.0",
+                "workerman/webman-framework": ">=1.5.15"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^10.5"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Webman\\Limiter\\": "src",
+                    "support\\limiter\\": "src/support/limiter"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "Rate limiting component of Webman.",
+            "support": {
+                "issues": "https://github.com/webman-php/limiter/issues",
+                "source": "https://github.com/webman-php/limiter/tree/v2.2.0"
+            },
+            "time": "2026-02-21T07:40:48+00:00"
+        },
+        {
             "name": "webman/redis",
             "version": "v2.1.4",
             "source": {
@@ -6028,6 +6067,40 @@
                 "source": "https://github.com/webman-php/redis/tree/v2.1.4"
             },
             "time": "2026-03-19T07:35:54+00:00"
+        },
+        {
+            "name": "webman/redis-queue",
+            "version": "v2.1.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/webman-php/redis-queue.git",
+                "reference": "ff4791e21f3c324a47e21da7b6f2dae5a7311dcb"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/webman-php/redis-queue/zipball/ff4791e21f3c324a47e21da7b6f2dae5a7311dcb",
+                "reference": "ff4791e21f3c324a47e21da7b6f2dae5a7311dcb",
+                "shasum": ""
+            },
+            "require": {
+                "ext-redis": "*",
+                "php": ">=8.1",
+                "workerman/redis-queue": "^1.2",
+                "workerman/webman-framework": "^2.1 || dev-master"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Webman\\RedisQueue\\": "./src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "description": "Redis message queue plugin for webman.",
+            "support": {
+                "issues": "https://github.com/webman-php/redis-queue/issues",
+                "source": "https://github.com/webman-php/redis-queue/tree/v2.1.1"
+            },
+            "time": "2025-11-14T07:12:52+00:00"
         },
         {
             "name": "webman/validation",
@@ -6159,6 +6232,78 @@
                 "wiki": "http://doc.workerman.net/"
             },
             "time": "2025-01-15T07:20:50+00:00"
+        },
+        {
+            "name": "workerman/redis",
+            "version": "v2.0.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/walkor/redis.git",
+                "reference": "49627c1809eff1ef7175eb8ee7549234a1d67ec5"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/walkor/redis/zipball/49627c1809eff1ef7175eb8ee7549234a1d67ec5",
+                "reference": "49627c1809eff1ef7175eb8ee7549234a1d67ec5",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=7",
+                "workerman/workerman": "^4.1.0||^5.0.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Workerman\\Redis\\": "./src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "homepage": "http://www.workerman.net",
+            "support": {
+                "issues": "https://github.com/walkor/redis/issues",
+                "source": "https://github.com/walkor/redis/tree/v2.0.5"
+            },
+            "time": "2025-04-07T01:58:58+00:00"
+        },
+        {
+            "name": "workerman/redis-queue",
+            "version": "v1.2.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/walkor/redis-queue.git",
+                "reference": "f0ba4ea9143ae02f39b998ed908d107354cb43c0"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/walkor/redis-queue/zipball/f0ba4ea9143ae02f39b998ed908d107354cb43c0",
+                "reference": "f0ba4ea9143ae02f39b998ed908d107354cb43c0",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=7.0",
+                "workerman/redis": "^1.0||^2.0",
+                "workerman/workerman": ">=4.0.20"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Workerman\\RedisQueue\\": "./src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "Message queue system written in PHP based on workerman and backed by Redis.",
+            "homepage": "http://www.workerman.net",
+            "support": {
+                "issues": "https://github.com/walkor/redis-queue/issues",
+                "source": "https://github.com/walkor/redis-queue/tree/v1.2.2"
+            },
+            "time": "2026-01-20T14:57:09+00:00"
         },
         {
             "name": "workerman/webman-framework",
@@ -6301,214 +6446,6 @@
                 }
             ],
             "time": "2026-01-09T03:26:15+00:00"
-        },
-        {
-            "name": "yansongda/artful",
-            "version": "v1.1.3",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/yansongda/artful.git",
-                "reference": "ddc203ef34ab369a5a31df057a0fda697d3ed855"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/yansongda/artful/zipball/ddc203ef34ab369a5a31df057a0fda697d3ed855",
-                "reference": "ddc203ef34ab369a5a31df057a0fda697d3ed855",
-                "shasum": ""
-            },
-            "require": {
-                "guzzlehttp/psr7": "^2.6",
-                "php": ">=8.0",
-                "psr/container": "^1.1 || ^2.0",
-                "psr/event-dispatcher": "^1.0",
-                "psr/http-client": "^1.0",
-                "psr/http-message": "^1.1 || ^2.0",
-                "psr/log": "^1.1 || ^2.0 || ^3.0",
-                "yansongda/supports": "~4.0.10"
-            },
-            "require-dev": {
-                "friendsofphp/php-cs-fixer": "^3.44",
-                "guzzlehttp/guzzle": "^7.0",
-                "hyperf/pimple": "^2.2",
-                "mockery/mockery": "^1.4",
-                "monolog/monolog": "^2.2",
-                "phpstan/phpstan": "^1.0.0 || ^2.0.0",
-                "phpunit/phpunit": "^9.0",
-                "symfony/event-dispatcher": "^5.2.0",
-                "symfony/http-foundation": "^5.2.0",
-                "symfony/psr-http-message-bridge": "^2.1",
-                "symfony/var-dumper": "^5.1"
-            },
-            "suggest": {
-                "hyperf/pimple": "其它/无框架下使用 SDK，请安装，任选其一",
-                "illuminate/container": "其它/无框架下使用 SDK，请安装，任选其一"
-            },
-            "type": "library",
-            "autoload": {
-                "files": [
-                    "src/Functions.php"
-                ],
-                "psr-4": {
-                    "Yansongda\\Artful\\": "src"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "yansongda",
-                    "email": "me@yansongda.cn"
-                }
-            ],
-            "description": "Artful 是一个简单易用的 API 请求框架 PHP Api RequesT Framwork U Like。",
-            "keywords": [
-                "api",
-                "artful",
-                "framework",
-                "request"
-            ],
-            "support": {
-                "homepage": "https://artful.yansongda.cn",
-                "issues": "https://github.com/yansongda/artful/issues",
-                "source": "https://github.com/yansongda/artful"
-            },
-            "time": "2025-07-24T09:39:17+00:00"
-        },
-        {
-            "name": "yansongda/pay",
-            "version": "v3.7.20",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/yansongda/pay.git",
-                "reference": "26987ebf789f1e7f0a85febb640986ab4289fd7f"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/yansongda/pay/zipball/26987ebf789f1e7f0a85febb640986ab4289fd7f",
-                "reference": "26987ebf789f1e7f0a85febb640986ab4289fd7f",
-                "shasum": ""
-            },
-            "require": {
-                "ext-bcmath": "*",
-                "ext-json": "*",
-                "ext-libxml": "*",
-                "ext-openssl": "*",
-                "ext-simplexml": "*",
-                "php": ">=8.0",
-                "yansongda/artful": "~1.1.3",
-                "yansongda/supports": "~4.0.10"
-            },
-            "conflict": {
-                "hyperf/framework": "<3.0"
-            },
-            "require-dev": {
-                "friendsofphp/php-cs-fixer": "^3.44",
-                "guzzlehttp/guzzle": "^7.0",
-                "hyperf/pimple": "^2.2",
-                "jetbrains/phpstorm-attributes": "^1.1",
-                "mockery/mockery": "^1.4",
-                "monolog/monolog": "^2.2",
-                "phpstan/phpstan": "^1.0.0 || ^2.0.0",
-                "phpunit/phpunit": "^9.0",
-                "symfony/event-dispatcher": "^5.2.0",
-                "symfony/http-foundation": "^5.2.0",
-                "symfony/psr-http-message-bridge": "^2.1",
-                "symfony/var-dumper": "^5.1"
-            },
-            "type": "library",
-            "autoload": {
-                "files": [
-                    "src/Functions.php"
-                ],
-                "psr-4": {
-                    "Yansongda\\Pay\\": "src"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "yansongda",
-                    "email": "me@yansongda.cn"
-                }
-            ],
-            "description": "可能是我用过的最优雅的 Alipay 和 WeChat 的支付 SDK 扩展包了",
-            "keywords": [
-                "alipay",
-                "pay",
-                "wechat"
-            ],
-            "support": {
-                "homepage": "https://pay.yansongda.cn",
-                "issues": "https://github.com/yansongda/pay/issues",
-                "source": "https://github.com/yansongda/pay"
-            },
-            "time": "2026-03-23T07:33:29+00:00"
-        },
-        {
-            "name": "yansongda/supports",
-            "version": "v4.0.12",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/yansongda/supports.git",
-                "reference": "308de376d20cb1cd4f959644793e0582ccd1ef6d"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/yansongda/supports/zipball/308de376d20cb1cd4f959644793e0582ccd1ef6d",
-                "reference": "308de376d20cb1cd4f959644793e0582ccd1ef6d",
-                "shasum": ""
-            },
-            "require": {
-                "ext-ctype": "*",
-                "ext-mbstring": "*",
-                "php": ">=8.0"
-            },
-            "require-dev": {
-                "friendsofphp/php-cs-fixer": "^3.0",
-                "mockery/mockery": "^1.4",
-                "phpstan/phpstan": "^1.1.0",
-                "phpunit/phpunit": "^9.0"
-            },
-            "suggest": {
-                "monolog/monolog": "Use logger",
-                "symfony/console": "Use stdout logger"
-            },
-            "type": "library",
-            "autoload": {
-                "files": [
-                    "src/Functions.php"
-                ],
-                "psr-4": {
-                    "Yansongda\\Supports\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "yansongda",
-                    "email": "me@yansongda.cn"
-                }
-            ],
-            "description": "common components",
-            "keywords": [
-                "array",
-                "collection",
-                "config",
-                "support"
-            ],
-            "support": {
-                "issues": "https://github.com/yansongda/supports/issues",
-                "source": "https://github.com/yansongda/supports"
-            },
-            "time": "2025-01-08T08:55:20+00:00"
         }
     ],
     "packages-dev": [],

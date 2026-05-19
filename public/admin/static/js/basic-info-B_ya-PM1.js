@@ -1,0 +1,1 @@
+import{_ as i}from"./basic-info.vue_vue_type_script_setup_true_lang-cSgerA8F.js";import"./index-CZax9yX3.js";/* empty css              *//* empty css              *//* empty css              *//* empty css              *//* empty css              *//* empty css              */import"./useLayoutModel-naF5wOvR.js";import"./useDevicesSize-Bki2fbAo.js";export{i as default};

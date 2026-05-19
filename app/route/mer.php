@@ -57,12 +57,15 @@ Route::group('/merapi', function () {
             Route::get('', [MerchantPortalController::class, 'pluginConfigs'])->name('merchantApiPortalPluginConfigs')->setParams(['real_name' => '商户插件配置']);
             Route::get('/options', [MerchantPortalController::class, 'pluginConfigOptions'])->name('merchantApiPortalPluginConfigOptions')->setParams(['real_name' => '商户插件配置选项']);
             Route::post('', [MerchantPortalController::class, 'createPluginConfig'])->name('merchantApiPortalPluginConfigCreate')->setParams(['real_name' => '新增商户插件配置']);
+            Route::get('/{id}', [MerchantPortalController::class, 'pluginConfigDetail'])->name('merchantApiPortalPluginConfigDetail')->setParams(['real_name' => '商户插件配置详情']);
             Route::put('/{id}', [MerchantPortalController::class, 'updatePluginConfig'])->name('merchantApiPortalPluginConfigUpdate')->setParams(['real_name' => '修改商户插件配置']);
             Route::delete('/{id}', [MerchantPortalController::class, 'deletePluginConfig'])->name('merchantApiPortalPluginConfigDelete')->setParams(['real_name' => '删除商户插件配置']);
         });
 
         Route::get('/payment-plugins/{code}/schema', [MerchantPortalController::class, 'pluginSchema'])->name('merchantApiPortalPluginSchema')->setParams(['real_name' => '商户插件配置结构']);
         Route::get('/route-preview', [MerchantPortalController::class, 'routePreview'])->name('merchantApiPortalRoutePreview')->setParams(['real_name' => '路由解析']);
+        Route::get('/route-configs', [MerchantPortalController::class, 'routeConfig'])->name('merchantApiPortalRouteConfig')->setParams(['real_name' => '商户路由配置']);
+        Route::put('/route-configs', [MerchantPortalController::class, 'updateRouteConfig'])->name('merchantApiPortalRouteConfigUpdate')->setParams(['real_name' => '保存商户路由配置']);
 
         // 文件
         Route::group('/file-asset', function () {

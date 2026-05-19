@@ -22,6 +22,10 @@ class RefundReportService extends BaseService
      */
     public function formatRefundOrderRow(array $row): array
     {
+        $extJson = (array) ($row['ext_json'] ?? []);
+        $adminAction = (array) ($extJson['admin_action'] ?? []);
+        $source = (string) ($adminAction['type'] ?? '');
+
         $row['merchant_group_name'] = trim((string) ($row['merchant_group_name'] ?? '')) ?: '未分组';
         $row['merchant_name'] = trim((string) ($row['merchant_name'] ?? '')) ?: '未知商户';
         $row['merchant_short_name'] = trim((string) ($row['merchant_short_name'] ?? ''));
@@ -45,6 +49,10 @@ class RefundReportService extends BaseService
         $row['processing_at_text'] = $this->formatDateTime($row['processing_at'] ?? null, '—');
         $row['succeeded_at_text'] = $this->formatDateTime($row['succeeded_at'] ?? null, '—');
         $row['failed_at_text'] = $this->formatDateTime($row['failed_at'] ?? null, '—');
+        $row['refund_source'] = $source !== '' ? $source : 'merchant_api';
+        $row['refund_source_text'] = $this->refundSourceText($row['refund_source']);
+        $row['upstream_status_text'] = $this->upstreamStatusText($row);
+        $row['retry_history_text'] = $this->retryHistoryText($row, $extJson);
 
         return $row;
     }
@@ -110,5 +118,70 @@ class RefundReportService extends BaseService
         $row['created_at_text'] = $this->formatDateTime($row['created_at'] ?? null, '—');
 
         return $row;
+    }
+
+    /**
+     * 退款来源文案。
+     *
+     * @param string $source 来源码
+     * @return string 来源文案
+     */
+    private function refundSourceText(string $source): string
+    {
+        return [
+            'api_refund' => '后台 API 退款',
+            'manual_refund' => '后台手动退款',
+            'merchant_api' => '商户/API 发起',
+        ][$source] ?? $source;
+    }
+
+    /**
+     * 上游退款状态文案。
+     *
+     * @param array<string, mixed> $row 退款单行
+     * @return string 状态文案
+     */
+    private function upstreamStatusText(array $row): string
+    {
+        $source = (string) ($row['refund_source'] ?? '');
+        if ($source === 'manual_refund') {
+            return '后台手动登记，无上游退款请求';
+        }
+
+        if (trim((string) ($row['channel_refund_no'] ?? '')) !== '') {
+            return '上游已返回退款号';
+        }
+
+        if ((int) ($row['status'] ?? 0) === TradeConstant::REFUND_STATUS_PROCESSING) {
+            return trim((string) ($row['channel_request_no'] ?? '')) !== '' ? '已请求上游，等待结果' : '等待投递上游';
+        }
+
+        if ((int) ($row['status'] ?? 0) === TradeConstant::REFUND_STATUS_FAILED) {
+            return trim((string) ($row['last_error'] ?? '')) !== '' ? '上游或插件处理失败' : '退款失败';
+        }
+
+        if ((int) ($row['status'] ?? 0) === TradeConstant::REFUND_STATUS_SUCCESS) {
+            return '退款成功';
+        }
+
+        return '未请求上游';
+    }
+
+    /**
+     * 退款重试摘要。
+     *
+     * @param array<string, mixed> $row 退款单行
+     * @param array<string, mixed> $extJson 扩展信息
+     * @return string 重试摘要
+     */
+    private function retryHistoryText(array $row, array $extJson): string
+    {
+        $retryCount = (int) ($row['retry_count'] ?? 0);
+        $reason = trim((string) ($row['last_error'] ?? $extJson['retry_reason'] ?? $extJson['processing_reason'] ?? ''));
+        if ($retryCount <= 0) {
+            return $reason !== '' ? '未重试，最近原因：' . $reason : '暂无重试';
+        }
+
+        return '已重试 ' . $retryCount . ' 次' . ($reason !== '' ? '，最近原因：' . $reason : '');
     }
 }

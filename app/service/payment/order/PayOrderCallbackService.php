@@ -136,7 +136,8 @@ class PayOrderCallbackService extends BaseService
 
             return $this->handlePluginCallback($payNo, $request);
         } catch (Throwable $e) {
-            return $plugin->notifyFail();
+            // return $plugin->notifyFail();
+            throw $e;
         }
     }
 

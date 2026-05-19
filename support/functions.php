@@ -7,6 +7,9 @@ if (!function_exists('container_get')) {
     /**
      * 从容器中获取实例。
      *
+     * 用于无运行时构造参数、可复用的服务。当前项目使用 PHP-DI 容器，
+     * get 会按容器规则解析依赖并复用同一个实例。
+     *
      * @param string $name 类名或接口名
      * @return mixed
      */
@@ -19,6 +22,9 @@ if (!function_exists('container_get')) {
 if (!function_exists('container_make')) {
     /**
      * 从容器中创建新实例。
+     *
+     * 用于需要每次独立实例化的对象，例如携带运行时配置的支付插件。
+     * 业务服务默认优先使用 container_get。
      *
      * @param string $name 类名或接口名
      * @param array $parameters 构造参数

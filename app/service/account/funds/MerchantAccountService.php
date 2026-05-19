@@ -41,6 +41,31 @@ class MerchantAccountService extends BaseService
     }
 
     /**
+     * 导出商户账户 CSV。
+     *
+     * @param array $filters 筛选条件
+     * @return \support\Response CSV 响应
+     */
+    public function exportCsv(array $filters = [])
+    {
+        $rows = $this->queryService->paginate($filters, 1, 5000)->items();
+        $csvRows = [['商户号', '商户名称', '商户分组', '可用余额', '冻结余额', '创建时间', '更新时间']];
+        foreach ($rows as $row) {
+            $csvRows[] = [
+                (string) ($row->merchant_no ?? ''),
+                (string) ($row->merchant_name ?? ''),
+                (string) ($row->merchant_group_name ?? ''),
+                (string) ($row->available_balance_text ?? ''),
+                (string) ($row->frozen_balance_text ?? ''),
+                (string) ($row->created_at ?? ''),
+                (string) ($row->updated_at ?? ''),
+            ];
+        }
+
+        return $this->csvResponse($csvRows, 'merchant-accounts-' . date('YmdHis') . '.csv');
+    }
+
+    /**
      * 获取商户账户总览。
      *
      * @return array 总览数据
@@ -48,6 +73,17 @@ class MerchantAccountService extends BaseService
     public function summary(): array
     {
         return $this->queryService->summary();
+    }
+
+    /**
+     * 获取账户、流水和冻结明细完整对账视图。
+     *
+     * @param array $filters 筛选条件
+     * @return array 对账结果
+     */
+    public function reconciliation(array $filters = []): array
+    {
+        return $this->queryService->reconciliation($filters);
     }
 
     /**
@@ -348,5 +384,28 @@ class MerchantAccountService extends BaseService
     public function findById(int $id): ?MerchantAccount
     {
         return $this->queryService->findById($id);
+    }
+
+    /**
+     * 构建 CSV 下载响应。
+     *
+     * @param array<int, array<int, string>> $rows CSV 行
+     * @param string $filename 文件名
+     * @return \support\Response 响应
+     */
+    private function csvResponse(array $rows, string $filename)
+    {
+        $fp = fopen('php://temp', 'r+');
+        foreach ($rows as $row) {
+            fputcsv($fp, $row);
+        }
+        rewind($fp);
+        $body = "\xEF\xBB\xBF" . stream_get_contents($fp);
+        fclose($fp);
+
+        return response($body, 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="' . str_replace(['"', "\r", "\n", "\0"], '', $filename) . '"',
+        ]);
     }
 }

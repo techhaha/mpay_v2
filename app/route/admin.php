@@ -4,11 +4,13 @@ use Webman\Route;
 use app\common\middleware\Cors;
 use app\http\admin\controller\account\MerchantAccountController;
 use app\http\admin\controller\account\MerchantAccountLedgerController;
+use app\http\admin\controller\account\MerchantFundFreezeController;
 use app\http\admin\controller\file\FileRecordController;
 use app\http\admin\controller\merchant\MerchantApiCredentialController;
 use app\http\admin\controller\merchant\MerchantController;
 use app\http\admin\controller\merchant\MerchantGroupController;
 use app\http\admin\controller\merchant\MerchantPolicyController;
+use app\http\admin\controller\ops\AdminDashboardController;
 use app\http\admin\controller\ops\ChannelDailyStatController;
 use app\http\admin\controller\ops\ChannelNotifyLogController;
 use app\http\admin\controller\ops\MerchantNotifyTaskController;
@@ -23,8 +25,10 @@ use app\http\admin\controller\payment\PaymentTypeController;
 use app\http\admin\controller\payment\RouteController;
 use app\http\admin\controller\system\AdminUserController;
 use app\http\admin\controller\system\AuthController;
+use app\http\admin\controller\system\InstallController;
 use app\http\admin\controller\system\SystemConfigPageController;
 use app\http\admin\controller\system\SystemController;
+use app\http\admin\controller\system\SystemOpsController;
 use app\http\admin\controller\trade\PayOrderController;
 use app\http\admin\controller\trade\RefundOrderController;
 use app\http\admin\controller\trade\SettlementOrderController;
@@ -38,8 +42,57 @@ $serveAdminApp = static function () {
 
     return response(file_get_contents($indexPath), 200, [
         'Content-Type' => 'text/html; charset=utf-8',
+        'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+        'Pragma' => 'no-cache',
+        'Expires' => '0',
     ]);
 };
+
+$serveHomeApp = static function () {
+    $indexPath = public_path('index.html');
+    if (!is_file($indexPath)) {
+        return response('Home page not found', 404);
+    }
+
+    return response(file_get_contents($indexPath), 200, [
+        'Content-Type' => 'text/html; charset=utf-8',
+    ]);
+};
+
+$serveDocsApp = static function () {
+    $indexPath = public_path('docs/index.html');
+    if (!is_file($indexPath)) {
+        return response('Docs page not found', 404);
+    }
+
+    return response(file_get_contents($indexPath), 200, [
+        'Content-Type' => 'text/html; charset=utf-8',
+    ]);
+};
+
+$serveInstallApp = static function () {
+    $indexPath = public_path('install/index.html');
+    if (!is_file($indexPath)) {
+        return response('Install page not found', 404);
+    }
+
+    return response(file_get_contents($indexPath), 200, [
+        'Content-Type' => 'text/html; charset=utf-8',
+    ]);
+};
+
+// 互联网公开首页。
+Route::any('/', $serveHomeApp);
+Route::any('/home', $serveHomeApp);
+Route::any('/home/', $serveHomeApp);
+
+// 公开接入文档：展示 ePay V1/V2 双协议接口说明。
+Route::any('/docs', $serveDocsApp);
+Route::any('/docs/', $serveDocsApp);
+
+// 安装向导页面：独立静态页，不进入 Vue 构建链路。
+Route::any('/install', $serveInstallApp);
+Route::any('/install/', $serveInstallApp);
 
 // 管理后台项目：页面路由
 Route::any('/admin', $serveAdminApp);
@@ -51,12 +104,21 @@ Route::group('/adminapi', function () {
     // 公开接口
     Route::post('/login', [AuthController::class, 'login'])->name('adminApiAuthLogin')->setParams(['real_name' => '管理员登录']);
     Route::get('/system/public-config', [SystemController::class, 'publicConfig'])->name('adminApiSystemPublicConfig')->setParams(['real_name' => '管理后台公开配置']);
+    Route::group('/install', function () {
+        Route::get('/status', [InstallController::class, 'status'])->name('adminApiInstallStatus')->setParams(['real_name' => '安装状态']);
+        Route::get('/check-env', [InstallController::class, 'checkEnv'])->name('adminApiInstallCheckEnv')->setParams(['real_name' => '安装环境检测']);
+        Route::get('/secrets', [InstallController::class, 'secrets'])->name('adminApiInstallSecrets')->setParams(['real_name' => '生成安装密钥']);
+        Route::post('/test-db', [InstallController::class, 'testDb'])->name('adminApiInstallTestDb')->setParams(['real_name' => '安装数据库测试']);
+        Route::post('/test-redis', [InstallController::class, 'testRedis'])->name('adminApiInstallTestRedis')->setParams(['real_name' => '安装Redis测试']);
+        Route::post('/run', [InstallController::class, 'run'])->name('adminApiInstallRun')->setParams(['real_name' => '执行安装']);
+    });
 
     Route::group('', function () {
         // 会话与当前用户
         Route::post('/logout', [AuthController::class, 'logout'])->name('adminApiAuthLogout')->setParams(['real_name' => '退出登录']);
         Route::get('/user/profile', [AuthController::class, 'profile'])->name('adminApiUserProfile')->setParams(['real_name' => '当前用户资料']);
         Route::post('/user/change-password', [AuthController::class, 'changePassword'])->name('adminApiUserChangePassword')->setParams(['real_name' => '修改当前管理员密码']);
+        Route::get('/dashboard/overview', [AdminDashboardController::class, 'overview'])->name('adminApiDashboardOverview')->setParams(['real_name' => '运营首页总览']);
 
         // 商户档案
         Route::group('/merchants', function () {
@@ -134,6 +196,7 @@ Route::group('/adminapi', function () {
             Route::get('/options', [PaymentChannelController::class, 'options'])->name('adminApiPaymentChannelsOptions')->setParams(['real_name' => '支付通道选项']);
             Route::get('/select-options', [PaymentChannelController::class, 'selectOptions'])->name('adminApiPaymentChannelsSelectOptions')->setParams(['real_name' => '支付通道选择项']);
             Route::get('/route-options', [PaymentChannelController::class, 'routeOptions'])->name('adminApiPaymentChannelsRouteOptions')->setParams(['real_name' => '支付通道路由选项']);
+            Route::get('/test-records', [PaymentChannelController::class, 'testRecords'])->name('adminApiPaymentChannelsTestRecords')->setParams(['real_name' => '支付通道测试记录']);
             Route::post('', [PaymentChannelController::class, 'store'])->name('adminApiPaymentChannelsStore')->setParams(['real_name' => '新增支付通道']);
             Route::post('/{id}/test', [PaymentChannelController::class, 'test'])->name('adminApiPaymentChannelsTest')->setParams(['real_name' => '测试支付通道']);
             Route::get('/{id}', [PaymentChannelController::class, 'show'])->name('adminApiPaymentChannelsShow')->setParams(['real_name' => '支付通道详情']);
@@ -167,6 +230,7 @@ Route::group('/adminapi', function () {
         });
 
         Route::get('/routes/resolve', [RouteController::class, 'resolve'])->name('adminApiRoutesResolve')->setParams(['real_name' => '解析路由']);
+        Route::get('/routes/change-records', [RouteController::class, 'changeRecords'])->name('adminApiRoutesChangeRecords')->setParams(['real_name' => '路由变更记录']);
 
         // 文件存储
         Route::group('/file-asset', function () {
@@ -233,12 +297,22 @@ Route::group('/adminapi', function () {
         Route::group('/merchant-accounts', function () {
             Route::get('', [MerchantAccountController::class, 'index'])->name('adminApiMerchantAccountsIndex')->setParams(['real_name' => '资金账户列表']);
             Route::get('/summary', [MerchantAccountController::class, 'summary'])->name('adminApiMerchantAccountsSummary')->setParams(['real_name' => '资金账户总览']);
+            Route::get('/reconciliation', [MerchantAccountController::class, 'reconciliation'])->name('adminApiMerchantAccountsReconciliation')->setParams(['real_name' => '资金账户完整对账']);
+            Route::get('/export', [MerchantAccountController::class, 'export'])->name('adminApiMerchantAccountsExport')->setParams(['real_name' => '资金账户导出']);
             Route::get('/{id}', [MerchantAccountController::class, 'show'])->name('adminApiMerchantAccountsShow')->setParams(['real_name' => '资金账户详情']);
         });
 
         Route::group('/account-ledgers', function () {
             Route::get('', [MerchantAccountLedgerController::class, 'index'])->name('adminApiAccountLedgersIndex')->setParams(['real_name' => '资金流水列表']);
+            Route::get('/export', [MerchantAccountLedgerController::class, 'export'])->name('adminApiAccountLedgersExport')->setParams(['real_name' => '资金流水导出']);
             Route::get('/{id}', [MerchantAccountLedgerController::class, 'show'])->name('adminApiAccountLedgersShow')->setParams(['real_name' => '资金流水详情']);
+        });
+
+        Route::group('/fund-freezes', function () {
+            Route::get('', [MerchantFundFreezeController::class, 'index'])->name('adminApiFundFreezesIndex')->setParams(['real_name' => '资金冻结明细列表']);
+            Route::get('/reconciliation', [MerchantFundFreezeController::class, 'reconciliation'])->name('adminApiFundFreezesReconciliation')->setParams(['real_name' => '资金冻结对账摘要']);
+            Route::get('/export', [MerchantFundFreezeController::class, 'export'])->name('adminApiFundFreezesExport')->setParams(['real_name' => '资金冻结明细导出']);
+            Route::get('/{id}', [MerchantFundFreezeController::class, 'show'])->name('adminApiFundFreezesShow')->setParams(['real_name' => '资金冻结明细详情']);
         });
 
         // 系统管理
@@ -253,6 +327,10 @@ Route::group('/adminapi', function () {
         Route::group('/system', function () {
             Route::get('/menu-tree', [SystemController::class, 'menuTree'])->name('adminApiMenuTree')->setParams(['real_name' => '菜单树']);
             Route::get('/dict-items', [SystemController::class, 'dictItems'])->name('adminApiDictItems')->setParams(['real_name' => '字典项']);
+            // 运行监控只暴露总览和白名单运维动作，命令安全校验统一放在服务层。
+            Route::get('/ops/overview', [SystemOpsController::class, 'overview'])->name('adminApiSystemOpsOverview')->setParams(['real_name' => '运行监控总览']);
+            Route::post('/ops/reload', [SystemOpsController::class, 'reload'])->name('adminApiSystemOpsReload')->setParams(['real_name' => '平滑重载服务']);
+            Route::post('/ops/restart', [SystemOpsController::class, 'restart'])->name('adminApiSystemOpsRestart')->setParams(['real_name' => '重启服务']);
         });
 
         Route::group('/system-config-pages', function () {

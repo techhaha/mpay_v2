@@ -6,6 +6,7 @@ use app\common\base\BaseController;
 use app\http\api\validation\EpayV2Validator;
 use app\service\payment\epay\EpayV2ProtocolService;
 use app\service\payment\order\PayOrderService;
+use support\limiter\Limiter;
 use support\Request;
 use support\Response;
 
@@ -35,7 +36,13 @@ class EpayV2Controller extends BaseController
      */
     public function submit(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'submit');
+        $payload = $request->all();
+        Limiter::check('epay-v2-pay-submit-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-pay-submit-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'submit');
+
         return $this->epayV2ProtocolService->submit($payload, $request);
     }
 
@@ -47,7 +54,13 @@ class EpayV2Controller extends BaseController
      */
     public function create(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'create');
+        $payload = $request->all();
+        Limiter::check('epay-v2-pay-create-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-pay-create-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'create');
+
         return json($this->epayV2ProtocolService->create($payload, $request));
     }
 
@@ -59,7 +72,13 @@ class EpayV2Controller extends BaseController
      */
     public function query(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'query');
+        $payload = $request->all();
+        Limiter::check('epay-v2-pay-query-ip:' . $request->getRealIp(), 300, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-pay-query-merchant:' . (int) $payload['pid'], 180, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'query');
+
         return json($this->epayV2ProtocolService->query($payload));
     }
 
@@ -71,7 +90,13 @@ class EpayV2Controller extends BaseController
      */
     public function refund(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'refund');
+        $payload = $request->all();
+        Limiter::check('epay-v2-pay-refund-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-pay-refund-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'refund');
+
         return json($this->epayV2ProtocolService->refund($payload));
     }
 
@@ -83,7 +108,13 @@ class EpayV2Controller extends BaseController
      */
     public function refundQuery(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'refund_query');
+        $payload = $request->all();
+        Limiter::check('epay-v2-pay-refund-query-ip:' . $request->getRealIp(), 300, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-pay-refund-query-merchant:' . (int) $payload['pid'], 180, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'refund_query');
+
         return json($this->epayV2ProtocolService->refundQuery($payload));
     }
 
@@ -95,7 +126,13 @@ class EpayV2Controller extends BaseController
      */
     public function close(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'close');
+        $payload = $request->all();
+        Limiter::check('epay-v2-pay-close-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-pay-close-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'close');
+
         return json($this->epayV2ProtocolService->close($payload));
     }
 
@@ -107,7 +144,13 @@ class EpayV2Controller extends BaseController
      */
     public function merchantInfo(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'merchant_info');
+        $payload = $request->all();
+        Limiter::check('epay-v2-merchant-info-ip:' . $request->getRealIp(), 300, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-merchant-info-merchant:' . (int) $payload['pid'], 180, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'merchant_info');
+
         return json($this->epayV2ProtocolService->merchantInfo($payload));
     }
 
@@ -119,7 +162,13 @@ class EpayV2Controller extends BaseController
      */
     public function merchantOrders(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'merchant_orders');
+        $payload = $request->all();
+        Limiter::check('epay-v2-merchant-orders-ip:' . $request->getRealIp(), 300, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-merchant-orders-merchant:' . (int) $payload['pid'], 180, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'merchant_orders');
+
         return json($this->epayV2ProtocolService->merchantOrders($payload));
     }
 
@@ -131,7 +180,13 @@ class EpayV2Controller extends BaseController
      */
     public function transferSubmit(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'transfer_submit');
+        $payload = $request->all();
+        Limiter::check('epay-v2-transfer-submit-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-transfer-submit-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'transfer_submit');
+
         return json($this->epayV2ProtocolService->transferSubmit($payload));
     }
 
@@ -143,7 +198,13 @@ class EpayV2Controller extends BaseController
      */
     public function transferQuery(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'transfer_query');
+        $payload = $request->all();
+        Limiter::check('epay-v2-transfer-query-ip:' . $request->getRealIp(), 300, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-transfer-query-merchant:' . (int) $payload['pid'], 180, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'transfer_query');
+
         return json($this->epayV2ProtocolService->transferQuery($payload));
     }
 
@@ -155,7 +216,13 @@ class EpayV2Controller extends BaseController
      */
     public function transferBalance(Request $request): Response
     {
-        $payload = $this->validated($request->all(), EpayV2Validator::class, 'transfer_balance');
+        $payload = $request->all();
+        Limiter::check('epay-v2-transfer-balance-ip:' . $request->getRealIp(), 300, 60, '接口请求过于频繁，请稍后再试');
+        if ((int) ($payload['pid'] ?? 0) > 0) {
+            Limiter::check('epay-v2-transfer-balance-merchant:' . (int) $payload['pid'], 180, 60, '商户接口请求过于频繁，请稍后再试');
+        }
+        $payload = $this->validated($payload, EpayV2Validator::class, 'transfer_balance');
+
         return json($this->epayV2ProtocolService->transferBalance($payload));
     }
 
@@ -182,4 +249,5 @@ class EpayV2Controller extends BaseController
     {
         return $this->payOrderService->handleChannelNotify($chanId, $request);
     }
+
 }

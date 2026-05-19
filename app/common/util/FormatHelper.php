@@ -172,6 +172,32 @@ class FormatHelper
     }
 
     /**
+     * 递归脱敏数组中的敏感字段。
+     *
+     * @param mixed $value 原始值
+     * @return mixed 脱敏后的值
+     */
+    public static function maskSensitiveData(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+
+        $masked = [];
+        foreach ($value as $key => $item) {
+            $keyText = strtolower((string) $key);
+            if (self::isSensitiveKey($keyText)) {
+                $masked[$key] = is_scalar($item) ? self::maskCredentialValue((string) $item) : '****';
+                continue;
+            }
+
+            $masked[$key] = is_array($item) ? self::maskSensitiveData($item) : $item;
+        }
+
+        return $masked;
+    }
+
+    /**
      * 将模型或对象归一化成数组。
      *
      * @param mixed $value 模型、对象或数组
@@ -234,5 +260,40 @@ class FormatHelper
 
         return (string) $value;
     }
-}
 
+    /**
+     * 判断字段名是否属于敏感字段。
+     *
+     * @param string $key 字段名
+     * @return bool 是否敏感
+     */
+    private static function isSensitiveKey(string $key): bool
+    {
+        if ($key === '') {
+            return false;
+        }
+
+        foreach ([
+            'password',
+            'passwd',
+            'secret',
+            'token',
+            'access_key',
+            'api_key',
+            'app_key',
+            'appkey',
+            'private_key',
+            'merchant_private_key',
+            'platform_private_key',
+            'cert_password',
+            'aes_key',
+            'mch_key',
+        ] as $pattern) {
+            if ($key === $pattern || str_contains($key, $pattern)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}

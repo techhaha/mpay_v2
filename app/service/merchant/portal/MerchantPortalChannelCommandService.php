@@ -63,6 +63,8 @@ class MerchantPortalChannelCommandService extends BaseService
      */
     public function pluginConfigs(array $filters, int $merchantId, int $page, int $pageSize): array
     {
+        $merchant = $this->supportService->merchantSummary($merchantId);
+
         $query = $this->paymentPluginConfRepository->query()
             ->from('ma_payment_plugin_conf as c')
             ->leftJoin('ma_payment_plugin as p', 'c.plugin_code', '=', 'p.code')
@@ -99,6 +101,8 @@ class MerchantPortalChannelCommandService extends BaseService
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
 
         $paginator->getCollection()->transform(function ($row) {
+            $row->config_masked = $this->maskSensitiveData((array) ($row->config ?? []));
+            $row->config = $row->config_masked;
             $row->settlement_cycle_type_text = $this->textFromMap((int) $row->settlement_cycle_type, [
                 0 => 'D0',
                 1 => 'D1',
@@ -108,18 +112,38 @@ class MerchantPortalChannelCommandService extends BaseService
             ]);
             $row->created_at_text = $this->formatDateTime($row->created_at ?? null);
             $row->updated_at_text = $this->formatDateTime($row->updated_at ?? null);
+            $row->is_writable = true;
+            $row->source_type = 'merchant';
+            $row->source_text = '自建配置';
 
             return $row;
         });
 
         return [
-            'merchant' => $this->supportService->merchantSummary($merchantId),
+            'merchant' => $merchant,
             'plugins' => $this->createMeta()['plugins'],
             'list' => $paginator->items(),
             'total' => $paginator->total(),
             'page' => $paginator->currentPage(),
             'size' => $paginator->perPage(),
         ];
+    }
+
+    /**
+     * 查询商户插件配置详情。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $id 配置ID
+     * @return PaymentPluginConf|null 配置
+     */
+    public function pluginConfigDetail(int $merchantId, int $id): ?PaymentPluginConf
+    {
+        $model = $this->paymentPluginConfRepository->findByMerchantAndId($merchantId, $id);
+        if ($model) {
+            $model->config_masked = $this->maskSensitiveData((array) ($model->config ?? []));
+        }
+
+        return $model;
     }
 
     /**
@@ -247,6 +271,7 @@ class MerchantPortalChannelCommandService extends BaseService
         if (!$model) {
             return null;
         }
+        $this->assertSelfChannel($model);
 
         $payload = $this->normalizeChannelPayload($merchantId, $data);
         $this->assertChannelWritable($merchantId, $payload);
@@ -271,6 +296,7 @@ class MerchantPortalChannelCommandService extends BaseService
         if (!$model) {
             return false;
         }
+        $this->assertSelfChannel($model);
 
         return (bool) $model->delete();
     }
@@ -372,6 +398,13 @@ class MerchantPortalChannelCommandService extends BaseService
         }
 
         return $plugin;
+    }
+
+    private function assertSelfChannel(PaymentChannel $channel): void
+    {
+        if ((int) $channel->channel_mode !== RouteConstant::CHANNEL_MODE_SELF) {
+            throw new PaymentException('系统分配通道不允许商户端修改', 40249);
+        }
     }
 
     private function pluginOption(PaymentPlugin $plugin): array

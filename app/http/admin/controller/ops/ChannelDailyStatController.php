@@ -35,14 +35,19 @@ class ChannelDailyStatController extends BaseController
     public function index(Request $request): Response
     {
         $data = $this->validated($request->all(), ChannelDailyStatValidator::class, 'index');
-
-        return $this->page(
-            $this->channelDailyStatService->paginate(
-                $data,
-                (int) ($data['page'] ?? 1),
-                (int) ($data['page_size'] ?? 10)
-            )
+        $paginator = $this->channelDailyStatService->paginate(
+            $data,
+            (int) ($data['page'] ?? 1),
+            (int) ($data['page_size'] ?? 10)
         );
+
+        return $this->success([
+            'list' => $paginator->items(),
+            'total' => $paginator->total(),
+            'page' => $paginator->currentPage(),
+            'size' => $paginator->perPage(),
+            'summary' => $this->channelDailyStatService->summary($data),
+        ]);
     }
 
     /**

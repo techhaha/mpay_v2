@@ -3,8 +3,10 @@
 namespace app\service\account\funds;
 
 use app\common\base\BaseService;
+use app\common\constant\FundFreezeConstant;
 use app\model\merchant\MerchantAccount;
 use app\repository\account\balance\MerchantAccountRepository;
+use app\repository\account\freeze\MerchantFundFreezeRepository;
 use app\repository\account\ledger\MerchantAccountLedgerRepository;
 
 /**
@@ -26,7 +28,8 @@ class MerchantAccountQueryService extends BaseService
      */
     public function __construct(
         protected MerchantAccountRepository $accountRepository,
-        protected MerchantAccountLedgerRepository $ledgerRepository
+        protected MerchantAccountLedgerRepository $ledgerRepository,
+        protected MerchantFundFreezeRepository $fundFreezeRepository
     ) {
     }
 
@@ -117,6 +120,132 @@ class MerchantAccountQueryService extends BaseService
     }
 
     /**
+     * 获取账户、流水和冻结明细完整对账视图。
+     *
+     * @param array $filters 筛选条件
+     * @return array<string, mixed> 对账结果
+     */
+    public function reconciliation(array $filters = []): array
+    {
+        $query = $this->accountRepository->query()
+            ->from('ma_merchant_account as a')
+            ->leftJoin('ma_merchant as m', 'a.merchant_id', '=', 'm.id')
+            ->leftJoin('ma_merchant_group as g', 'm.group_id', '=', 'g.id')
+            ->leftJoinSub(
+                $this->ledgerRepository->query()
+                    ->from('ma_merchant_account_ledger as latest')
+                    ->joinSub(
+                        $this->ledgerRepository->query()
+                            ->from('ma_merchant_account_ledger')
+                            ->selectRaw('merchant_id, MAX(id) AS latest_id')
+                            ->groupBy('merchant_id'),
+                        'lm',
+                        'latest.id',
+                        '=',
+                        'lm.latest_id'
+                    )
+                    ->select([
+                        'latest.merchant_id',
+                        'latest.available_after',
+                        'latest.frozen_after',
+                        'latest.ledger_no',
+                        'latest.created_at',
+                    ]),
+                'll',
+                'a.merchant_id',
+                '=',
+                'll.merchant_id'
+            )
+            ->leftJoinSub(
+                $this->fundFreezeRepository->query()
+                    ->from('ma_merchant_fund_freeze')
+                    ->selectRaw('merchant_id, COUNT(*) AS active_freeze_count, COALESCE(SUM(remaining_amount), 0) AS active_freeze_amount')
+                    ->where('status', FundFreezeConstant::STATUS_ACTIVE)
+                    ->where('remaining_amount', '>', 0)
+                    ->groupBy('merchant_id'),
+                'ff',
+                'a.merchant_id',
+                '=',
+                'ff.merchant_id'
+            )
+            ->select([
+                'a.merchant_id',
+                'a.available_balance',
+                'a.frozen_balance',
+            ])
+            ->selectRaw('COALESCE(m.merchant_no, \'\') AS merchant_no')
+            ->selectRaw('COALESCE(m.merchant_name, \'\') AS merchant_name')
+            ->selectRaw('COALESCE(g.group_name, \'\') AS merchant_group_name')
+            ->selectRaw('COALESCE(ll.available_after, 0) AS ledger_available_balance')
+            ->selectRaw('COALESCE(ll.frozen_after, 0) AS ledger_frozen_balance')
+            ->selectRaw('COALESCE(ll.ledger_no, \'\') AS latest_ledger_no')
+            ->selectRaw('ll.created_at AS latest_ledger_at')
+            ->selectRaw('COALESCE(ff.active_freeze_count, 0) AS active_freeze_count')
+            ->selectRaw('COALESCE(ff.active_freeze_amount, 0) AS active_freeze_amount');
+
+        $merchantId = (string) ($filters['merchant_id'] ?? '');
+        if ($merchantId !== '') {
+            $query->where('a.merchant_id', (int) $merchantId);
+        }
+
+        $rows = $query
+            ->orderByDesc('a.id')
+            ->get()
+            ->map(function ($row) {
+                $row->available_ledger_diff = (int) $row->available_balance - (int) $row->ledger_available_balance;
+                $row->frozen_ledger_diff = (int) $row->frozen_balance - (int) $row->ledger_frozen_balance;
+                $row->frozen_freeze_diff = (int) $row->frozen_balance - (int) $row->active_freeze_amount;
+                $row->is_balanced = $row->available_ledger_diff === 0
+                    && $row->frozen_ledger_diff === 0
+                    && $row->frozen_freeze_diff === 0;
+
+                $row->available_balance_text = $this->formatAmount((int) $row->available_balance);
+                $row->frozen_balance_text = $this->formatAmount((int) $row->frozen_balance);
+                $row->ledger_available_balance_text = $this->formatAmount((int) $row->ledger_available_balance);
+                $row->ledger_frozen_balance_text = $this->formatAmount((int) $row->ledger_frozen_balance);
+                $row->active_freeze_amount_text = $this->formatAmount((int) $row->active_freeze_amount);
+                $row->available_ledger_diff_text = $this->formatSignedAmount((int) $row->available_ledger_diff);
+                $row->frozen_ledger_diff_text = $this->formatSignedAmount((int) $row->frozen_ledger_diff);
+                $row->frozen_freeze_diff_text = $this->formatSignedAmount((int) $row->frozen_freeze_diff);
+                $row->latest_ledger_at_text = $this->formatDateTime($row->latest_ledger_at ?? null, '—');
+
+                return $row;
+            })
+            ->values()
+            ->all();
+
+        $mismatchRows = array_values(array_filter($rows, static fn ($row) => !$row->is_balanced));
+        $accountAvailableAmount = array_sum(array_map(static fn ($row) => (int) $row->available_balance, $rows));
+        $accountFrozenAmount = array_sum(array_map(static fn ($row) => (int) $row->frozen_balance, $rows));
+        $ledgerAvailableAmount = array_sum(array_map(static fn ($row) => (int) $row->ledger_available_balance, $rows));
+        $ledgerFrozenAmount = array_sum(array_map(static fn ($row) => (int) $row->ledger_frozen_balance, $rows));
+        $activeFreezeAmount = array_sum(array_map(static fn ($row) => (int) $row->active_freeze_amount, $rows));
+
+        return [
+            'account_count' => count($rows),
+            'mismatch_count' => count($mismatchRows),
+            'is_balanced' => count($mismatchRows) === 0,
+            'account_available_amount' => $accountAvailableAmount,
+            'account_available_amount_text' => $this->formatAmount($accountAvailableAmount),
+            'ledger_available_amount' => $ledgerAvailableAmount,
+            'ledger_available_amount_text' => $this->formatAmount($ledgerAvailableAmount),
+            'available_diff_amount' => $accountAvailableAmount - $ledgerAvailableAmount,
+            'available_diff_amount_text' => $this->formatSignedAmount($accountAvailableAmount - $ledgerAvailableAmount),
+            'account_frozen_amount' => $accountFrozenAmount,
+            'account_frozen_amount_text' => $this->formatAmount($accountFrozenAmount),
+            'ledger_frozen_amount' => $ledgerFrozenAmount,
+            'ledger_frozen_amount_text' => $this->formatAmount($ledgerFrozenAmount),
+            'active_freeze_amount' => $activeFreezeAmount,
+            'active_freeze_amount_text' => $this->formatAmount($activeFreezeAmount),
+            'frozen_ledger_diff_amount' => $accountFrozenAmount - $ledgerFrozenAmount,
+            'frozen_ledger_diff_amount_text' => $this->formatSignedAmount($accountFrozenAmount - $ledgerFrozenAmount),
+            'frozen_freeze_diff_amount' => $accountFrozenAmount - $activeFreezeAmount,
+            'frozen_freeze_diff_amount_text' => $this->formatSignedAmount($accountFrozenAmount - $activeFreezeAmount),
+            'mismatch_rows' => array_slice($mismatchRows, 0, 20),
+        ];
+    }
+
+    /**
      * 获取商户余额快照。
      *
      * 用于后台展示和接口返回，不修改任何账户数据。
@@ -180,7 +309,21 @@ class MerchantAccountQueryService extends BaseService
         return $row;
     }
 
-}
+    /**
+     * 格式化带符号金额。
+     *
+     * @param int $amount 金额，单位分
+     * @return string 带符号金额
+     */
+    private function formatSignedAmount(int $amount): string
+    {
+        if ($amount === 0) {
+            return '0.00';
+        }
 
+        return ($amount > 0 ? '+' : '-') . $this->formatAmount(abs($amount));
+    }
+
+}
 
 

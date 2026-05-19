@@ -6,6 +6,7 @@ use app\common\base\BaseService;
 use app\common\constant\AuthConstant;
 use app\common\constant\CommonConstant;
 use app\common\constant\EpayProtocolConstant;
+use app\common\constant\PaymentIdentityConstant;
 use app\common\constant\TradeConstant;
 use app\common\util\FormatHelper;
 use app\exception\ResourceNotFoundException;
@@ -107,6 +108,10 @@ class EpayV2ProtocolService extends BaseService
                 EpayProtocolConstant::SUBMIT_TYPE_PAGE
             );
 
+            if (($attempt['status'] ?? '') === PaymentIdentityConstant::STATUS_REQUIRED) {
+                return redirect((string) $attempt[PaymentIdentityConstant::FIELD_IDENTITY_URL]);
+            }
+
             return redirect((string) $attempt['payment_page_url']);
         } catch (Throwable $e) {
             $data = method_exists($e, 'getData') ? $e->getData() : [];
@@ -137,6 +142,10 @@ class EpayV2ProtocolService extends BaseService
                 $request,
                 EpayProtocolConstant::SUBMIT_TYPE_API
             );
+            if (($attempt['status'] ?? '') === PaymentIdentityConstant::STATUS_REQUIRED) {
+                return $this->signResponse($this->buildIdentityCreateResponse($attempt));
+            }
+
             /** @var PayOrder $payOrder */
             $payOrder = $attempt['pay_order'];
             $paymentResult = (array) ($attempt['payment_result'] ?? []);
@@ -516,9 +525,14 @@ class EpayV2ProtocolService extends BaseService
             'device' => (string) $orderFields['device'],
             'channel_id' => (int) ($payload['channel_id'] ?? 0),
             'ext_json' => (array) $orderFields['ext_json'],
+            'identity_flow' => true,
         ];
 
         $attempt = $this->payOrderService->preparePayAttempt($normalized);
+        if (($attempt['status'] ?? '') === PaymentIdentityConstant::STATUS_REQUIRED) {
+            return $attempt;
+        }
+
         $payOrder = $attempt['pay_order'];
 
         return [
@@ -588,6 +602,28 @@ class EpayV2ProtocolService extends BaseService
             'page' => $payParams['params'] ?? array_diff_key($payParams, ['_page' => true, 'raw' => true]),
             default => array_diff_key($payParams, ['raw' => true]),
         };
+    }
+
+    /**
+     * 构建需要用户授权时的 V2 创建订单响应。
+     *
+     * @param array<string, mixed> $attempt 身份流程结果
+     * @return array<string, mixed> V2 响应
+     */
+    private function buildIdentityCreateResponse(array $attempt): array
+    {
+        $identityUrl = (string) ($attempt[PaymentIdentityConstant::FIELD_IDENTITY_URL] ?? '');
+
+        return [
+            'code' => self::SUCCESS_CODE,
+            'msg' => PaymentIdentityConstant::STATUS_REQUIRED,
+            'trade_no' => '',
+            'pay_type' => 'identity',
+            'pay_info' => $identityUrl,
+            PaymentIdentityConstant::FIELD_REQUIRED => 1,
+            PaymentIdentityConstant::FIELD_IDENTITY_URL => $identityUrl,
+            PaymentIdentityConstant::FIELD_RESUME_TOKEN => (string) ($attempt[PaymentIdentityConstant::FIELD_RESUME_TOKEN] ?? ''),
+        ];
     }
 
     /**

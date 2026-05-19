@@ -89,6 +89,11 @@ class MerchantPortalService extends BaseService
         return $this->channelService->pluginConfigs($filters, $merchantId, $page, $pageSize);
     }
 
+    public function pluginConfigDetail(int $merchantId, int $id)
+    {
+        return $this->channelService->pluginConfigDetail($merchantId, $id);
+    }
+
     public function createPluginConfig(int $merchantId, array $data)
     {
         return $this->channelService->createPluginConfig($merchantId, $data);
@@ -141,6 +146,29 @@ class MerchantPortalService extends BaseService
     public function routePreview(int $merchantId, int $payTypeId, int $payAmount, string $statDate = ''): array
     {
         return $this->channelService->routePreview($merchantId, $payTypeId, $payAmount, $statDate);
+    }
+
+    /**
+     * 查询商户路由偏好配置。
+     *
+     * @param int $merchantId 商户ID
+     * @return array 配置数据
+     */
+    public function routeConfig(int $merchantId): array
+    {
+        return $this->channelService->routeConfig($merchantId);
+    }
+
+    /**
+     * 保存商户路由偏好配置。
+     *
+     * @param int $merchantId 商户ID
+     * @param array $payload 配置数据
+     * @return array 保存后的配置
+     */
+    public function saveRouteConfig(int $merchantId, array $payload): array
+    {
+        return $this->channelService->saveRouteConfig($merchantId, $payload);
     }
 
     /**

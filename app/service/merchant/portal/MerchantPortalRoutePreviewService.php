@@ -60,6 +60,7 @@ class MerchantPortalRoutePreviewService extends BaseService
             'merchant_group_name' => (string) ($merchant['merchant_group_name'] ?? ''),
             'bind' => null,
             'poll_group' => null,
+            'route_preference' => null,
             'selected_channel' => null,
             'candidates' => [],
         ];
@@ -79,7 +80,7 @@ class MerchantPortalRoutePreviewService extends BaseService
                 (int) $merchant['merchant_group_id'],
                 $payTypeId,
                 $payAmount,
-                ['stat_date' => $statDate]
+                ['stat_date' => $statDate, 'merchant_id' => $merchantId]
             );
 
             $response['available'] = true;
@@ -87,6 +88,7 @@ class MerchantPortalRoutePreviewService extends BaseService
             // 把模型和仓库返回的对象统一整理成前端可直接展示的数组结构。
             $response['bind'] = $this->normalizeBind($resolved['bind'] ?? null);
             $response['poll_group'] = $this->normalizePollGroup($resolved['poll_group'] ?? null);
+            $response['route_preference'] = $this->normalizeRoutePreference($resolved['route_preference'] ?? null);
             $response['selected_channel'] = $this->normalizePreviewCandidate($resolved['selected_channel'] ?? null);
 
             $response['candidates'] = array_values(array_map(
@@ -99,6 +101,29 @@ class MerchantPortalRoutePreviewService extends BaseService
         }
 
         return $response;
+    }
+
+    /**
+     * 标准化商户路由偏好。
+     *
+     * @param array|null $routePreference 路由偏好
+     * @return array|null 标准化结果
+     */
+    private function normalizeRoutePreference(?array $routePreference): ?array
+    {
+        if ($routePreference === null) {
+            return null;
+        }
+
+        $routeMode = $routePreference['route_mode'];
+
+        return [
+            'configured' => (bool) ($routePreference['configured'] ?? false),
+            'use_platform_channels' => (bool) ($routePreference['use_platform_channels'] ?? true),
+            'route_mode' => $routeMode,
+            'route_mode_text' => $routeMode === null ? '继承平台轮询组' : (string) (RouteConstant::routeModeMap()[(int) $routeMode] ?? '未知'),
+            'default_channel_id' => (int) ($routePreference['default_channel_id'] ?? 0),
+        ];
     }
 
     /**
@@ -190,6 +215,8 @@ class MerchantPortalRoutePreviewService extends BaseService
             'status' => $status,
             'status_text' => (string) (CommonConstant::statusMap()[$status] ?? '未知'),
             'plugin_code' => (string) ($channel['plugin_code'] ?? ''),
+            'source_type' => (string) ($pollGroupChannel['source_type'] ?? 'group_assigned'),
+            'source_text' => (string) (($pollGroupChannel['source_type'] ?? '') === 'merchant_self' ? '自建通道' : '系统分配'),
             'sort_no' => (int) ($pollGroupChannel['sort_no'] ?? 0),
             'weight' => (int) ($pollGroupChannel['weight'] ?? 0),
             'is_default' => (int) ($pollGroupChannel['is_default'] ?? 0),
@@ -202,8 +229,6 @@ class MerchantPortalRoutePreviewService extends BaseService
             'avg_latency_text' => $this->formatLatency((int) ($dailyStat['avg_latency_ms'] ?? 0)),
             'split_rate_bp' => (int) ($channel['split_rate_bp'] ?? 0),
             'split_rate_text' => $this->formatRate((int) ($channel['split_rate_bp'] ?? 0)),
-            'cost_rate_bp' => (int) ($channel['cost_rate_bp'] ?? 0),
-            'cost_rate_text' => $this->formatRate((int) ($channel['cost_rate_bp'] ?? 0)),
             'daily_limit_amount' => (int) ($channel['daily_limit_amount'] ?? 0),
             'daily_limit_amount_text' => $this->formatAmountOrUnlimited((int) ($channel['daily_limit_amount'] ?? 0)),
             'daily_limit_count' => (int) ($channel['daily_limit_count'] ?? 0),

@@ -57,6 +57,28 @@ class MerchantAccountController extends BaseController
     }
 
     /**
+     * 账户、流水和冻结明细完整对账视图。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function reconciliation(Request $request): Response
+    {
+        return $this->success($this->merchantAccountService->reconciliation($request->all()));
+    }
+
+    /**
+     * 导出商户账户 CSV。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function export(Request $request): Response
+    {
+        return $this->merchantAccountService->exportCsv($request->all());
+    }
+
+    /**
      * 查询商户账户详情。
      *
      * @param Request $request 请求对象

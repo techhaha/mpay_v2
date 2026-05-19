@@ -10,6 +10,7 @@ use app\exception\ValidationException;
 use app\model\payment\BizOrder;
 use app\model\payment\PayOrder;
 use app\model\payment\RefundOrder;
+use app\repository\ops\log\PayOrderOperationLogRepository;
 use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\service\payment\runtime\MerchantNotifyDispatcherService;
@@ -36,6 +37,7 @@ class PayOrderAdminActionService extends BaseService
      * @param PayOrderLifecycleService $payOrderLifecycleService 支付单生命周期服务
      * @param PayOrderRiskControlService $riskControlService 支付单风控服务
      * @param PayOrderActionResolverService $actionResolverService 支付单操作项服务
+     * @param PayOrderOperationLogRepository $operationLogRepository 支付单后台操作日志仓库
      * @return void
      */
     public function __construct(
@@ -47,7 +49,8 @@ class PayOrderAdminActionService extends BaseService
         protected MerchantNotifyDispatcherService $merchantNotifyDispatcherService,
         protected PayOrderLifecycleService $payOrderLifecycleService,
         protected PayOrderRiskControlService $riskControlService,
-        protected PayOrderActionResolverService $actionResolverService
+        protected PayOrderActionResolverService $actionResolverService,
+        protected PayOrderOperationLogRepository $operationLogRepository
     ) {
     }
 
@@ -104,12 +107,15 @@ class PayOrderAdminActionService extends BaseService
             throw new ValidationException('订单未配置 notify_url，无法重新通知');
         }
 
-        return [
+        $result = [
             'pay_no' => (string) $payOrder->pay_no,
             'notify_no' => (string) $task->notify_no,
             'queued' => $this->paymentQueueService->sendMerchantNotify((string) $task->notify_no),
             'status' => (int) $task->status,
         ];
+        $this->recordOperation($payOrder, 'renotify', $adminId, trim((string) ($input['reason'] ?? '')), 'success', '已创建商户通知任务', $result);
+
+        return $result;
     }
 
     /**
@@ -133,7 +139,10 @@ class PayOrderAdminActionService extends BaseService
             throw new BusinessStateException('订单缺少通道信息，无法主动查询', ['pay_no' => $payNo]);
         }
 
-        return $this->runtimeMaintenanceService->syncPayOrderByQuery($payNo, 'admin_manual_query');
+        $result = $this->runtimeMaintenanceService->syncPayOrderByQuery($payNo, 'admin_manual_query');
+        $this->recordOperation($payOrder, 'active_query', $adminId, trim((string) ($input['reason'] ?? '')), (string) ($result['status'] ?? 'unknown'), '主动查单完成', $result);
+
+        return $result;
     }
 
     /**
@@ -158,12 +167,15 @@ class PayOrderAdminActionService extends BaseService
             'reason' => trim((string) ($input['reason'] ?? '')) ?: '后台 API 全额退款',
         ]), $adminId, 'api_refund');
 
-        return [
+        $result = [
             'pay_no' => $payNo,
             'refund_no' => (string) $refundOrder->refund_no,
             'queued' => $this->paymentQueueService->sendRefundDispatch((string) $refundOrder->refund_no),
             'status' => (int) $refundOrder->status,
         ];
+        $this->recordOperation($payOrder, 'api_refund', $adminId, trim((string) ($input['reason'] ?? '后台 API 全额退款')), 'success', 'API 退款单已创建', $result);
+
+        return $result;
     }
 
     /**
@@ -192,11 +204,14 @@ class PayOrderAdminActionService extends BaseService
             ],
         ]);
 
-        return [
+        $result = [
             'pay_no' => $payNo,
             'refund_no' => (string) $refundOrder->refund_no,
             'status' => (int) $refundOrder->status,
         ];
+        $this->recordOperation($payOrder, 'manual_refund', $adminId, trim((string) ($input['reason'] ?? '')), 'success', '手动退款已登记成功', $result);
+
+        return $result;
     }
 
     /**
@@ -224,11 +239,14 @@ class PayOrderAdminActionService extends BaseService
 
         $payOrder = $this->payOrderLifecycleService->markPaySuccess($payNo, $successInput);
 
-        return [
+        $result = [
             'pay_no' => (string) $payOrder->pay_no,
             'status' => (int) $payOrder->status,
             'paid_at' => $this->formatDateTime($payOrder->paid_at, ''),
         ];
+        $this->recordOperation($payOrder, 'manual_success', $adminId, $reason, 'success', '支付单已手动补单为成功', $result);
+
+        return $result;
     }
 
     /**
@@ -244,7 +262,10 @@ class PayOrderAdminActionService extends BaseService
         $payOrder = $this->riskControlService->freeze($payNo, $input, $adminId);
         $bizOrder = $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
 
-        return $this->actionResolverService->resolveForPayOrder($payOrder, $bizOrder);
+        $result = $this->actionResolverService->resolveForPayOrder($payOrder, $bizOrder);
+        $this->recordOperation($payOrder, 'freeze', $adminId, trim((string) ($input['reason'] ?? '')), 'success', '订单已冻结', $result);
+
+        return $result;
     }
 
     /**
@@ -260,7 +281,10 @@ class PayOrderAdminActionService extends BaseService
         $payOrder = $this->riskControlService->unfreeze($payNo, $input, $adminId);
         $bizOrder = $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
 
-        return $this->actionResolverService->resolveForPayOrder($payOrder, $bizOrder);
+        $result = $this->actionResolverService->resolveForPayOrder($payOrder, $bizOrder);
+        $this->recordOperation($payOrder, 'unfreeze', $adminId, trim((string) ($input['reason'] ?? '')), 'success', '订单已解冻', $result);
+
+        return $result;
     }
 
     /**
@@ -366,6 +390,33 @@ class PayOrderAdminActionService extends BaseService
         }
 
         return $reason;
+    }
+
+    /**
+     * 记录后台支付单操作日志。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @param string $action 操作码
+     * @param int $adminId 管理员ID
+     * @param string $reason 操作原因
+     * @param string $resultStatus 结果状态
+     * @param string $resultMessage 结果说明
+     * @param array<string, mixed> $payload 结果摘要
+     * @return void
+     */
+    private function recordOperation(PayOrder $payOrder, string $action, int $adminId, string $reason, string $resultStatus, string $resultMessage, array $payload = []): void
+    {
+        $this->operationLogRepository->create([
+            'pay_no' => (string) $payOrder->pay_no,
+            'biz_no' => (string) $payOrder->biz_no,
+            'action' => $action,
+            'admin_id' => $adminId,
+            'reason' => $reason,
+            'result_status' => $resultStatus,
+            'result_message' => $resultMessage,
+            'result_payload' => $payload,
+            'created_at' => $this->now(),
+        ]);
     }
 
 }

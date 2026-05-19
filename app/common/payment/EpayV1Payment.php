@@ -73,13 +73,12 @@ class EpayV1Payment extends BasePayment implements PaymentInterface, PayPluginIn
                 ],
             ],
             [
-                'type' => 'input',
+                'type' => 'password',
                 'field' => 'api_key',
                 'title' => '商户密钥',
                 'value' => '',
                 'props' => [
                     'placeholder' => 'MD5格式密钥',
-                    'rows' => 4,
                 ],
                 'validate' => [
                     ['required' => true, 'message' => 'MD5密钥不能为空'],

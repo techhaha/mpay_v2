@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>MPAY 安装向导</title>
+  <link rel="icon" href="/assets/brand/mpay-mark.svg" type="image/svg+xml">
+  <link rel="shortcut icon" href="/assets/brand/mpay-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/install/assets/install.css?v=2026051801">
+</head>
+<body>
+  <main class="install-shell">
+    <aside class="install-aside">
+      <div class="brand">
+        <img class="brand-logo" src="/assets/brand/mpay-logo.svg" alt="MPAY">
+        <div class="brand-caption">
+          <strong>系统安装向导</strong>
+          <span>Initialization Wizard</span>
+        </div>
+      </div>
+      <ol class="steps" id="steps">
+        <li class="active" data-step="1">协议说明</li>
+        <li data-step="2">环境检测</li>
+        <li data-step="3">基础配置</li>
+        <li data-step="4">执行安装</li>
+        <li data-step="5">安装完成</li>
+      </ol>
+    </aside>
+
+    <section class="install-main">
+      <header class="page-head">
+        <div>
+          <h1 id="stepTitle">协议说明</h1>
+          <p id="stepDesc">请阅读并确认安装、支付业务和数据安全相关说明。</p>
+        </div>
+        <span class="status-pill" id="installStatus">检测中</span>
+      </header>
+
+      <section class="panel active" data-panel="0">
+        <div class="notice-box agreement-scroll">
+          <h2>MPAY 安装使用协议与免责声明</h2>
+          <p><strong>重要提示：</strong>请在安装、部署、复制、修改、分发或使用本程序前，完整阅读并充分理解本协议。你点击确认或继续安装，即视为你已阅读、理解并同意接受本协议全部条款；如你不同意本协议任何内容，请立即停止安装和使用。</p>
+
+          <h3>一、定义与适用范围</h3>
+          <p>1. MPAY 是面向支付聚合、商户收单、通道路由、订单管理、退款转账、通知回调、商户后台和管理后台等场景的软件工具。本程序仅提供技术实现能力，不当然代表你具备开展支付、收单、清结算、代收代付、分账或其他金融相关业务的资质。</p>
+          <p>2. 本协议适用于你对本程序及其相关代码、文档、页面、接口、插件、配置文件、数据库结构、品牌资源和衍生修改版本的安装、部署、运行、测试、二次开发、商业化运营和对外提供服务等全部行为。</p>
+
+          <h3>二、版权、知识产权与权益说明</h3>
+          <p>1. 除依法或另行书面约定归属于第三方的内容外，本程序的名称、代码、架构设计、文档、界面、图标、Logo、数据库设计、插件规范及相关素材的著作权、商标权、商业标识权益和其他知识产权，归相应权利人所有。</p>
+          <p>2. 未经权利人明确授权，你不得删除、遮挡、篡改本程序中的版权声明、授权说明、品牌标识、来源标注或其他权益声明；不得以虚假方式声称本程序或其衍生版本由你独立原创或获得官方背书。</p>
+          <p>3. 如本程序包含第三方开源组件、SDK、字体、图标或其他资源，你应同时遵守其各自许可协议、版权声明和使用限制。因违反第三方许可或侵犯他人知识产权产生的责任，由你自行承担。</p>
+
+          <h3>三、授权限制与合规义务</h3>
+          <p>1. 你应确保安装、部署、运营和使用本程序的主体具备相应民事行为能力、经营资格和业务资质，并遵守所在地适用的法律法规、监管规则、支付机构规则、银行及清算机构规则、反洗钱、反恐怖融资、反欺诈、实名制、税务、网络安全、数据安全和个人信息保护等要求。</p>
+          <p>2. 你不得将本程序用于任何违法违规、侵犯他人合法权益、规避监管或扰乱金融秩序的用途，包括但不限于洗钱、跑分、赌博、诈骗、套现、虚假交易、非法集资、传销、色情、毒品、黑灰产交易、侵犯知识产权、盗刷盗扣、绕过支付机构风控、伪造商户资料、非法收集个人信息，或为前述行为提供技术便利。</p>
+          <p>3. 如你使用本程序为第三方商户、代理商、门店、平台用户或下游系统提供支付相关能力，应自行建立并持续执行商户准入、身份核验、业务真实性审核、风险监控、交易限额、异常交易处置、投诉处理、资金对账、账务留痕和监管配合机制。</p>
+
+          <h3>四、支付业务与资金风险声明</h3>
+          <p>1. 本程序不提供支付牌照、资金托管、通道担保、交易担保、清结算担保、收益承诺或任何形式的合规背书。商户接入、通道配置、费率设置、路由策略、人工补单、退款转账、回调通知、资金清算等操作产生的全部业务风险由部署方、运营方和实际业务方自行承担。</p>
+          <p>2. 你应遵守第三方支付机构、银行、清算机构、云服务商、短信服务商、对象存储服务商及其他外部服务提供方的服务协议和接口规范。因违反上游平台规则、接口滥用、违规收款、违规分账、违规代付、超范围经营、账户出租出借或通道风控处罚造成的封号、冻结、拒付、罚款或损失，与本程序作者或分发方无关。</p>
+          <p>3. 因商户审核不严、交易背景不真实、资金来源不明、下游用户滥用、通道异常、网络故障、第三方接口变更、配置错误或人工操作失误导致的资金损失、账务差异、投诉纠纷、监管调查或法律责任，由你自行处理并承担。</p>
+
+          <h3>五、数据安全、密钥安全与系统运维</h3>
+          <p>1. 涉及个人信息、交易数据、商户资料、证书文件、付款凭证、回调报文和日志记录时，你应依法履行告知同意、最小必要、访问控制、加密存储、备份保护、日志留存、数据删除和跨境传输评估等义务。不得利用本程序非法采集、买卖、泄露、篡改或滥用任何个人信息、交易数据或商业秘密。</p>
+          <p>2. 你应妥善保管数据库账号、Redis 密码、管理员密码、JWT 密钥、平台 RSA 私钥、商户 API 凭证和第三方支付通道密钥。任何因弱密码、密钥泄露、服务器入侵、权限配置不当、日志暴露、备份泄露或二次开发缺陷造成的损失，均由系统部署和运营方负责。</p>
+          <p>3. 生产环境应使用 HTTPS、独立强随机密钥、最小权限数据库账号、受控服务器目录权限、可靠备份、监控告警和应急预案。安装程序会写入环境配置、创建初始管理员、初始化数据库、生成平台密钥并锁定安装入口；安装完成后请及时重启服务并核对系统配置。</p>
+
+          <h3>六、二次开发、插件扩展与对外服务</h3>
+          <p>1. 如你对本程序进行二次开发、插件扩展、接口开放、商户分发或商业化运营，应自行完成安全审计、合规评估、接口验签校验、数据脱敏、日志留存和应急预案，并确保修改后的代码、插件和部署环境不存在后门、越权、绕签、弱加密、敏感信息明文输出等安全问题。</p>
+          <p>2. 你基于本程序开发、组合、分发或运营的任何衍生系统、插件、接口、服务或商业模式，均不得侵犯原权利人或第三方合法权益，不得暗示获得官方授权、认证、担保或背书，除非你已取得明确书面授权。</p>
+
+          <h3>七、免责声明与责任限制</h3>
+          <p>1. 本程序按现状提供。除法律另有强制规定或另行书面承诺外，作者或分发方不对本程序的适销性、特定用途适用性、持续可用性、无错误性、无安全漏洞、与第三方服务兼容性或业务收益作任何明示或默示保证。</p>
+          <p>2. 在法律允许的最大范围内，作者或分发方不对因安装、部署、使用、无法使用、配置错误、二次开发、第三方接口异常、违法违规用途、数据丢失、密钥泄露、资金损失、业务中断或监管处罚导致的任何直接、间接、附带、特殊、惩罚性或后果性损失承担责任。</p>
+          <p>3. 一旦发现本程序被用于违法违规用途、异常资金活动、重大安全事件、监管调查或第三方投诉，你应立即停止相关服务、保全日志证据、冻结可疑配置、通知相关方并配合依法处置。本程序作者或分发方有权拒绝为违法违规用途提供支持。</p>
+
+          <h3>八、协议接受与继续安装</h3>
+          <p>你确认已充分阅读、理解并同意本协议全部内容，确认你将合法、合规、审慎地部署和使用本程序，并自行承担因部署、运营、配置、二次开发、商业化使用及下游用户行为产生的全部责任。</p>
+        </div>
+        <label class="check-line">
+          <input type="checkbox" id="agree">
+          <span>我已阅读并同意上述协议、免责声明和安全责任说明</span>
+        </label>
+      </section>
+
+      <section class="panel" data-panel="1">
+        <div class="toolbar">
+          <button class="btn" id="checkEnvBtn" type="button">重新检测</button>
+        </div>
+        <div class="check-list" id="envList"></div>
+      </section>
+
+      <section class="panel" data-panel="2">
+        <form id="installForm" class="form-grid">
+          <div class="form-section">
+            <h2>站点信息</h2>
+            <label>平台名称<input name="site_name" value="MPAY 支付中台" required></label>
+            <label>站点 URL<input name="site_url" placeholder="https://pay.example.com" required></label>
+          </div>
+          <div class="form-section">
+            <h2>数据库</h2>
+            <div class="two-col">
+              <label>主机<input name="db_host" value="127.0.0.1" required></label>
+              <label>端口<input name="db_port" value="3306" required></label>
+            </div>
+            <label>数据库名<input name="db_database" value="mpay" required></label>
+            <div class="two-col">
+              <label>用户名<input name="db_username" value="root" required></label>
+              <label>密码<input name="db_password" type="password"></label>
+            </div>
+            <button class="btn ghost" id="testDbBtn" type="button">测试数据库</button>
+          </div>
+          <div class="form-section">
+            <h2>Redis</h2>
+            <div class="two-col">
+              <label>主机<input name="redis_host" value="127.0.0.1" required></label>
+              <label>端口<input name="redis_port" value="6379" required></label>
+            </div>
+            <div class="two-col">
+              <label>密码<input name="redis_password" type="password"></label>
+              <label>Redis DB<input name="redis_database" value="0" required></label>
+            </div>
+            <label>Queue DB<input name="queue_database" value="1" required></label>
+            <button class="btn ghost" id="testRedisBtn" type="button">测试 Redis</button>
+          </div>
+          <div class="form-section">
+            <h2>初始管理员</h2>
+            <div class="two-col">
+              <label>用户名<input name="admin_username" value="admin" required></label>
+              <label>姓名<input name="admin_real_name" value="超级管理员"></label>
+            </div>
+            <label>密码<input name="admin_password" type="password" minlength="8" required></label>
+            <label>确认密码<input name="admin_password_confirm" type="password" minlength="8" required></label>
+          </div>
+          <input name="auth_jwt_secret" type="hidden">
+          <input name="auth_admin_jwt_secret" type="hidden">
+          <input name="auth_merchant_jwt_secret" type="hidden">
+        </form>
+      </section>
+
+      <section class="panel" data-panel="3">
+        <div class="progress">
+          <div id="progressBar"></div>
+        </div>
+        <pre class="install-log" id="installLog">等待开始安装...</pre>
+      </section>
+
+      <section class="panel" data-panel="4">
+        <div class="result-box">
+          <div class="result-icon">✓</div>
+          <h2>安装完成</h2>
+          <p>系统已完成初始化，安装入口已锁定。请重启 Webman 服务，让新的 .env 配置生效后再正式使用后台。</p>
+          <a class="btn primary" href="/admin">进入管理后台</a>
+        </div>
+      </section>
+
+      <footer class="actions">
+        <button class="btn ghost" id="prevBtn" type="button">上一步</button>
+        <button class="btn primary" id="nextBtn" type="button">下一步</button>
+      </footer>
+    </section>
+  </main>
+  <div class="toast-mask" id="toastMask">
+    <div class="toast" id="toast"></div>
+  </div>
+  <script src="/install/assets/install.js?v=2026051801"></script>
+</body>
+</html>

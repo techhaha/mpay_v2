@@ -5,6 +5,7 @@ namespace app\http\mer\controller\system;
 use app\common\base\BaseController;
 use app\http\mer\validation\AuthValidator;
 use app\service\merchant\auth\MerchantAuthService;
+use support\limiter\Limiter;
 use support\Request;
 use support\Response;
 
@@ -34,7 +35,11 @@ class AuthController extends BaseController
      */
     public function login(Request $request): Response
     {
+        $ip = $request->getRealIp();
+        Limiter::check('merchant-login-ip:' . $ip, 10, 60, '登录请求过于频繁，请稍后再试');
+
         $data = $this->validated($request->all(), AuthValidator::class, 'login');
+        Limiter::check('merchant-login-account:' . md5($ip . ':' . strtolower((string) $data['merchant_no'])), 5, 300, '商户登录尝试过于频繁，请稍后再试');
 
         return $this->success($this->merchantAuthService->authenticateCredentials(
             (string) $data['merchant_no'],

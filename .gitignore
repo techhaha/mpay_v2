@@ -1,9 +1,3 @@
-/.cursor
-/.idea
-/.vscode
-/tests/tmp
-/tests/.phpunit.result.cache
-/vendor
+.env
 /runtime
-*.log
-/.env
+/vendor

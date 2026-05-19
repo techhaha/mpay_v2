@@ -167,6 +167,22 @@ class MerchantPortalController extends BaseController
         return $this->success($this->merchantPortalService->pluginConfigs($payload, $merchantId, $page, $pageSize));
     }
 
+    public function pluginConfigDetail(Request $request, string $id): Response
+    {
+        $merchantId = $this->currentMerchantId($request);
+        if ($merchantId <= 0) {
+            return $this->fail('未获取到当前商户信息', 401);
+        }
+
+        $data = $this->validated(['id' => (int) $id], MerchantPortalValidator::class, 'pluginConfigShow');
+        $config = $this->merchantPortalService->pluginConfigDetail($merchantId, (int) $data['id']);
+        if (!$config) {
+            return $this->fail('插件配置不存在', 404);
+        }
+
+        return $this->success($config);
+    }
+
     public function createPluginConfig(Request $request): Response
     {
         $merchantId = $this->currentMerchantId($request);
@@ -256,6 +272,40 @@ class MerchantPortalController extends BaseController
         $statDate = trim((string) ($payload['stat_date'] ?? ''));
 
         return $this->success($this->merchantPortalService->routePreview($merchantId, $payTypeId, $payAmount, $statDate));
+    }
+
+    /**
+     * 当前商户路由偏好配置。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function routeConfig(Request $request): Response
+    {
+        $merchantId = $this->currentMerchantId($request);
+        if ($merchantId <= 0) {
+            return $this->fail('未获取到当前商户信息', 401);
+        }
+
+        return $this->success($this->merchantPortalService->routeConfig($merchantId));
+    }
+
+    /**
+     * 保存当前商户路由偏好配置。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function updateRouteConfig(Request $request): Response
+    {
+        $merchantId = $this->currentMerchantId($request);
+        if ($merchantId <= 0) {
+            return $this->fail('未获取到当前商户信息', 401);
+        }
+
+        $payload = $this->validated($this->payload($request), MerchantPortalValidator::class, 'routeConfigUpdate');
+
+        return $this->success($this->merchantPortalService->saveRouteConfig($merchantId, $payload));
     }
 
     /**

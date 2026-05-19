@@ -30,6 +30,7 @@ use support\Response;
  *
  * 金额口径：
  * - 变动后的金额只用于通知反查订单，不作为业务单统计金额。
+ * - 备注模式下，备注码只负责定位候选支付单，通知金额也必须等于订单原始金额。
  * - 通知确认后会把支付单金额恢复到原始金额，并把实际付款金额写入 ext_json。
  */
 class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayPluginInterface, ChannelNotifyInterface
@@ -97,13 +98,12 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
                 ],
             ],
             [
-                'type' => 'input',
+                'type' => 'password',
                 'field' => 'sms_forwarder_secret',
                 'title' => 'SmsForwarder密钥',
                 'value' => '',
                 'props' => [
                     'placeholder' => '用于校验 SmsForwarder sign',
-                    'type' => 'password',
                 ],
                 'validate' => [
                     ['required' => true, 'message' => 'SmsForwarder密钥不能为空'],
@@ -262,12 +262,10 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
     public function notify(Request $request): array
     {
         $payload = $this->verifiedSmsForwarderPayload($request);
-        $content = (string) $payload['content'];
+        $content = $this->notificationTextFromPayload($payload);
         $tradeNo = $this->channelTradeNo($payload);
         $payNo = $this->locatePayNo($payload);
-        $notifiedAmount = $this->receiptMatchMode() === 'amount'
-            ? $this->amountFromContent($content)
-            : null;
+        $notifiedAmount = $this->amountFromPayload($payload);
 
         $this->restoreOriginalPayAmount($payNo, $payload, $tradeNo, $notifiedAmount);
 
@@ -287,7 +285,7 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
      */
     public function notifySuccess(): string|Response
     {
-        return 'success';
+        return '200';
     }
 
     /**
@@ -295,7 +293,7 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
      */
     public function notifyFail(): string|Response
     {
-        return 'fail';
+        return '400';
     }
 
     /**
@@ -622,6 +620,13 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
             throw new PaymentException('SmsForwarder 通知内容为空', 40200);
         }
 
+        $from = trim((string) ($payload['from'] ?? ''));
+        if ($from !== '' && $from !== 'com.eg.android.AlipayGphone') {
+            throw new PaymentException('非支付宝通知来源', 40200, ['from' => $from]);
+        }
+
+        $this->alipayNotificationFromPayload($payload);
+
         return $payload;
     }
 
@@ -646,7 +651,7 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
      */
     private function locatePayNoByAmount(array $payload): string
     {
-        $amount = $this->amountFromContent((string) $payload['content']);
+        $amount = $this->amountFromPayload($payload);
         $orders = $this->payOrderRepository->listMutableReceiptOrdersByAmount(
             [(int) $this->getConfig('channel_id')],
             $amount,
@@ -679,37 +684,86 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
     }
 
     /**
-     * 备注模式下通过缓存中的 4 位备注码定位支付单。
+     * 备注模式下通过缓存中的 4 位备注码和通知金额定位支付单。
      *
      * @param array<string, mixed> $payload 通知载荷
      * @return string 支付单号
      */
     private function locatePayNoByRemark(array $payload): string
     {
-        $remarkCode = $this->remarkFromContent((string) $payload['content']);
+        $content = $this->notificationTextFromPayload($payload);
+        $remarkCode = $this->remarkFromContent($content);
+        $amount = $this->amountFromPayload($payload);
         $payNo = (string) Cache::get($this->remarkCacheKey($remarkCode), '');
         if ($payNo === '') {
             throw new PaymentException('付款备注已失效或不存在', 40200, ['remark_code' => $remarkCode]);
+        }
+
+        $payOrder = $this->payOrderRepository->findByPayNo($payNo, ['pay_no', 'pay_amount', 'ext_json']);
+        if (!$payOrder || $amount !== $this->originalAmount($payOrder)) {
+            throw new PaymentException('付款备注匹配的支付单金额不一致', 40200, [
+                'pay_no' => $payNo,
+                'remark_code' => $remarkCode,
+                'amount' => FormatHelper::amount($amount),
+            ]);
         }
 
         return $payNo;
     }
 
     /**
-     * 从通知文本中提取收款金额。
+     * 从 SmsForwarder content JSON 中提取支付宝通知标题和正文。
      *
-     * @param string $content 通知内容
-     * @return int 金额，单位分
+     * @param array<string, mixed> $payload 通知载荷
+     * @return array{title:string,msg:string}
      */
-    private function amountFromContent(string $content): int
+    private function alipayNotificationFromPayload(array $payload): array
     {
-        if (preg_match('/(?:收款|到账|收钱|付款|支付|转账)[^\d]{0,20}(\d+(?:\.\d{1,2})?)\s*元/u', $content, $matches) !== 1
-            && preg_match('/(?<!\d)(\d+(?:\.\d{1,2})?)\s*元/u', $content, $matches) !== 1
-        ) {
-            throw new PaymentException('通知内容未识别到收款金额', 40200);
+        $content = json_decode((string) ($payload['content'] ?? ''), true);
+        if (!is_array($content)) {
+            throw new PaymentException('SmsForwarder 通知内容格式不合法', 40200);
         }
 
-        return $this->moneyToCents((string) $matches[1]);
+        $title = trim((string) ($content['title'] ?? ''));
+        $msg = trim((string) ($content['msg'] ?? ''));
+        if ($title === '') {
+            throw new PaymentException('SmsForwarder 通知标题为空', 40200);
+        }
+        if ($title === '收款通知' && $msg === '') {
+            throw new PaymentException('SmsForwarder 通知正文为空', 40200);
+        }
+
+        return ['title' => $title, 'msg' => $msg];
+    }
+
+    /**
+     * 获取用于展示和备注提取的支付宝通知文本。
+     *
+     * @param array<string, mixed> $payload 通知载荷
+     * @return string 通知文本
+     */
+    private function notificationTextFromPayload(array $payload): string
+    {
+        ['title' => $title, 'msg' => $msg] = $this->alipayNotificationFromPayload($payload);
+
+        \support\Log::info('notificationTextFromPayload', ['title' => $title, 'msg' => $msg]);
+        return $title === '收款通知' ? $msg : $title;
+    }
+
+    /**
+     * 从支付宝通知载荷中提取收款金额。
+     *
+     * @param array<string, mixed> $payload 通知载荷
+     * @return int 金额，单位分
+     */
+    private function amountFromPayload(array $payload): int
+    {
+        $content = $this->notificationTextFromPayload($payload);
+        if (preg_match('/(?:到账|收款|成功收款)\s*(\d+(?:\.\d{1,2})?)\s*元/u', $content, $matches) === 1) {
+            return $this->moneyToCents((string) $matches[1]);
+        }
+
+        throw new PaymentException('通知内容未识别到收款金额', 40200, ['content' => mb_strcut($content, 0, 180, 'UTF-8')]);
     }
 
     /**

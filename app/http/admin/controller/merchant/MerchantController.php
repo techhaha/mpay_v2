@@ -132,7 +132,7 @@ class MerchantController extends BaseController
     /**
      * 签发商户后台临时登录令牌。
      *
-     * 该入口只在管理后台登录态下可用，用于客服或运营从商户工作台直接进入当前商户后台。
+     * 该入口只在管理后台登录态下可用，用于从商户工作台直接进入当前商户后台。
      *
      * @param Request $request 请求对象
      * @param string $id 商户ID

@@ -99,14 +99,7 @@ class StorageConfigService extends BaseService
      */
     public function allowedExtensions(): array
     {
-        $raw = trim((string) sys_config(FileConstant::CONFIG_ALLOWED_EXTENSIONS, implode(',', FileConstant::defaultAllowedExtensions())));
-        if ($raw === '') {
-            return FileConstant::defaultAllowedExtensions();
-        }
-
-        $extensions = array_filter(array_map(static fn (string $value): string => strtolower(trim($value)), explode(',', $raw)));
-
-        return array_values(array_unique($extensions));
+        return FileConstant::defaultAllowedExtensions();
     }
 
     /**
@@ -303,7 +296,6 @@ class StorageConfigService extends BaseService
         };
     }
 }
-
 
 
 

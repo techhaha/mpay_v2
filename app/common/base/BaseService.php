@@ -159,6 +159,17 @@ class BaseService
     }
 
     /**
+     * 递归脱敏数组中的敏感字段。
+     *
+     * @param mixed $value 原始值
+     * @return mixed 脱敏后的值
+     */
+    protected function maskSensitiveData(mixed $value): mixed
+    {
+        return FormatHelper::maskSensitiveData($value);
+    }
+
+    /**
      * 将模型或对象归一化成数组。
      *
      * @param mixed $value 模型实例、数组或可序列化对象

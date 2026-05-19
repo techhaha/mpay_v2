@@ -102,11 +102,13 @@ class MerchantPolicyService extends BaseService
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
 
         $paginator->getCollection()->transform(function ($row) {
-            $row->has_policy = $row->id ? 1 : 0;
-            $row->has_policy_text = $row->id ? '已配置' : '未配置';
-            $row->settlement_cycle_text = $this->settlementCycleText((int) ($row->settlement_cycle_override ?? 0));
-            $row->auto_payout_text = (int) ($row->auto_payout ?? 0) === 1 ? '是' : '否';
-            $row->min_settlement_amount_text = $this->formatAmount((int) ($row->min_settlement_amount ?? 0));
+            $hasPolicy = (bool) $row->id;
+            $row->has_policy = $hasPolicy ? 1 : 0;
+            $row->has_policy_text = $hasPolicy ? '已配置' : '未配置';
+            $row->policy_source_text = $hasPolicy ? '商户单独策略' : '继承默认策略';
+            $row->settlement_cycle_text = $hasPolicy ? $this->settlementCycleText((int) ($row->settlement_cycle_override ?? 0)) : '继承默认';
+            $row->auto_payout_text = $hasPolicy ? ((int) ($row->auto_payout ?? 0) === 1 ? '是' : '否') : '继承默认';
+            $row->min_settlement_amount_text = $hasPolicy ? $this->formatAmount((int) ($row->min_settlement_amount ?? 0)) : '继承默认';
             $row->has_retry_policy = !empty((array) ($row->retry_policy_json ?? []));
             $row->has_route_policy = !empty((array) ($row->route_policy_json ?? []));
             $row->has_fee_rule_override = !empty((array) ($row->fee_rule_override_json ?? []));

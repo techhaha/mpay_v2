@@ -41,9 +41,10 @@
     "workerman/crontab": "^1.0",
     "php-di/php-di": "7.0",
     "firebase/php-jwt": "7.0",
-    "yansongda/pay": "~3.0",
     "alibabacloud/oss-v2": "^0.4.0",
-    "qcloud/cos-sdk-v5": "^2.6"
+    "qcloud/cos-sdk-v5": "^2.6",
+    "webman/redis-queue": "^2.1",
+    "webman/limiter": "^2.2"
   },
   "suggest": {
     "ext-event": "For better performance. "

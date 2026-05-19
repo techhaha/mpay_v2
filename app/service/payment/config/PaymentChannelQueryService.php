@@ -4,6 +4,7 @@ namespace app\service\payment\config;
 
 use app\common\base\BaseService;
 use app\common\constant\CommonConstant;
+use app\common\constant\RouteConstant;
 use app\model\payment\PaymentChannel;
 use app\repository\payment\config\PaymentChannelRepository;
 
@@ -158,6 +159,8 @@ class PaymentChannelQueryService extends BaseService
             ->from('ma_payment_channel as c')
             ->leftJoin('ma_payment_type as t', 'c.pay_type_id', '=', 't.id')
             ->where('c.status', CommonConstant::STATUS_ENABLED)
+            ->where('c.merchant_id', 0)
+            ->where('c.channel_mode', RouteConstant::CHANNEL_MODE_COLLECT)
             ->select([
                 'c.id',
                 'c.name',
@@ -282,5 +285,4 @@ class PaymentChannelQueryService extends BaseService
         return array_values(array_filter(array_map(static fn ($id) => (int) $id, $ids), static fn ($id) => $id > 0));
     }
 }
-
 

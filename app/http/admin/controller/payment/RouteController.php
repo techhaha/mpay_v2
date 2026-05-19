@@ -4,6 +4,7 @@ namespace app\http\admin\controller\payment;
 
 use app\common\base\BaseController;
 use app\http\admin\validation\RouteResolveValidator;
+use app\service\payment\runtime\PaymentRouteChangeService;
 use app\service\payment\runtime\PaymentRouteService;
 use support\Request;
 use support\Response;
@@ -24,7 +25,8 @@ class RouteController extends BaseController
      * @return void
      */
     public function __construct(
-        protected PaymentRouteService $paymentRouteService
+        protected PaymentRouteService $paymentRouteService,
+        protected PaymentRouteChangeService $paymentRouteChangeService
     ) {
     }
 
@@ -37,12 +39,27 @@ class RouteController extends BaseController
     public function resolve(Request $request): Response
     {
         $data = $this->validated($request->all(), RouteResolveValidator::class, 'resolve');
+        $data['_preview'] = true;
 
         return $this->success($this->paymentRouteService->resolveByMerchantGroup(
             (int) $data['merchant_group_id'],
             (int) $data['pay_type_id'],
             (int) $data['pay_amount'],
             $data
+        ));
+    }
+
+    /**
+     * 查询最近路由配置变更。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function changeRecords(Request $request): Response
+    {
+        return $this->success($this->paymentRouteChangeService->recent(
+            $request->all(),
+            (int) $request->input('limit', 20)
         ));
     }
 }

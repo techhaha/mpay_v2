@@ -12,6 +12,7 @@ use app\exception\ValidationException;
 use Throwable;
 use app\model\payment\PaymentChannel;
 use app\model\payment\PaymentPollGroup;
+use app\repository\merchant\base\MerchantPolicyRepository;
 use app\repository\ops\stat\ChannelDailyStatRepository;
 use app\repository\payment\config\PaymentChannelRepository;
 use app\repository\payment\config\PaymentPollGroupBindRepository;
@@ -33,6 +34,7 @@ use support\Redis;
  * @property ChannelDailyStatRepository $channelDailyStatRepository 渠道日统计仓库
  * @property PaymentPluginRepository $paymentPluginRepository 支付插件仓库
  * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+ * @property MerchantPolicyRepository $merchantPolicyRepository 商户策略仓库
  */
 class PaymentRouteResolverService extends BaseService
 {
@@ -46,6 +48,7 @@ class PaymentRouteResolverService extends BaseService
      * @param ChannelDailyStatRepository $channelDailyStatRepository 渠道日统计仓库
      * @param PaymentPluginRepository $paymentPluginRepository 支付插件仓库
      * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+     * @param MerchantPolicyRepository $merchantPolicyRepository 商户策略仓库
      * @return void
      */
     public function __construct(
@@ -55,7 +58,8 @@ class PaymentRouteResolverService extends BaseService
         protected PaymentChannelRepository $channelRepository,
         protected ChannelDailyStatRepository $channelDailyStatRepository,
         protected PaymentPluginRepository $paymentPluginRepository,
-        protected PaymentTypeRepository $paymentTypeRepository
+        protected PaymentTypeRepository $paymentTypeRepository,
+        protected MerchantPolicyRepository $merchantPolicyRepository
     ) {
     }
 
@@ -83,10 +87,23 @@ class PaymentRouteResolverService extends BaseService
         // 先锁定商户分组与支付方式的绑定，再进入正式通道选路。
         $bind = $this->bindRepository->findActiveByMerchantGroupAndPayType($merchantGroupId, $payTypeId);
         if (!$bind) {
-            throw new ResourceNotFoundException('路由不存在', [
-                'merchant_group_id' => $merchantGroupId,
-                'pay_type_id' => $payTypeId,
-            ]);
+            if ((int) ($context['merchant_id'] ?? 0) <= 0) {
+                throw new ResourceNotFoundException('路由不存在', [
+                    'merchant_group_id' => $merchantGroupId,
+                    'pay_type_id' => $payTypeId,
+                ]);
+            }
+
+            $route = $this->resolveRouteSelection(
+                $merchantGroupId,
+                0,
+                $payTypeId,
+                $payAmount,
+                $context
+            );
+            $route['bind'] = null;
+
+            return $route;
         }
 
         $route = $this->resolveRouteSelection(
@@ -118,23 +135,40 @@ class PaymentRouteResolverService extends BaseService
         }
 
         // 预览阶段只拿绑定摘要，不先把所有通道明细一次性拉出来。
+        $merchantId = (int) ($context['merchant_id'] ?? 0);
         $bindRows = $this->bindRepository->listSummaryByMerchantGroupId($merchantGroupId);
-        if ($bindRows->isEmpty()) {
+        $payTypeIds = $bindRows
+            ->filter(fn ($row): bool => (int) ($row->status ?? 0) === CommonConstant::STATUS_ENABLED)
+            ->pluck('pay_type_id')
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->values()
+            ->all();
+
+        if ($merchantId > 0) {
+            $selfPayTypeIds = $this->channelRepository->query()
+                ->where('merchant_id', $merchantId)
+                ->where('channel_mode', RouteConstant::CHANNEL_MODE_SELF)
+                ->pluck('pay_type_id')
+                ->map(fn ($id): int => (int) $id)
+                ->filter(fn (int $id): bool => $id > 0)
+                ->values()
+                ->all();
+            $payTypeIds = array_merge($payTypeIds, $selfPayTypeIds);
+        }
+
+        $payTypeIds = array_values(array_unique($payTypeIds));
+        if ($payTypeIds === []) {
             return [];
         }
 
         $available = [];
-        foreach ($bindRows as $row) {
-            if ((int) ($row->status ?? 0) !== CommonConstant::STATUS_ENABLED) {
-                continue;
-            }
-
+        foreach ($payTypeIds as $payTypeId) {
             try {
                 // 每个可用支付方式仍然复用正式选路逻辑，只是最终结果被压成前端可展示摘要。
-                $route = $this->resolveRouteSelection(
+                $route = $this->resolveByMerchantGroup(
                     $merchantGroupId,
-                    (int) ($row->poll_group_id ?? 0),
-                    (int) ($row->pay_type_id ?? 0),
+                    $payTypeId,
                     $payAmount,
                     $context
                 );
@@ -145,11 +179,12 @@ class PaymentRouteResolverService extends BaseService
             $selected = $route['selected_channel'];
             /** @var PaymentChannel $channel */
             $channel = $selected['channel'];
+            $paymentType = $this->paymentTypeRepository->find($payTypeId);
             $available[] = [
-                'pay_type_id' => (int) ($row->pay_type_id ?? 0),
-                'code' => (string) ($row->pay_type_code ?? ''),
-                'name' => (string) ($row->pay_type_name ?? ''),
-                'icon' => (string) ($row->pay_type_icon ?? ''),
+                'pay_type_id' => $payTypeId,
+                'code' => (string) ($paymentType->code ?? ''),
+                'name' => (string) ($paymentType->name ?? ''),
+                'icon' => (string) ($paymentType->icon ?? ''),
                 'selected_channel_id' => (int) $channel->id,
                 'selected_channel_name' => (string) $channel->name,
                 'selected_channel_mode' => (int) $channel->channel_mode,
@@ -170,7 +205,7 @@ class PaymentRouteResolverService extends BaseService
      * @param int $payAmount 支付金额（分）
      * @param array $context 路由上下文，支持传入 `stat_date` 等辅助参数
      * @return array{
-     *     poll_group: PaymentPollGroup,
+     *     poll_group: PaymentPollGroup|null,
      *     candidates: array<int, array<string, mixed>>,
      *     selected_channel: array<string, mixed>
      * }
@@ -180,24 +215,37 @@ class PaymentRouteResolverService extends BaseService
      */
     private function resolveRouteSelection(int $merchantGroupId, int $pollGroupId, int $payTypeId, int $payAmount, array $context = []): array
     {
-        if ($merchantGroupId <= 0 || $pollGroupId <= 0 || $payTypeId <= 0 || $payAmount <= 0) {
+        if ($merchantGroupId <= 0 || $payTypeId <= 0 || $payAmount <= 0) {
             throw new ValidationException('路由参数不合法');
         }
 
-        /** @var PaymentPollGroup|null $pollGroup */
-        $pollGroup = $this->pollGroupRepository->find($pollGroupId);
-        if (!$pollGroup || (int) $pollGroup->status !== CommonConstant::STATUS_ENABLED) {
-            throw new ResourceNotFoundException('路由不存在', [
-                'merchant_group_id' => $merchantGroupId,
-                'pay_type_id' => $payTypeId,
-                'poll_group_id' => $pollGroupId,
-            ]);
+        $pollGroup = null;
+        $candidateRows = collect();
+        $merchantId = (int) ($context['merchant_id'] ?? 0);
+        $routePreference = $this->merchantRoutePreference($merchantId, $payTypeId);
+        if ($pollGroupId > 0) {
+            /** @var PaymentPollGroup|null $pollGroup */
+            $pollGroup = $this->pollGroupRepository->find($pollGroupId);
+            if (!$pollGroup || (int) $pollGroup->status !== CommonConstant::STATUS_ENABLED) {
+                throw new ResourceNotFoundException('路由不存在', [
+                    'merchant_group_id' => $merchantGroupId,
+                    'pay_type_id' => $payTypeId,
+                    'poll_group_id' => $pollGroupId,
+                ]);
+            }
+
+            $candidateRows = $this->pollGroupChannelRepository->listByPollGroupId((int) $pollGroup->id);
         }
 
-        $candidateRows = $this->pollGroupChannelRepository->listByPollGroupId((int) $pollGroup->id);
+        if (!$routePreference['use_platform_channels']) {
+            $candidateRows = collect();
+        }
+
+        $candidateRows = $this->mergeMerchantSelfCandidates($candidateRows, $payTypeId, $merchantId, $pollGroupId);
         if ($candidateRows->isEmpty()) {
             throw new BusinessStateException('支付通道不可用', [
-                'poll_group_id' => (int) $pollGroup->id,
+                'poll_group_id' => $pollGroup ? (int) $pollGroup->id : 0,
+                'merchant_id' => $merchantId,
             ]);
         }
 
@@ -205,7 +253,6 @@ class PaymentRouteResolverService extends BaseService
         $channelIds = $candidateRows->pluck('channel_id')->all();
         $channels = $this->channelRepository->query()
             ->whereIn('id', $channelIds)
-            ->where('status', CommonConstant::STATUS_ENABLED)
             ->get()
             ->keyBy('id');
         $pluginCodes = $channels->pluck('plugin_code')->filter()->unique()->values()->all();
@@ -225,43 +272,27 @@ class PaymentRouteResolverService extends BaseService
         $statDate = $context['stat_date'] ?? FormatHelper::timestamp(time(), 'Y-m-d');
         $payAmount = (int) $payAmount;
         $eligible = [];
+        $rejected = [];
 
         foreach ($candidateRows as $row) {
             $channelId = (int) $row->channel_id;
 
             /** @var PaymentChannel|null $channel */
             $channel = $channels->get($channelId);
-            if (!$channel) {
-                continue;
-            }
-
-            // 通道类型、插件支持、金额区间和日限额都必须同时满足，候选才算有效。
-            if ((int) $channel->pay_type_id !== $payTypeId) {
-                continue;
-            }
-
-            /** @var \app\model\payment\PaymentPlugin|null $plugin */
-            $plugin = $plugins[(string) $channel->plugin_code] ?? null;
-            if (!$plugin || (int) $plugin->status !== CommonConstant::STATUS_ENABLED) {
-                continue;
-            }
-
-            $pluginPayTypes = is_array($plugin->pay_types) ? $plugin->pay_types : [];
-            $pluginPayTypes = array_values(array_filter(array_map(static fn ($item) => trim((string) $item), $pluginPayTypes)));
-            if ($payTypeCode === '' || !in_array($payTypeCode, $pluginPayTypes, true)) {
-                continue;
-            }
-
-            if (!$this->isAmountAllowed($channel, $payAmount)) {
-                continue;
-            }
-
-            $stat = $this->channelDailyStatRepository->findByChannelAndDate($channelId, $statDate);
-            if (!$this->isDailyLimitAllowed($channel, $payAmount, $statDate, $stat)) {
-                continue;
-            }
-
-            $eligible[] = [
+            $plugin = $channel ? ($plugins[(string) $channel->plugin_code] ?? null) : null;
+            $stat = $channel ? $this->channelDailyStatRepository->findByChannelAndDate($channelId, $statDate) : null;
+            $isMerchantSelfCandidate = (string) ($row->source_type ?? '') === 'merchant_self';
+            $rejectReasons = $this->resolveCandidateRejectReasons(
+                $channel,
+                $plugin,
+                $payTypeId,
+                $payTypeCode,
+                $payAmount,
+                $statDate,
+                $stat,
+                $isMerchantSelfCandidate
+            );
+            $candidate = [
                 'channel' => $channel,
                 'poll_group_channel' => $row,
                 'daily_stat' => $stat,
@@ -269,29 +300,262 @@ class PaymentRouteResolverService extends BaseService
                 'success_rate_bp' => (int) ($stat->success_rate_bp ?? 0),
                 'avg_latency_ms' => (int) ($stat->avg_latency_ms ?? 0),
                 'weight' => max(1, (int) $row->weight),
-                'is_default' => (int) $row->is_default,
+                'is_default' => $this->isRouteDefaultCandidate($row, $routePreference),
                 'sort_no' => (int) $row->sort_no,
+                'available' => empty($rejectReasons),
+                'reject_reasons' => $rejectReasons,
+                'reject_reason_text' => implode('；', $rejectReasons),
+                'channel_id' => $channelId,
             ];
+
+            if (!empty($rejectReasons)) {
+                $rejected[] = $candidate;
+                continue;
+            }
+
+            $eligible[] = $candidate;
         }
 
         if (empty($eligible)) {
+            if (!empty($context['_preview'])) {
+                return [
+                    'available' => false,
+                    'reason' => '支付通道不可用',
+                    'poll_group' => $pollGroup,
+                    'candidates' => [],
+                    'rejected_candidates' => $rejected,
+                    'selected_channel' => null,
+                ];
+            }
+
             throw new BusinessStateException('支付通道不可用', [
-                'poll_group_id' => (int) $pollGroup->id,
+                'poll_group_id' => $pollGroup ? (int) $pollGroup->id : 0,
                 'merchant_group_id' => $merchantGroupId,
                 'pay_type_id' => $payTypeId,
             ]);
         }
 
-        $routeMode = (int) $pollGroup->route_mode;
+        $routeMode = $routePreference['route_mode'] !== null
+            ? (int) $routePreference['route_mode']
+            : ($pollGroup ? (int) $pollGroup->route_mode : RouteConstant::ROUTE_MODE_FIRST_AVAILABLE);
+        $cursorKey = $this->routeCursorKey($merchantId, $payTypeId, $pollGroup ? (int) $pollGroup->id : 0);
         // 剩余候选再按轮询组策略排序，最终只从排序结果里挑一条。
         $ordered = $this->sortCandidates($eligible, $routeMode);
-        $selected = $this->selectChannel($ordered, $routeMode, (int) $pollGroup->id);
+        $selected = $this->selectChannel($ordered, $routeMode, $cursorKey);
 
         return [
+            'available' => true,
             'poll_group' => $pollGroup,
+            'route_preference' => $routePreference,
             'candidates' => $ordered,
+            'rejected_candidates' => $rejected,
             'selected_channel' => $selected,
         ];
+    }
+
+    /**
+     * 把当前商户自建自收通道合并进候选集。
+     *
+     * @param mixed $candidateRows 轮询组候选行集合
+     * @param int $payTypeId 支付方式ID
+     * @param int $merchantId 当前商户ID
+     * @param int $pollGroupId 轮询组ID
+     * @return mixed 合并后的候选行集合
+     */
+    private function mergeMerchantSelfCandidates($candidateRows, int $payTypeId, int $merchantId, int $pollGroupId)
+    {
+        if ($merchantId <= 0) {
+            return $candidateRows;
+        }
+
+        $existingChannelIds = $candidateRows
+            ->filter(fn ($row): bool => (string) ($row->source_type ?? '') === 'merchant_self')
+            ->pluck('channel_id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+
+        $selfChannels = $this->channelRepository->query()
+            ->where('merchant_id', $merchantId)
+            ->where('channel_mode', RouteConstant::CHANNEL_MODE_SELF)
+            ->where('pay_type_id', $payTypeId)
+            ->orderBy('sort_no')
+            ->orderBy('id')
+            ->get(['id', 'sort_no']);
+
+        foreach ($selfChannels as $channel) {
+            $channelId = (int) $channel->id;
+            if (in_array($channelId, $existingChannelIds, true)) {
+                continue;
+            }
+
+            $candidateRows->push((object) [
+                'poll_group_id' => $pollGroupId,
+                'channel_id' => $channelId,
+                'sort_no' => (int) $channel->sort_no,
+                'weight' => 1,
+                'is_default' => 0,
+                'status' => CommonConstant::STATUS_ENABLED,
+                'source_type' => 'merchant_self',
+            ]);
+            $existingChannelIds[] = $channelId;
+        }
+
+        return $candidateRows;
+    }
+
+    /**
+     * 读取当前商户在指定支付方式下的路由偏好。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $payTypeId 支付方式ID
+     * @return array{configured: bool, use_platform_channels: bool, route_mode: int|null, default_channel_id: int}
+     */
+    private function merchantRoutePreference(int $merchantId, int $payTypeId): array
+    {
+        $default = [
+            'configured' => false,
+            'use_platform_channels' => true,
+            'route_mode' => null,
+            'default_channel_id' => 0,
+        ];
+
+        if ($merchantId <= 0 || $payTypeId <= 0) {
+            return $default;
+        }
+
+        $policy = $this->merchantPolicyRepository->findByMerchantId($merchantId, ['route_policy_json']);
+        $routePolicy = is_array($policy?->route_policy_json) ? $policy->route_policy_json : [];
+        $payTypePolicies = is_array($routePolicy['pay_types'] ?? null) ? $routePolicy['pay_types'] : [];
+        $item = $payTypePolicies[(string) $payTypeId] ?? $payTypePolicies[$payTypeId] ?? null;
+        if (!is_array($item)) {
+            return $default;
+        }
+
+        $routeMode = array_key_exists('route_mode', $item) ? (int) $item['route_mode'] : null;
+        if (!in_array($routeMode, array_keys(RouteConstant::routeModeMap()), true)) {
+            $routeMode = null;
+        }
+
+        return [
+            'configured' => true,
+            'use_platform_channels' => $this->truthy($item['use_platform_channels'] ?? true),
+            'route_mode' => $routeMode,
+            'default_channel_id' => max(0, (int) ($item['default_channel_id'] ?? 0)),
+        ];
+    }
+
+    /**
+     * 判断当前候选是否应作为商户偏好的默认通道。
+     *
+     * @param object $row 候选通道行
+     * @param array<string, mixed> $routePreference 商户路由偏好
+     * @return int 默认标记
+     */
+    private function isRouteDefaultCandidate(object $row, array $routePreference): int
+    {
+        $defaultChannelId = (int) ($routePreference['default_channel_id'] ?? 0);
+        if ($defaultChannelId > 0) {
+            return (int) $row->channel_id === $defaultChannelId ? 1 : 0;
+        }
+
+        return (int) $row->is_default;
+    }
+
+    /**
+     * 路由顺序轮询游标键。
+     *
+     * @param int $merchantId 商户ID
+     * @param int $payTypeId 支付方式ID
+     * @param int $pollGroupId 轮询组ID
+     * @return string 游标键
+     */
+    private function routeCursorKey(int $merchantId, int $payTypeId, int $pollGroupId): string
+    {
+        if ($merchantId > 0) {
+            return sprintf('merchant:%d:pay_type:%d', $merchantId, $payTypeId);
+        }
+
+        return sprintf('poll_group:%d', $pollGroupId);
+    }
+
+    /**
+     * 解析布尔配置。
+     *
+     * @param mixed $value 原始值
+     * @return bool 布尔值
+     */
+    private function truthy(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 'on', 'enabled'], true);
+    }
+
+    /**
+     * 生成通道被过滤的原因。
+     *
+     * @param PaymentChannel|null $channel 渠道
+     * @param object|null $plugin 插件
+     * @param int $payTypeId 支付方式ID
+     * @param string $payTypeCode 支付方式编码
+     * @param int $payAmount 支付金额，单位分
+     * @param string $statDate 统计日期
+     * @param object|null $stat 当日统计
+     * @param bool $isMerchantSelfCandidate 是否为当前商户自建候选
+     * @return array<int, string> 过滤原因列表
+     */
+    private function resolveCandidateRejectReasons(
+        ?PaymentChannel $channel,
+        ?object $plugin,
+        int $payTypeId,
+        string $payTypeCode,
+        int $payAmount,
+        string $statDate,
+        ?object $stat,
+        bool $isMerchantSelfCandidate = false
+    ): array {
+        if (!$channel) {
+            return ['通道配置不存在'];
+        }
+
+        $reasons = [];
+        if (
+            !$isMerchantSelfCandidate
+            && ((int) $channel->merchant_id !== 0 || (int) $channel->channel_mode !== RouteConstant::CHANNEL_MODE_COLLECT)
+        ) {
+            $reasons[] = '商户自建通道不能由平台路由分配';
+        }
+        if ((int) $channel->status !== CommonConstant::STATUS_ENABLED) {
+            $reasons[] = '通道已禁用';
+        }
+        if ((int) $channel->pay_type_id !== $payTypeId) {
+            $reasons[] = '通道支付方式不匹配';
+        }
+        if (!$plugin) {
+            $reasons[] = '插件不存在';
+        } elseif ((int) $plugin->status !== CommonConstant::STATUS_ENABLED) {
+            $reasons[] = '插件已禁用';
+        } else {
+            $pluginPayTypes = is_array($plugin->pay_types) ? $plugin->pay_types : [];
+            $pluginPayTypes = array_values(array_filter(array_map(static fn ($item) => trim((string) $item), $pluginPayTypes)));
+            if ($payTypeCode === '' || !in_array($payTypeCode, $pluginPayTypes, true)) {
+                $reasons[] = '插件不支持该支付方式';
+            }
+        }
+        if (!$this->isAmountAllowed($channel, $payAmount)) {
+            $reasons[] = sprintf(
+                '金额不在通道范围内（最小 %s，最大 %s）',
+                (int) $channel->min_amount > 0 ? FormatHelper::amount((int) $channel->min_amount) : '不限',
+                (int) $channel->max_amount > 0 ? FormatHelper::amount((int) $channel->max_amount) : '不限'
+            );
+        }
+        if (!$this->isDailyLimitAllowed($channel, $payAmount, $statDate, $stat)) {
+            $reasons[] = '超过通道单日限额或限笔';
+        }
+
+        return $reasons;
     }
 
     /**
@@ -380,7 +644,7 @@ class PaymentRouteResolverService extends BaseService
      * @param int $pollGroupId 轮询分组ID
      * @return array 选中的通道候选
      */
-    private function selectChannel(array $candidates, int $routeMode, int $pollGroupId): array
+    private function selectChannel(array $candidates, int $routeMode, string $cursorKey): array
     {
         if (count($candidates) === 1) {
             return $candidates[0];
@@ -388,7 +652,7 @@ class PaymentRouteResolverService extends BaseService
 
         return match ($routeMode) {
             RouteConstant::ROUTE_MODE_WEIGHTED => $this->selectWeightedChannel($candidates),
-            RouteConstant::ROUTE_MODE_ORDER => $this->selectSequentialChannel($candidates, $pollGroupId),
+            RouteConstant::ROUTE_MODE_ORDER => $this->selectSequentialChannel($candidates, $cursorKey),
             RouteConstant::ROUTE_MODE_FIRST_AVAILABLE => $this->selectDefaultChannel($candidates),
             default => $candidates[0],
         };
@@ -419,21 +683,21 @@ class PaymentRouteResolverService extends BaseService
      * 按轮询游标顺序选择通道。
      *
      * @param array $candidates 候选通道列表
-     * @param int $pollGroupId 轮询分组ID
+     * @param string $cursorKey 轮询游标键
      * @return array 选中的通道候选
      */
-    private function selectSequentialChannel(array $candidates, int $pollGroupId): array
+    private function selectSequentialChannel(array $candidates, string $cursorKey): array
     {
-        if ($pollGroupId <= 0) {
+        if ($cursorKey === '') {
             return $candidates[0];
         }
 
         try {
             // 用 Redis 维护跨进程共享的轮询游标，避免每个 PHP 进程各选各的。
-            $cursorKey = sprintf('payment:route:round_robin:%d', $pollGroupId);
-            $cursor = (int) Redis::incr($cursorKey);
+            $redisKey = sprintf('payment:route:round_robin:%s', $cursorKey);
+            $cursor = (int) Redis::incr($redisKey);
             // 游标保留一个较长的生命周期，避免 Redis 清理后轮询顺序完全丢失。
-            Redis::expire($cursorKey, 30 * 86400);
+            Redis::expire($redisKey, 30 * 86400);
             // Redis 自增从 1 开始，这里转成 0 基索引后再对候选集取模。
             $index = max(0, ($cursor - 1) % count($candidates));
 

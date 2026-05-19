@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MPAY 码支付</title>
+  <meta name="description" content="MPAY 支付中台，面向聚合支付、商户收单、支付通道、订单回调和资金清算的支付基础设施。">
+  <link rel="icon" href="/assets/brand/mpay-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/home/assets/home.css?v=2026051901">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="MPAY 首页">
+      <img src="/assets/brand/mpay-logo.svg" alt="MPAY">
+      <span>码支付</span>
+    </a>
+    <nav class="nav-links" aria-label="主导航">
+      <a href="#products">产品</a>
+      <a href="#capabilities">能力</a>
+      <a href="/docs">文档</a>
+      <a href="#entry">入口</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="primary-btn small" href="/mer">商户后台</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow">MPAY Payment Platform</div>
+        <h1>面向商户收单与聚合支付的支付中台</h1>
+        <p class="hero-desc">
+          统一管理支付通道、商户策略、订单回调、通知重试和资金流水，让支付接入、运营监控和后续对账更清晰。
+        </p>
+        <div class="hero-actions">
+          <a class="primary-btn" id="primaryEntry" href="/mer">进入商户后台</a>
+          <a class="secondary-btn" href="/docs">查看对接文档</a>
+        </div>
+        <div class="hero-meta">
+          <span id="installState">正在检测系统状态</span>
+          <span>Webman / PHP / MySQL / Redis</span>
+        </div>
+      </div>
+
+      <div class="hero-visual" aria-label="支付中台业务概览">
+        <div class="visual-top">
+          <span>今日交易</span>
+          <strong>¥ 128,640.52</strong>
+          <em>成功率 99.92%</em>
+        </div>
+        <div class="pay-card active">
+          <i class="dot green"></i>
+          <div>
+            <strong>聚合收银台</strong>
+            <span>二维码 / H5 / PC 支付</span>
+          </div>
+          <b>运行中</b>
+        </div>
+        <div class="pay-card">
+          <i class="dot blue"></i>
+          <div>
+            <strong>通道路由</strong>
+            <span>费率策略与可用性调度</span>
+          </div>
+          <b>4 个通道</b>
+        </div>
+        <div class="pay-card">
+          <i class="dot orange"></i>
+          <div>
+            <strong>通知重试</strong>
+            <span>失败通知自动补偿</span>
+          </div>
+          <b>队列</b>
+        </div>
+        <div class="visual-chart">
+          <span style="height: 48%"></span>
+          <span style="height: 62%"></span>
+          <span style="height: 42%"></span>
+          <span style="height: 76%"></span>
+          <span style="height: 58%"></span>
+          <span style="height: 88%"></span>
+          <span style="height: 71%"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="products">
+      <div class="section-head">
+        <span>Products</span>
+        <h2>主要产品</h2>
+      </div>
+      <div class="product-grid">
+        <article>
+          <div class="icon">收</div>
+          <h3>聚合支付</h3>
+          <p>统一接入支付宝、微信、QQ 钱包、银行卡等支付方式，按通道能力和商户策略完成收单。</p>
+        </article>
+        <article>
+          <div class="icon">商</div>
+          <h3>商户系统</h3>
+          <p>管理商户资料、费率策略、API 凭证、应用密钥和交易查询，支撑多商户业务运营。</p>
+        </article>
+        <article>
+          <div class="icon">码</div>
+          <h3>收银台</h3>
+          <p>提供统一支付页面、二维码展示、订单状态轮询和支付结果引导，适配 PC 与移动端。</p>
+        </article>
+        <article>
+          <div class="icon">运</div>
+          <h3>运营后台</h3>
+          <p>覆盖订单、回调、通知重试、通道统计、资金流水和清算记录，便于日常运营排查。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section muted" id="capabilities">
+      <div class="section-head">
+        <span>Capabilities</span>
+        <h2>核心能力</h2>
+      </div>
+      <div class="capability-layout">
+        <div class="capability-list">
+          <div><strong>统一 API</strong><span>统一下单、查单、退款与异步通知协议。</span></div>
+          <div><strong>多通道管理</strong><span>通道配置、状态管理、成本统计与插件化扩展。</span></div>
+          <div><strong>商户策略</strong><span>费率、服务费、自动清算和商户分组策略。</span></div>
+          <div><strong>通知补偿</strong><span>商户通知失败记录、重试队列和最后响应追踪。</span></div>
+          <div><strong>资金流水</strong><span>余额、冻结、扣费、退款冲回和清算入账留痕。</span></div>
+          <div><strong>安全密钥</strong><span>平台 RSA、商户密钥、JWT 密钥与权限隔离。</span></div>
+        </div>
+        <div class="phone-preview">
+          <div class="phone-head"></div>
+          <div class="qr-box"><img src="/assets/home/mpay-qrcode.svg" alt="支付二维码"></div>
+          <strong>扫码支付</strong>
+          <span>订单号 MP202605190001</span>
+          <button>等待支付</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <span>Flow</span>
+        <h2>快速接入流程</h2>
+      </div>
+      <ol class="flow">
+        <li><b>1</b><strong>创建商户</strong><span>录入商户资料，配置结算与费率策略。</span></li>
+        <li><b>2</b><strong>配置通道</strong><span>启用支付插件，维护通道密钥和支付方式。</span></li>
+        <li><b>3</b><strong>获取密钥</strong><span>为商户生成 API 凭证，完成签名联调。</span></li>
+        <li><b>4</b><strong>发起支付</strong><span>按文档创建订单，跳转收银台完成支付。</span></li>
+        <li><b>5</b><strong>接收通知</strong><span>处理异步通知，失败任务由系统自动重试。</span></li>
+      </ol>
+    </section>
+
+    <section class="section docs" id="docs">
+      <div>
+        <span>Developer</span>
+        <h2>对接文档与开发入口</h2>
+        <p>面向开发者提供 V1、V2 两套接口标准，覆盖下单、签名、回调、查单、退款和商户接口等接入说明。</p>
+      </div>
+      <div class="doc-cards">
+        <a href="/docs#v2" aria-label="查看 V2 接口标准">V2 接口标准</a>
+        <a href="/docs#v1" aria-label="查看 V1 接口标准">V1 接口标准</a>
+        <a href="/mer" aria-label="商户后台查看 API 密钥">商户密钥</a>
+        <a href="/install" aria-label="打开安装向导">安装向导</a>
+      </div>
+    </section>
+
+    <section class="section entry" id="entry">
+      <div class="entry-card">
+        <span>Console</span>
+        <h2>系统入口</h2>
+        <p>根据你的角色进入对应后台。未完成部署时，请先进入安装向导完成环境检测、基础配置和数据初始化。</p>
+      </div>
+      <div class="entry-actions">
+        <a class="primary-btn" href="/mer">商户后台</a>
+        <a class="secondary-btn" href="/admin">管理后台</a>
+        <a class="secondary-btn" href="/cashier">收银台</a>
+        <a class="secondary-btn" href="/install">安装向导</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <img src="/assets/brand/mpay-mark.svg" alt="">
+    <span>© MPAY 码支付</span>
+    <span>请在生产环境启用 HTTPS，并妥善保管平台密钥、商户密钥和支付通道凭证。</span>
+  </footer>
+
+  <script src="/home/assets/home.js?v=2026051901"></script>
+</body>
+</html>

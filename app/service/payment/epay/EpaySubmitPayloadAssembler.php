@@ -48,8 +48,14 @@ class EpaySubmitPayloadAssembler extends BaseService
         $payment = array_filter([
             'method' => $payload['method'] ?? null,
             'auth_code' => $payload['auth_code'] ?? null,
+            'openid' => $payload['openid'] ?? null,
             'sub_openid' => $payload['sub_openid'] ?? null,
+            'wx_openid' => $payload['wx_openid'] ?? null,
+            'mini_openid' => $payload['mini_openid'] ?? null,
+            'buyer_id' => $payload['buyer_id'] ?? null,
+            'buyer_open_id' => $payload['buyer_open_id'] ?? null,
             'sub_appid' => $payload['sub_appid'] ?? null,
+            'op_app_id' => $payload['op_app_id'] ?? null,
         ], static fn ($value) => $value !== null && $value !== '');
 
         if ($payment !== []) {

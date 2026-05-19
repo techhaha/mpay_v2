@@ -6,6 +6,8 @@ use app\common\base\BaseService;
 use app\common\constant\CommonConstant;
 use app\common\constant\RouteConstant;
 use app\repository\payment\config\PaymentChannelRepository;
+use app\repository\payment\config\PaymentPollGroupBindRepository;
+use app\repository\payment\config\PaymentPollGroupChannelRepository;
 
 /**
  * 商户门户通道查询服务。
@@ -25,7 +27,9 @@ class MerchantPortalChannelQueryService extends BaseService
      */
     public function __construct(
         protected MerchantPortalSupportService $supportService,
-        protected PaymentChannelRepository $paymentChannelRepository
+        protected PaymentChannelRepository $paymentChannelRepository,
+        protected PaymentPollGroupBindRepository $pollGroupBindRepository,
+        protected PaymentPollGroupChannelRepository $pollGroupChannelRepository
     ) {
     }
 
@@ -40,6 +44,9 @@ class MerchantPortalChannelQueryService extends BaseService
      */
     public function myChannels(array $filters, int $merchantId, int $page, int $pageSize): array
     {
+        $merchant = $this->supportService->merchantSummary($merchantId);
+        $assignedChannelIds = $this->assignedChannelIds((int) ($merchant['merchant_group_id'] ?? 0));
+
         $query = $this->paymentChannelRepository->query()
             ->from('ma_payment_channel as c')
             ->leftJoin('ma_payment_type as t', 'c.pay_type_id', '=', 't.id')
@@ -48,7 +55,6 @@ class MerchantPortalChannelQueryService extends BaseService
                 'c.merchant_id',
                 'c.name',
                 'c.split_rate_bp',
-                'c.cost_rate_bp',
                 'c.channel_mode',
                 'c.pay_type_id',
                 'c.plugin_code',
@@ -65,7 +71,12 @@ class MerchantPortalChannelQueryService extends BaseService
             ])
             ->selectRaw("COALESCE(t.code, '') AS pay_type_code")
             ->selectRaw("COALESCE(t.name, '') AS pay_type_name")
-            ->where('c.merchant_id', $merchantId);
+            ->where(function ($builder) use ($merchantId, $assignedChannelIds) {
+                $builder->where('c.merchant_id', $merchantId);
+                if ($assignedChannelIds !== []) {
+                    $builder->orWhereIn('c.id', $assignedChannelIds);
+                }
+            });
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
         if ($keyword !== '') {
@@ -96,12 +107,12 @@ class MerchantPortalChannelQueryService extends BaseService
             ->orderByDesc('c.id')
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
 
-        $paginator->getCollection()->transform(function ($row) {
-            return $this->decorateChannelRow($row);
+        $paginator->getCollection()->transform(function ($row) use ($merchantId, $assignedChannelIds) {
+            return $this->decorateChannelRow($row, $merchantId, $assignedChannelIds);
         });
 
         return [
-            'merchant' => $this->supportService->merchantSummary($merchantId),
+            'merchant' => $merchant,
             'pay_types' => $this->supportService->enabledPayTypeOptions(),
             'list' => $paginator->items(),
             'total' => $paginator->total(),
@@ -114,23 +125,66 @@ class MerchantPortalChannelQueryService extends BaseService
      * 为通道行补充文本字段。
      *
      * @param object $row 通道行
+     * @param int $merchantId 当前商户ID
+     * @param array<int, int> $assignedChannelIds 系统分配通道ID
      * @return object 处理后的通道行
      */
-    private function decorateChannelRow(object $row): object
+    private function decorateChannelRow(object $row, int $merchantId, array $assignedChannelIds): object
     {
+        $isWritable = (int) $row->merchant_id === $merchantId && (int) $row->channel_mode === RouteConstant::CHANNEL_MODE_SELF;
+
         $row->channel_mode_text = (string) (RouteConstant::channelModeMap()[(int) $row->channel_mode] ?? '未知');
         $row->status_text = (string) (CommonConstant::statusMap()[(int) $row->status] ?? '未知');
         $row->split_rate_text = $this->formatRate((int) $row->split_rate_bp);
-        $row->cost_rate_text = $this->formatRate((int) $row->cost_rate_bp);
         $row->daily_limit_amount_text = $this->formatAmountOrUnlimited((int) $row->daily_limit_amount);
         $row->daily_limit_count_text = $this->formatCountOrUnlimited((int) $row->daily_limit_count);
         $row->min_amount_text = $this->formatAmountOrUnlimited((int) $row->min_amount);
         $row->max_amount_text = $this->formatAmountOrUnlimited((int) $row->max_amount);
         $row->created_at_text = $this->formatDateTime($row->created_at ?? null);
         $row->updated_at_text = $this->formatDateTime($row->updated_at ?? null);
+        $row->is_writable = $isWritable;
+        $row->source_type = $isWritable ? 'merchant' : 'system';
+        $row->source_text = $isWritable ? '自建通道' : (in_array((int) $row->id, $assignedChannelIds, true) ? '系统分配' : '系统通道');
+        unset($row->cost_rate_bp, $row->cost_rate_text);
 
         return $row;
     }
+
+    /**
+     * 获取当前商户分组路由中已分配的通道 ID。
+     *
+     * @param int $merchantGroupId 商户分组ID
+     * @return array<int, int> 通道ID列表
+     */
+    private function assignedChannelIds(int $merchantGroupId): array
+    {
+        if ($merchantGroupId <= 0) {
+            return [];
+        }
+
+        $pollGroupIds = $this->pollGroupBindRepository->listSummaryByMerchantGroupId($merchantGroupId)
+            ->filter(fn ($row): bool => (int) ($row->status ?? 0) === CommonConstant::STATUS_ENABLED)
+            ->pluck('poll_group_id')
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($pollGroupIds === []) {
+            return [];
+        }
+
+        $channelIds = [];
+        foreach ($pollGroupIds as $pollGroupId) {
+            foreach ($this->pollGroupChannelRepository->listByPollGroupId((int) $pollGroupId, ['channel_id']) as $row) {
+                $channelId = (int) ($row->channel_id ?? 0);
+                if ($channelId > 0) {
+                    $channelIds[] = $channelId;
+                }
+            }
+        }
+
+        return array_values(array_unique($channelIds));
+    }
 }
-
-

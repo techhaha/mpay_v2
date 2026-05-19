@@ -98,6 +98,58 @@ class MerchantAccountLedgerService extends BaseService
     }
 
     /**
+     * 导出账户流水 CSV。
+     *
+     * @param array $filters 筛选条件
+     * @return \support\Response CSV 响应
+     */
+    public function exportCsv(array $filters = [])
+    {
+        $rows = $this->paginate($filters, 1, 5000)->items();
+        $csvRows = [[
+            '流水号',
+            '商户号',
+            '商户名称',
+            '业务类型',
+            '业务单号',
+            '追踪号',
+            '事件类型',
+            '方向',
+            '金额',
+            '变动前可用',
+            '变动后可用',
+            '变动前冻结',
+            '变动后冻结',
+            '幂等键',
+            '备注',
+            '创建时间',
+        ]];
+
+        foreach ($rows as $row) {
+            $csvRows[] = [
+                (string) ($row->ledger_no ?? ''),
+                (string) ($row->merchant_no ?? ''),
+                (string) ($row->merchant_name ?? ''),
+                (string) ($row->biz_type_text ?? ''),
+                (string) ($row->biz_no ?? ''),
+                (string) ($row->trace_no ?? ''),
+                (string) ($row->event_type_text ?? ''),
+                (string) ($row->direction_text ?? ''),
+                (string) ($row->amount_text ?? ''),
+                (string) ($row->available_before_text ?? ''),
+                (string) ($row->available_after_text ?? ''),
+                (string) ($row->frozen_before_text ?? ''),
+                (string) ($row->frozen_after_text ?? ''),
+                (string) ($row->idempotency_key ?? ''),
+                (string) ($row->remark ?? ''),
+                (string) ($row->created_at_text ?? ''),
+            ];
+        }
+
+        return $this->csvResponse($csvRows, 'account-ledgers-' . date('YmdHis') . '.csv');
+    }
+
+    /**
      * 格式化记录。
      *
      * @param object $row 原始查询行
@@ -153,6 +205,28 @@ class MerchantAccountLedgerService extends BaseService
             ->selectRaw("COALESCE(g.group_name, '') AS merchant_group_name");
     }
 
-}
+    /**
+     * 构建 CSV 下载响应。
+     *
+     * @param array<int, array<int, string>> $rows CSV 行
+     * @param string $filename 文件名
+     * @return \support\Response 响应
+     */
+    private function csvResponse(array $rows, string $filename)
+    {
+        $fp = fopen('php://temp', 'r+');
+        foreach ($rows as $row) {
+            fputcsv($fp, $row);
+        }
+        rewind($fp);
+        $body = "\xEF\xBB\xBF" . stream_get_contents($fp);
+        fclose($fp);
 
+        return response($body, 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="' . str_replace(['"', "\r", "\n", "\0"], '', $filename) . '"',
+        ]);
+    }
+
+}
 

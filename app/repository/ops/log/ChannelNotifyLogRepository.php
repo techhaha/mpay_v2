@@ -53,8 +53,24 @@ class ChannelNotifyLogRepository extends BaseRepository
             ->where('biz_no', $bizNo)
             ->first($columns);
     }
-}
 
+    /**
+     * 查询指定支付单和通知类型的渠道日志。
+     *
+     * @param string $payNo 支付单号
+     * @param int $notifyType 通知类型
+     * @param array $columns 字段列表
+     * @return \Illuminate\Database\Eloquent\Collection<int, ChannelNotifyLog> 日志列表
+     */
+    public function listByPayNoAndType(string $payNo, int $notifyType, array $columns = ['*'])
+    {
+        return $this->model->newQuery()
+            ->where('pay_no', $payNo)
+            ->where('notify_type', $notifyType)
+            ->orderByDesc('id')
+            ->get($columns);
+    }
+}
 
 
 

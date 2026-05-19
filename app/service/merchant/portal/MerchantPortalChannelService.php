@@ -10,6 +10,7 @@ use app\common\base\BaseService;
  * @property MerchantPortalChannelQueryService $queryService 查询服务
  * @property MerchantPortalChannelCommandService $commandService 命令服务
  * @property MerchantPortalRoutePreviewService $routePreviewService 路由解析服务
+ * @property MerchantPortalRouteConfigService $routeConfigService 路由偏好配置服务
  */
 class MerchantPortalChannelService extends BaseService
 {
@@ -19,11 +20,13 @@ class MerchantPortalChannelService extends BaseService
      * @param MerchantPortalChannelQueryService $queryService 查询服务
      * @param MerchantPortalChannelCommandService $commandService 命令服务
      * @param MerchantPortalRoutePreviewService $routePreviewService 路由解析服务
+     * @param MerchantPortalRouteConfigService $routeConfigService 路由偏好配置服务
      */
     public function __construct(
         protected MerchantPortalChannelQueryService $queryService,
         protected MerchantPortalChannelCommandService $commandService,
-        protected MerchantPortalRoutePreviewService $routePreviewService
+        protected MerchantPortalRoutePreviewService $routePreviewService,
+        protected MerchantPortalRouteConfigService $routeConfigService
     ) {
     }
 
@@ -55,6 +58,29 @@ class MerchantPortalChannelService extends BaseService
         return $this->routePreviewService->routePreview($merchantId, $payTypeId, $payAmount, $statDate);
     }
 
+    /**
+     * 查询商户路由偏好配置。
+     *
+     * @param int $merchantId 商户ID
+     * @return array 配置数据
+     */
+    public function routeConfig(int $merchantId): array
+    {
+        return $this->routeConfigService->settings($merchantId);
+    }
+
+    /**
+     * 保存商户路由偏好配置。
+     *
+     * @param int $merchantId 商户ID
+     * @param array $payload 配置数据
+     * @return array 保存后的配置
+     */
+    public function saveRouteConfig(int $merchantId, array $payload): array
+    {
+        return $this->routeConfigService->save($merchantId, $payload);
+    }
+
     public function createMeta(): array
     {
         return $this->commandService->createMeta();
@@ -63,6 +89,11 @@ class MerchantPortalChannelService extends BaseService
     public function pluginConfigs(array $filters, int $merchantId, int $page, int $pageSize): array
     {
         return $this->commandService->pluginConfigs($filters, $merchantId, $page, $pageSize);
+    }
+
+    public function pluginConfigDetail(int $merchantId, int $id)
+    {
+        return $this->commandService->pluginConfigDetail($merchantId, $id);
     }
 
     public function createPluginConfig(int $merchantId, array $data)
