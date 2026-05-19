@@ -7,7 +7,8 @@
 
 <p align="center">
   <a href="https://gitee.com/technical-laohu/mpay_v2_webman">项目主页</a> | 
-  <a href="https://gitee.com/technical-laohu/mpay_v2_webman/releases">发行版</a> | 
+  <a href="https://gitee.com/technical-laohu/mpay_v2_webman/wikis">项目文档</a> | 
+  <a href="https://gitee.com/technical-laohu/mpay_v2_webman/releases">发行版下载</a> | 
   <a href="https://gitee.com/technical-laohu/mpay_v2_webman/issues">问题反馈</a>
 </p>
 
