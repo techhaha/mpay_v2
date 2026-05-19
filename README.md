@@ -1,16 +1,17 @@
+<h1 align="center"></h1>
 <p align="center">
   <img src="public/assets/brand/mpay-logo.svg" alt="MPAY V2 Webman" width="360">
 </p>
 
-<h1 align="center">MPAY V2</h1>
+<h1 align="center">码支付 V2</h1>
 
 <p align="center">
-  <a href="https://gitee.com/technical-laohu/mpay_v2_webman">项目主页</a> |
-  <a href="https://gitee.com/technical-laohu/mpay_v2_webman/releases">发行版</a> |
+  <a href="https://gitee.com/technical-laohu/mpay_v2_webman">项目主页</a> | 
+  <a href="https://gitee.com/technical-laohu/mpay_v2_webman/releases">发行版</a> | 
   <a href="https://gitee.com/technical-laohu/mpay_v2_webman/issues">问题反馈</a>
 </p>
 
-MPAY V2 Webman 是一套基于 Webman 的支付中台后端服务，面向多商户、多通道、多支付方式的统一收款、支付路由、订单管理、退款、转账、清算和资金流水场景。
+MPAY V2 是一套基于 Webman 的支付中台后端服务，面向多商户、多通道、多支付方式的统一收款、支付路由、订单管理、退款、转账、清算和资金流水场景。
 
 程序通过发行版安装包部署，内置安装向导会完成环境检测、数据库初始化、系统配置写入和管理员账号创建。
 
