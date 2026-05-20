@@ -79,7 +79,7 @@ MPAY V2 的核心目标是把支付系统里容易分散的能力统一起来：
 
 | 类型 | 技术 |
 | --- | --- |
-| 运行环境 | PHP 8.1+ |
+| 运行环境 | PHP 8.2+ |
 | 后端框架 | Webman 2.x、Workerman |
 | 数据库 | MySQL |
 | 缓存与队列 | Redis、webman/redis-queue |
@@ -151,13 +151,13 @@ tools/             辅助工具，例如 receipt_watcher
 
 | 依赖 | 要求 |
 | --- | --- |
-| PHP | 8.1 或更高 |
+| PHP | 8.2 或更高版本 |
 | MySQL | 5.7+ / 8.x |
 | Redis | 5.x+ |
 | PHP 扩展 | `pdo_mysql`、`redis`、`pcntl` |
 
 开发环境可以直接使用 PHP CLI 启动；生产环境建议使用 Nginx 或 Apache 反向代理到 Webman HTTP 服务。
-具体要求可以看webman官方教程：**[宝塔安装](https://www.workerman.net/doc/webman/bt-install.html)**，[nginx代理](https://www.workerman.net/doc/webman/others/nginx-proxy.html)
+具体要求可以看webman官方教程：**[宝塔安装](https://www.workerman.net/doc/webman/bt-install.html)**，**[nginx代理](https://www.workerman.net/doc/webman/others/nginx-proxy.html)**
 
 ## 📝 安装说明
 
@@ -201,7 +201,7 @@ https://gitee.com/technical-laohu/mpay_v2_webman/releases
 
 | 依赖 | 说明 |
 | --- | --- |
-| PHP | 8.1 或更高版本 |
+| PHP | 8.2 或更高版本 |
 | MySQL | 建议 5.7+ / 8.x |
 | Redis | 用于缓存、登录态、队列和运行时任务 |
 | 程序依赖 | 发行版已包含 `vendor`，通常不需要在服务器单独安装依赖 |
