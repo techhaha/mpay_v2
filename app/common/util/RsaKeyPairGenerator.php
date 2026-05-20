@@ -62,6 +62,9 @@ final class RsaKeyPairGenerator
     {
         $candidates = [];
 
+        $projectConfig = base_path(false) . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'openssl.cnf';
+        $candidates[] = $projectConfig;
+
         $envConfig = trim((string) getenv('OPENSSL_CONF'));
         if ($envConfig !== '') {
             $candidates[] = $envConfig;

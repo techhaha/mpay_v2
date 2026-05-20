@@ -1068,3 +1068,4 @@ class PostarReceiptPayment extends BasePayment implements PaymentInterface, PayP
         return $timestamp !== false ? $timestamp : null;
     }
 }
+

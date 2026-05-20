@@ -3,6 +3,7 @@
 namespace app\service\install;
 
 use app\common\base\BaseService;
+use app\common\util\RsaKeyPairGenerator;
 
 /**
  * 安装环境检测服务。
@@ -20,6 +21,7 @@ class EnvironmentCheckService extends BaseService
             $this->item('PHP 版本 >= 8.1', version_compare(PHP_VERSION, '8.1.0', '>='), PHP_VERSION),
             $this->item('PDO MySQL 扩展', extension_loaded('pdo_mysql'), extension_loaded('pdo_mysql') ? '已启用' : '未启用'),
             $this->item('OpenSSL 扩展', extension_loaded('openssl'), extension_loaded('openssl') ? '已启用' : '未启用'),
+            $this->rsaItem(),
             $this->item('JSON 扩展', extension_loaded('json'), extension_loaded('json') ? '已启用' : '未启用'),
             $this->item('mbstring 扩展', extension_loaded('mbstring'), extension_loaded('mbstring') ? '已启用' : '未启用'),
             $this->item('curl 扩展', extension_loaded('curl'), extension_loaded('curl') ? '已启用' : '未启用', 'warning'),
@@ -78,6 +80,22 @@ class EnvironmentCheckService extends BaseService
         }
 
         return $this->item($name, $ok, $this->displayPath($path));
+    }
+
+    /**
+     * 检测 OpenSSL 是否可以实际生成 RSA 密钥。
+     *
+     * @return array<string, mixed> 检测项
+     */
+    private function rsaItem(): array
+    {
+        try {
+            $pair = RsaKeyPairGenerator::generate(1024);
+            $ok = trim($pair['private_key'] ?? '') !== '' && trim($pair['public_key'] ?? '') !== '';
+            return $this->item('RSA 密钥生成', $ok, $ok ? '可用' : '不可用');
+        } catch (\Throwable $e) {
+            return $this->item('RSA 密钥生成', false, $e->getMessage());
+        }
     }
 
     /**

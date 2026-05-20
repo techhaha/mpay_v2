@@ -1,0 +1,10 @@
+openssl_conf = openssl_init
+
+[openssl_init]
+
+[req]
+default_bits = 2048
+default_md = sha256
+distinguished_name = req_distinguished_name
+
+[req_distinguished_name]

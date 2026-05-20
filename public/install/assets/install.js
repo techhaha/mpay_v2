@@ -25,10 +25,35 @@
     }
   }
 
+  function apiUrl(path) {
+    if (/^https?:\/\//i.test(path)) {
+      return path;
+    }
+    var prefix = '';
+    var installIndex = window.location.pathname.indexOf('/install');
+    if (installIndex > 0) {
+      prefix = window.location.pathname.slice(0, installIndex);
+    }
+    if (path.charAt(0) === '/') {
+      return window.location.origin + prefix + path;
+    }
+    return window.location.origin + prefix + '/' + path;
+  }
+
   function api(url, options) {
-    return fetch(url, Object.assign({
+    return fetch(apiUrl(url), Object.assign({
       headers: { 'Content-Type': 'application/json' }
-    }, options || {})).then(function (res) { return res.json(); });
+    }, options || {})).then(function (res) {
+      return res.text().then(function (text) {
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          throw new Error('接口返回格式异常，请确认 Webman 服务已启动，并通过 http://域名:端口/install 访问安装向导');
+        }
+      });
+    }).catch(function (err) {
+      throw new Error(err && err.message ? err.message : '接口请求失败，请检查访问地址和服务状态');
+    });
   }
 
   function showToast(message) {
