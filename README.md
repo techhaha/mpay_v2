@@ -310,25 +310,25 @@ php webman restart
 
 进入宝塔面板的「软件商店」，先确认服务器已安装并启动 `Nginx`、`MySQL`、`Redis` 和 `PHP 8.2+`。MPAY V2 使用 Webman 常驻内存运行，动态请求最终会由 Nginx 反向代理到 Webman HTTP 服务。
 
-![宝塔面板安装基础运行环境](public/assets/readme/install/01.png)
+![宝塔面板安装基础运行环境](https://foruda.gitee.com/images/1779353289805107112/e718dc7c_12697045.png)
 
 ### 2. 安装 PHP 扩展
 
 在 PHP 设置中进入「安装扩展」，确认当前 PHP 版本已安装 `fileinfo` 和 `redis` 扩展。`redis` 扩展用于连接 Redis 服务，`fileinfo` 用于文件类型识别和上传相关处理。
 
-![宝塔面板安装 PHP 扩展](public/assets/readme/install/02.png)
+![宝塔面板安装 PHP 扩展](https://foruda.gitee.com/images/1779353308475459260/dbd65d1f_12697045.png)
 
 ### 3. 创建站点和数据库
 
 进入「网站」页面点击「添加站点」，选择「传统项目」。填写访问域名，站点根目录建议使用 `/www/wwwroot/你的域名`；同时创建 MySQL 数据库并记录数据库名、用户名和密码。因为 Webman 不依赖 PHP-FPM 处理动态请求，PHP 版本可以选择「纯静态」，后续通过伪静态规则反向代理到 Webman 服务。
 
-![宝塔面板创建站点和数据库](public/assets/readme/install/03.png)
+![宝塔面板创建站点和数据库](https://foruda.gitee.com/images/1779353324760739931/8d4a137f_12697045.png)
 
 ### 4. 上传并解压发行版安装包
 
 进入刚创建的站点目录，上传从发行版页面下载的 MPAY V2 安装包，例如 `mpay_v2.zip`，然后解压到站点当前目录。解压后站点根目录下应能看到 `app`、`config`、`database`、`public`、`runtime`、`support`、`vendor`、`webman`、`start.php` 等文件和目录。
 
-![宝塔面板上传并解压安装包](public/assets/readme/install/04.png)
+![宝塔面板上传并解压安装包](https://foruda.gitee.com/images/1779353343893590519/b7e86feb_12697045.png)
 
 ### 5. 解除必要函数禁用
 
@@ -344,7 +344,7 @@ curl -Ss https://www.workerman.net/webman/fix-disable-functions | php
 
 命令会检查当前 PHP CLI 配置，并尝试启用 `exec`、`shell_exec`、`proc_open`、`pcntl_alarm`、`pcntl_fork`、`pcntl_signal`、`pcntl_signal_dispatch` 等函数。执行完成后如有提示，请按宝塔或 PHP 配置要求重载对应服务。
 
-![宝塔面板解除 PHP 禁用函数](public/assets/readme/install/05.png)
+![宝塔面板解除 PHP 禁用函数](https://foruda.gitee.com/images/1779353361914885224/fa7a7bf8_12697045.png)
 
 ### 6. 启动 Webman 服务
 
@@ -356,13 +356,13 @@ php webman start -d
 
 看到 `Start success` 且监听地址为 `http://0.0.0.0:8787` 时，说明 Webman 服务已经启动。后续访问域名时，Nginx 会把动态请求转发到该端口。
 
-![宝塔面板启动 Webman 服务](public/assets/readme/install/06.png)
+![宝塔面板启动 Webman 服务](https://foruda.gitee.com/images/1779353385726246291/2bc0d68a_12697045.png)
 
 ### 7. 设置网站运行目录
 
 进入站点设置的「网站目录」，将「运行目录」设置为 `/public` 并保存。这样静态资源、首页、安装页和前端构建产物会从 `public` 目录对外提供。
 
-![宝塔面板设置网站运行目录](public/assets/readme/install/07.png)
+![宝塔面板设置网站运行目录](https://foruda.gitee.com/images/1779353405855345417/42eacf7e_12697045.png)
 
 ### 8. 配置伪静态反向代理
 
@@ -414,19 +414,19 @@ location ~ /\. {
 }
 ```
 
-![宝塔面板配置 Nginx 伪静态](public/assets/readme/install/08.png)
+![宝塔面板配置 Nginx 伪静态](https://foruda.gitee.com/images/1779353425824628114/faaf8522_12697045.png)
 
 ### 9. 打开安装入口
 
 浏览器访问站点域名，未安装时首页会显示系统状态为「未安装」。点击「开始安装」，或直接访问 `/install` 进入安装向导。
 
-![MPAY V2 未安装首页](public/assets/readme/install/09.png)
+![MPAY V2 未安装首页](https://foruda.gitee.com/images/1779353444389677137/570d36ba_12697045.png)
 
 ### 10. 填写基础配置
 
 安装向导会依次完成协议确认、环境检测和基础配置。基础配置中需要填写平台名称、站点 URL、MySQL 连接信息、Redis 连接信息和初始管理员信息。Redis 默认没有密码时可以留空；如果服务器设置了 Redis 密码，则按实际密码填写。
 
-![MPAY V2 安装向导基础配置](public/assets/readme/install/10.png)
+![MPAY V2 安装向导基础配置](https://foruda.gitee.com/images/1779353469746411588/b092ed1e_12697045.png)
 
 ### 11. 进入管理后台检查
 
@@ -438,13 +438,13 @@ php webman restart -d
 
 然后访问 `/admin` 进入管理后台。运营首页能正常打开，并显示运行健康、交易统计、运维告警和快捷入口，说明管理端页面和后台 API 已经连通。
 
-![MPAY V2 管理后台首页](public/assets/readme/install/11.png)
+![MPAY V2 管理后台首页](https://foruda.gitee.com/images/1779353490103183099/b6ec6f14_12697045.png)
 
 ### 12. 进入商户后台验证
 
 访问 `/mer` 可进入商户后台。首次上线后建议在管理后台补齐商户资料、接口凭证、插件配置、支付通道和路由策略，再使用商户后台验证订单、退款、资金流水和通道配置是否符合预期。
 
-![MPAY V2 商户后台首页](public/assets/readme/install/12.png)
+![MPAY V2 商户后台首页](https://foruda.gitee.com/images/1779353507701324783/ac64a892_12697045.png)
 
 ## 🚪 访问入口
 
