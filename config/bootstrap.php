@@ -14,4 +14,5 @@
 
 return [
     support\bootstrap\Session::class,
+    app\bootstrap\SystemConfigBootstrap::class,
 ];

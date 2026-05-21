@@ -3,10 +3,12 @@
 namespace app\service\install;
 
 use app\common\base\BaseService;
+use app\common\constant\EventConstant;
 use app\service\database\MigrationRunner;
 use app\service\database\SeederRunner;
 use PDO;
 use RuntimeException;
+use Webman\Event\Event;
 
 /**
  * 安装编排服务。
@@ -67,6 +69,8 @@ class InstallService extends BaseService
             'site_url' => $config['site_url'],
         ];
         $this->lockService->write($lockPayload);
+        Event::dispatch(EventConstant::SYSTEM_INSTALL_COMPLETED, $lockPayload);
+        $restartStatus = $this->restartStatus();
 
         return [
             'migrations' => $migrations,
@@ -75,7 +79,41 @@ class InstallService extends BaseService
             'lock' => $lockPayload,
             'admin_url' => '/admin',
             'restart_required' => true,
+            'restart_status' => (string) ($restartStatus['status'] ?? 'unknown'),
+            'restart_notice' => $this->restartNotice($restartStatus),
         ];
+    }
+
+    /**
+     * 读取安装完成后的重启提交状态。
+     *
+     * @return array<string, mixed>
+     */
+    private function restartStatus(): array
+    {
+        $path = runtime_path('install' . DIRECTORY_SEPARATOR . 'restart_required.json');
+        if (!is_file($path)) {
+            return [];
+        }
+
+        $content = @file_get_contents($path);
+        $status = is_string($content) ? json_decode($content, true) : null;
+        return is_array($status) ? $status : [];
+    }
+
+    /**
+     * 生成安装结果中的重启提示。
+     *
+     * @param array<string, mixed> $status 重启状态
+     * @return string
+     */
+    private function restartNotice(array $status): string
+    {
+        return match ((string) ($status['status'] ?? '')) {
+            'submitted' => '安装已写入 .env，系统已提交自动重启命令用于重新读取配置',
+            'failed' => '安装已写入 .env，但自动重启未提交：' . (string) ($status['message'] ?? '未知原因'),
+            default => '安装已写入 .env，请确认 Webman 已重启并重新读取配置',
+        };
     }
 
     /**

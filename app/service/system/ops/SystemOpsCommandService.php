@@ -23,6 +23,11 @@ class SystemOpsCommandService extends BaseService
     ];
 
     /**
+     * Linux 后台命令执行器优先级。
+     */
+    private const LINUX_EXECUTORS = ['proc_open', 'exec', 'shell_exec'];
+
+    /**
      * 构造方法。
      *
      * @param SystemOpsOperationLogService $operationLogService 系统运维操作日志服务
@@ -97,9 +102,8 @@ class SystemOpsCommandService extends BaseService
             throw new RuntimeException('未找到 Webman 命令入口');
         }
 
-        $disabled = array_filter(array_map('trim', explode(',', (string) ini_get('disable_functions'))));
-        if (DIRECTORY_SEPARATOR !== '\\' && (!function_exists('popen') || in_array('popen', $disabled, true))) {
-            throw new RuntimeException('当前 PHP 环境禁用了 popen，无法提交后台运维命令');
+        if (DIRECTORY_SEPARATOR !== '\\' && $this->availableExecutor() === '') {
+            throw new RuntimeException('当前 PHP 环境禁用了 proc_open、exec、shell_exec，无法提交后台运维命令');
         }
     }
 
@@ -214,11 +218,93 @@ class SystemOpsCommandService extends BaseService
             ? 'start /B "" ' . $commandLine . ' > ' . $output . ' 2>&1'
             : $commandLine . ' > ' . $output . ' 2>&1 &';
 
-        $handle = @popen($backgroundCommand, 'r');
-        if (!$handle) {
+        if (DIRECTORY_SEPARATOR !== '\\') {
+            $executor = $this->availableExecutor();
+            if ($executor === '') {
+                throw new RuntimeException('当前 PHP 环境禁用了 proc_open、exec、shell_exec，无法提交后台运维命令');
+            }
+            if (!$this->dispatchLinuxCommand($backgroundCommand, $executor)) {
+                throw new RuntimeException('运维命令提交失败，执行器：' . $executor);
+            }
+            return;
+        }
+
+        $null = DIRECTORY_SEPARATOR === '\\' ? 'NUL' : '/dev/null';
+        $process = @proc_open($backgroundCommand, [
+            0 => ['file', $null, 'r'],
+            1 => ['file', $null, 'a'],
+            2 => ['file', $null, 'a'],
+        ], $pipes, base_path(false));
+        if (!is_resource($process)) {
             throw new RuntimeException('运维命令提交失败');
         }
-        pclose($handle);
+
+        $exitCode = proc_close($process);
+        if ($exitCode !== 0 && $exitCode !== -1) {
+            throw new RuntimeException('运维命令提交失败');
+        }
+    }
+
+    /**
+     * 获取可用的 Linux 后台命令执行器。
+     *
+     * @return string 执行器名称，空字符串表示不可用
+     */
+    private function availableExecutor(): string
+    {
+        foreach (self::LINUX_EXECUTORS as $function) {
+            if ($this->functionEnabled($function)) {
+                return $function;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * 检测函数是否可用。
+     *
+     * @param string $function 函数名
+     * @return bool
+     */
+    private function functionEnabled(string $function): bool
+    {
+        $disabled = array_filter(array_map('trim', explode(',', (string) ini_get('disable_functions'))));
+        return function_exists($function) && !in_array($function, $disabled, true);
+    }
+
+    /**
+     * 使用指定执行器提交 Linux 后台命令。
+     *
+     * @param string $command 命令行
+     * @param string $executor 执行器
+     * @return bool 是否提交成功
+     */
+    private function dispatchLinuxCommand(string $command, string $executor): bool
+    {
+        if ($executor === 'exec') {
+            @exec($command, $output, $exitCode);
+            return $exitCode === 0;
+        }
+
+        if ($executor === 'shell_exec') {
+            $result = @shell_exec($command . ' ; echo MPAY_EXIT:$?');
+            return is_string($result) && str_contains($result, 'MPAY_EXIT:0');
+        }
+
+        $null = '/dev/null';
+        $process = @proc_open($command, [
+            0 => ['file', $null, 'r'],
+            1 => ['file', $null, 'a'],
+            2 => ['file', $null, 'a'],
+        ], $pipes, base_path(false));
+
+        if (!is_resource($process)) {
+            return false;
+        }
+
+        $exitCode = proc_close($process);
+        return $exitCode === 0 || $exitCode === -1;
     }
 
     /**

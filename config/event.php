@@ -1,6 +1,7 @@
 <?php
 
 use app\common\constant\EventConstant;
+use app\listener\InstallCompletedListener;
 use app\listener\PaymentChannelStatListener;
 use app\listener\PaymentMerchantNotifyListener;
 use app\listener\PaymentSettlementListener;
@@ -10,6 +11,9 @@ use app\listener\SystemConfigChangedListener;
 // 这里只注册当前启用的事件监听关系。
 // EventConstant 中允许保留未注册的领域事件，作为后续扩展告警、风控、统计或补偿的挂载点。
 return [
+    EventConstant::SYSTEM_INSTALL_COMPLETED => [
+        [InstallCompletedListener::class, 'requestRestart'],
+    ],
     EventConstant::SYSTEM_CONFIG_CHANGED => [
         [SystemConfigChangedListener::class, 'refreshRuntimeCache'],
         [ReceiptWatcherListener::class, 'onConfigChanged'],

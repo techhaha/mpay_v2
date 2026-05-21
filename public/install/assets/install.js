@@ -176,7 +176,7 @@
       installLog.textContent += '数据库迁移完成：' + (res.data.migrations.executed || []).length + ' 项\n';
       installLog.textContent += '基础数据初始化完成：' + (res.data.seeders || []).length + ' 项\n';
       installLog.textContent += '平台密钥已就绪\n安装锁已写入\n';
-      installLog.textContent += '请重启 Webman 服务，让新的 .env 配置生效\n';
+      installLog.textContent += (res.data.restart_notice || '系统已提交重启通知，请稍后刷新后台') + '\n';
       setTimeout(function () { setStep(4); }, 500);
     }).catch(function (err) {
       progressBar.style.width = '100%';

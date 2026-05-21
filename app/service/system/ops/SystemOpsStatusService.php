@@ -3,6 +3,7 @@
 namespace app\service\system\ops;
 
 use app\common\base\BaseService;
+use app\service\payment\receipt\ReceiptWatcherRuntimeStatusService;
 use Composer\InstalledVersions;
 use support\Db;
 use support\Redis;
@@ -25,7 +26,8 @@ class SystemOpsStatusService extends BaseService
      */
     public function __construct(
         protected SystemOpsHeartbeatService $heartbeatService,
-        protected SystemOpsOperationLogService $operationLogService
+        protected SystemOpsOperationLogService $operationLogService,
+        protected ReceiptWatcherRuntimeStatusService $receiptWatcherRuntimeStatusService
     ) {
     }
 
@@ -47,14 +49,16 @@ class SystemOpsStatusService extends BaseService
         $processes = $this->processes($processConfig, $masterPid, $masterAlive);
         $logs = $this->logSummary($server);
         $dependencies = $this->dependencies();
+        $receiptWatcherRuntime = $this->receiptWatcherRuntimeStatusService->overview();
 
         return [
             'generated_at' => $this->formatDateTime($this->now()),
             'runtime' => $this->runtimeStatus($server, $pidFile, $masterPid, $masterAlive),
             'application' => $this->applicationInfo(),
-            'summary' => $this->summary($processes, $logs, $dependencies),
+            'summary' => $this->summary($processes, $logs, $dependencies, $receiptWatcherRuntime),
             'resources' => $this->resources($server),
             'dependencies' => $dependencies,
+            'receipt_watcher_runtime' => $receiptWatcherRuntime,
             'processes' => $processes,
             'logs' => $logs,
             'operations' => $this->operationLogService->latest(8),
@@ -140,9 +144,10 @@ class SystemOpsStatusService extends BaseService
      * @param array<int, array<string, mixed>> $processes 进程列表
      * @param array<string, mixed> $logs 日志摘要
      * @param array<int, array<string, mixed>> $dependencies 依赖状态
+     * @param array<string, mixed> $receiptWatcherRuntime 网页监听工具运行状态
      * @return array<int, array<string, mixed>>
      */
-    private function summary(array $processes, array $logs, array $dependencies): array
+    private function summary(array $processes, array $logs, array $dependencies, array $receiptWatcherRuntime): array
     {
         $healthy = 0;
         $warning = 0;
@@ -167,6 +172,7 @@ class SystemOpsStatusService extends BaseService
             ['key' => 'memory', 'label' => '当前内存', 'value' => $this->formatBytes(memory_get_usage(true)), 'tone' => 'primary'],
             ['key' => 'log', 'label' => '日志告警', 'value' => (string) ($logs['error_count'] ?? 0), 'tone' => ((int) ($logs['error_count'] ?? 0)) > 0 ? 'danger' : 'success'],
             ['key' => 'dependency', 'label' => '依赖异常', 'value' => (string) $dependencyWarning, 'tone' => $dependencyWarning > 0 ? 'danger' : 'success'],
+            ['key' => 'receipt_watcher', 'label' => '网页监听', 'value' => (string) ($receiptWatcherRuntime['summary_value'] ?? '—'), 'tone' => (string) ($receiptWatcherRuntime['tone'] ?? 'gray')],
         ];
     }
 
@@ -546,7 +552,13 @@ class SystemOpsStatusService extends BaseService
      */
     private function canRunCommand(): bool
     {
-        return function_exists('popen') && !in_array('popen', $this->disabledFunctions(), true);
+        foreach (['proc_open', 'exec', 'shell_exec'] as $function) {
+            if (function_exists($function) && !in_array($function, $this->disabledFunctions(), true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -16,6 +16,11 @@ final class EventConstant
     public const SYSTEM_CONFIG_CHANGED = 'system.config.changed';
 
     /**
+     * 系统安装已完成，需要重启服务重新读取 .env。
+     */
+    public const SYSTEM_INSTALL_COMPLETED = 'system.install.completed';
+
+    /**
      * 支付单首次进入成功态。
      */
     public const PAYMENT_PAY_ORDER_SUCCEEDED = 'payment.pay_order.succeeded';

@@ -16,16 +16,16 @@ return new class {
     public function run(\PDO $pdo, array $context = []): array
     {
         $rows = [
-            ['alipay', '支付宝', 'icon-alipay', 10, '支付宝支付'],
-            ['wxpay', '微信支付', 'icon-wechat', 20, '微信支付'],
-            ['qqpay', 'QQ钱包', 'icon-qq', 30, 'QQ 钱包支付'],
-            ['bank', '银行卡', 'icon-bank-card', 40, '银行卡支付'],
+            ['alipay', '支付宝', 'icon-alipay-circle', 10, 1, '支付宝支付'],
+            ['wxpay', '微信支付', 'icon-wechatpay', 20, 1, '微信支付'],
+            ['qqpay', 'QQ钱包', 'icon-qq', 30, 1, 'QQ 钱包支付'],
+            ['bank', '银行卡', 'icon-idcard', 40, 1, '银行卡支付'],
         ];
 
         $statement = $pdo->prepare(
             'INSERT INTO `ma_payment_type` (`code`, `name`, `icon`, `sort_no`, `status`, `remark`, `created_at`, `updated_at`) ' .
-            'VALUES (?, ?, ?, ?, 1, ?, NOW(), NOW()) ' .
-            'ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `icon` = VALUES(`icon`), `sort_no` = VALUES(`sort_no`), `updated_at` = NOW()'
+            'VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW()) ' .
+            'ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `icon` = VALUES(`icon`), `sort_no` = VALUES(`sort_no`), `status` = VALUES(`status`), `remark` = VALUES(`remark`), `updated_at` = NOW()'
         );
 
         foreach ($rows as $row) {
