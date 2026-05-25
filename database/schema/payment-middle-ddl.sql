@@ -415,8 +415,7 @@ CREATE TABLE IF NOT EXISTS `ma_merchant_account_ledger` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_idempotency_key` (`idempotency_key`),
   KEY `idx_trace_no` (`trace_no`),
-  KEY `idx_merchant_biz` (`merchant_id`, `biz_type`, `biz_no`),
-  KEY `idx_merchant_created` (`merchant_id`, `created_at`)
+  KEY `idx_merchant_biz` (`merchant_id`, `biz_type`, `biz_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商户余额流水表';
 
 CREATE TABLE IF NOT EXISTS `ma_settlement_order` (
@@ -502,6 +501,7 @@ CREATE TABLE IF NOT EXISTS `ma_pay_callback_log` (
   `channel_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '通道ID',
   `callback_type` tinyint unsigned NOT NULL DEFAULT 0 COMMENT '回调类型：0-异步通知,1-同步返回',
   `request_data` longtext COMMENT '请求原始数据（完整回调参数）',
+  `request_hash` char(64) NOT NULL DEFAULT '' COMMENT '请求载荷SHA-256摘要',
   `verify_status` tinyint unsigned NOT NULL DEFAULT 0 COMMENT '验签状态：0-未知,1-成功,2-失败',
   `process_status` tinyint unsigned NOT NULL DEFAULT 0 COMMENT '处理状态：0-待处理,1-成功,2-失败',
   `process_result` longtext COMMENT '处理结果（JSON或文本）',
@@ -510,6 +510,7 @@ CREATE TABLE IF NOT EXISTS `ma_pay_callback_log` (
   KEY `idx_pay_created` (`pay_no`, `created_at`),
   KEY `idx_channel_created` (`channel_id`, `created_at`),
   KEY `idx_callback_type` (`callback_type`),
+  KEY `idx_request_hash` (`request_hash`),
   KEY `idx_verify_status` (`verify_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付回调日志表';
 
@@ -571,7 +572,8 @@ CREATE TABLE IF NOT EXISTS `ma_notify_task` (
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_notify_no` (`notify_no`),
-  UNIQUE KEY `uk_notify_event_ref` (`event_type`, `ref_no`),
+  UNIQUE KEY `uk_event_ref` (`event_type`, `ref_no`),
+  KEY `idx_pay_no` (`pay_no`),
   KEY `idx_status_retry` (`status`, `next_retry_at`),
   KEY `idx_merchant_group` (`merchant_id`, `merchant_group_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商户通知任务表';

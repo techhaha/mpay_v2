@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\FileConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\ChannelNotifyInterface;
 use app\common\interface\PaymentInterface;
@@ -131,12 +132,24 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
                 ],
             ],
             [
-                'type' => 'input',
+                'type' => 'upload',
                 'field' => 'receipt_qrcode_image',
                 'title' => '支付宝收款码图片',
                 'value' => '',
                 'props' => [
-                    'placeholder' => '收款码图片 URL，未配置收款码内容时使用',
+                    'fileUpload' => [
+                        'selectorType' => 'image',
+                        'scene' => FileConstant::SCENE_IMAGE,
+                        'visibility' => FileConstant::VISIBILITY_PUBLIC,
+                        'getKey' => 'url',
+                        'accept' => '.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg',
+                        'listType' => 'picture-card',
+                        'showFileList' => true,
+                        'imagePreview' => true,
+                        'limit' => 1,
+                        'multiple' => false,
+                    ],
+                    'tip' => '上传收款码图片，未配置收款码内容时用于收银台展示。',
                 ],
             ],
         ],

@@ -9,6 +9,7 @@ use app\exception\PaymentException;
 use app\model\payment\PaymentChannel;
 use app\repository\merchant\base\MerchantRepository;
 use app\repository\payment\config\PaymentChannelRepository;
+use app\repository\payment\config\PaymentPluginConfRepository;
 use app\repository\payment\config\PaymentPluginRepository;
 use app\repository\payment\config\PaymentTypeRepository;
 use Webman\Event\Event;
@@ -20,16 +21,45 @@ use Webman\Event\Event;
  *
  * @property MerchantRepository $merchantRepository 商户仓库
  * @property PaymentChannelRepository $paymentChannelRepository 支付渠道仓库
+ * @property PaymentPluginConfRepository $paymentPluginConfRepository 支付插件配置仓库
  * @property PaymentPluginRepository $paymentPluginRepository 支付插件仓库
  * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
  */
 class PaymentChannelCommandService extends BaseService
 {
     /**
+     * 支付通道写入字段里的整数字段。
+     */
+    private const INTEGER_FIELDS = [
+        'merchant_id',
+        'split_rate_bp',
+        'cost_rate_bp',
+        'channel_mode',
+        'pay_type_id',
+        'api_config_id',
+        'daily_limit_amount',
+        'daily_limit_count',
+        'min_amount',
+        'max_amount',
+        'status',
+        'sort_no',
+    ];
+
+    /**
+     * 支付通道写入字段里的字符串字段。
+     */
+    private const STRING_FIELDS = [
+        'name',
+        'plugin_code',
+        'remark',
+    ];
+
+    /**
      * 构造方法。
      *
      * @param MerchantRepository $merchantRepository 商户仓库
      * @param PaymentChannelRepository $paymentChannelRepository 支付渠道仓库
+     * @param PaymentPluginConfRepository $paymentPluginConfRepository 支付插件配置仓库
      * @param PaymentPluginRepository $paymentPluginRepository 支付插件仓库
      * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
      * @return void
@@ -37,6 +67,7 @@ class PaymentChannelCommandService extends BaseService
     public function __construct(
         protected MerchantRepository $merchantRepository,
         protected PaymentChannelRepository $paymentChannelRepository,
+        protected PaymentPluginConfRepository $paymentPluginConfRepository,
         protected PaymentPluginRepository $paymentPluginRepository,
         protected PaymentTypeRepository $paymentTypeRepository
     ) {
@@ -62,13 +93,15 @@ class PaymentChannelCommandService extends BaseService
      */
     public function create(array $data): PaymentChannel
     {
-        // 新增通道前先校验名称、商户归属和插件支付方式兼容性。
-        $this->assertPlatformPayload($data);
-        $this->assertChannelNameUnique((string) ($data['name'] ?? ''));
-        $this->assertMerchantExists($data);
-        $this->assertPluginSupportsPayType($data);
+        $payload = $this->normalizePayload($data);
 
-        $channel = $this->paymentChannelRepository->create($data);
+        $this->assertPlatformPayload($payload);
+        $this->assertChannelNameUnique((string) ($payload['name'] ?? ''));
+        $this->assertMerchantExists($payload);
+        $this->assertPluginSupportsPayType($payload);
+        $this->assertApiConfigMatchesPlugin($payload, true);
+
+        $channel = $this->paymentChannelRepository->create($payload);
         $this->dispatchWatcherConfigChanged('create', $channel);
 
         return $channel;
@@ -89,14 +122,20 @@ class PaymentChannelCommandService extends BaseService
             return null;
         }
 
-        // 更新通道时同样要先拦住冲突配置，避免保存后才发现路由不可用。
-        $this->assertPlatformChannel($current);
-        $this->assertPlatformPayload($data, false);
-        $this->assertChannelNameUnique((string) ($data['name'] ?? ''), $id);
-        $this->assertMerchantExists($data);
-        $this->assertPluginSupportsPayType($data);
+        $payload = $this->normalizePayload($data);
 
-        if (!$this->paymentChannelRepository->updateById($id, $data)) {
+        $this->assertPlatformChannel($current);
+        $this->assertPlatformPayload($payload, false);
+        $this->assertChannelNameUnique((string) ($payload['name'] ?? ''), $id);
+        $this->assertMerchantExists($payload);
+        $this->assertPluginSupportsPayType($payload);
+        $this->assertApiConfigMatchesPlugin($payload, false);
+
+        if ($payload === []) {
+            return $current;
+        }
+
+        if (!$this->paymentChannelRepository->updateById($id, $payload)) {
             return null;
         }
 
@@ -128,6 +167,31 @@ class PaymentChannelCommandService extends BaseService
         }
 
         return $deleted;
+    }
+
+    /**
+     * 标准化通道写入数据，只保留通道表可写字段并统一类型。
+     *
+     * @param array $data 写入数据
+     * @return array<string, mixed> 标准化后的写入数据
+     */
+    private function normalizePayload(array $data): array
+    {
+        $payload = [];
+
+        foreach (self::STRING_FIELDS as $field) {
+            if (array_key_exists($field, $data)) {
+                $payload[$field] = trim((string) ($data[$field] ?? ''));
+            }
+        }
+
+        foreach (self::INTEGER_FIELDS as $field) {
+            if (array_key_exists($field, $data)) {
+                $payload[$field] = (int) ($data[$field] ?? 0);
+            }
+        }
+
+        return $payload;
     }
 
     /**
@@ -208,7 +272,7 @@ class PaymentChannelCommandService extends BaseService
         $pluginCode = trim((string) ($data['plugin_code'] ?? ''));
         $payTypeId = (int) ($data['pay_type_id'] ?? 0);
 
-        // 草稿态允许只填一半字段，只有插件和支付方式都明确时才做交叉校验。
+        // 状态开关等局部更新不会携带插件和支付方式，字段完整时才做交叉校验。
         if ($pluginCode === '' || $payTypeId <= 0) {
             return;
         }
@@ -229,6 +293,56 @@ class PaymentChannelCommandService extends BaseService
             throw new PaymentException('支付插件不支持当前支付方式', 40210, [
                 'plugin_code' => $pluginCode,
                 'pay_type_code' => $payTypeCode,
+            ]);
+        }
+    }
+
+    /**
+     * 校验通道绑定的接口配置存在、属于平台并且和插件编码一致。
+     *
+     * @param array $data 写入数据
+     * @param bool $requireFields 是否要求携带完整配置字段
+     * @return void
+     * @throws PaymentException
+     */
+    private function assertApiConfigMatchesPlugin(array $data, bool $requireFields = true): void
+    {
+        $hasConfigId = array_key_exists('api_config_id', $data);
+        $hasPluginCode = array_key_exists('plugin_code', $data);
+        if (!$requireFields && !$hasConfigId && !$hasPluginCode) {
+            return;
+        }
+
+        $apiConfigId = (int) ($data['api_config_id'] ?? 0);
+        $pluginCode = trim((string) ($data['plugin_code'] ?? ''));
+
+        if ($apiConfigId <= 0) {
+            throw new PaymentException('请先选择接口配置', 40219);
+        }
+
+        if ($pluginCode === '') {
+            throw new PaymentException('请先选择支付插件', 40220);
+        }
+
+        $config = $this->paymentPluginConfRepository->find($apiConfigId);
+        if (!$config) {
+            throw new PaymentException('接口配置不存在', 40221, [
+                'api_config_id' => $apiConfigId,
+            ]);
+        }
+
+        if ((int) $config->merchant_id !== 0) {
+            throw new PaymentException('管理后台通道只能绑定平台接口配置', 40222, [
+                'api_config_id' => $apiConfigId,
+                'merchant_id' => (int) $config->merchant_id,
+            ]);
+        }
+
+        if ((string) $config->plugin_code !== $pluginCode) {
+            throw new PaymentException('接口配置与支付插件不匹配，请重新选择', 40223, [
+                'api_config_id' => $apiConfigId,
+                'config_plugin_code' => (string) $config->plugin_code,
+                'plugin_code' => $pluginCode,
             ]);
         }
     }

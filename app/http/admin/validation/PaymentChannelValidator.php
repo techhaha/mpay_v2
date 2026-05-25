@@ -26,7 +26,7 @@ class PaymentChannelValidator extends Validator
         'channel_mode' => 'sometimes|integer|in:0,1',
         'pay_type_id' => 'sometimes|integer|min:1|exists:ma_payment_type,id',
         'plugin_code' => 'sometimes|string|min:1|max:64|exists:ma_payment_plugin,code',
-        'api_config_id' => 'nullable|integer|min:1',
+        'api_config_id' => 'sometimes|integer|min:1',
         'daily_limit_amount' => 'nullable|integer|min:0',
         'daily_limit_count' => 'nullable|integer|min:0',
         'min_amount' => 'nullable|integer|min:0',
@@ -100,6 +100,7 @@ class PaymentChannelValidator extends Validator
                 'channel_mode' => 'required|integer|in:0,1',
                 'pay_type_id' => 'required|integer|min:1|exists:ma_payment_type,id',
                 'plugin_code' => 'required|string|min:1|max:64|exists:ma_payment_plugin,code',
+                'api_config_id' => 'required|integer|min:1',
                 'status' => 'required|integer|in:0,1',
             ]),
             'update' => array_merge($rules, [
@@ -111,6 +112,7 @@ class PaymentChannelValidator extends Validator
                 'channel_mode' => 'required|integer|in:0,1',
                 'pay_type_id' => 'required|integer|min:1|exists:ma_payment_type,id',
                 'plugin_code' => 'required|string|min:1|max:64|exists:ma_payment_plugin,code',
+                'api_config_id' => 'required|integer|min:1',
                 'status' => 'required|integer|in:0,1',
             ]),
             'updateStatus' => array_merge($rules, [

@@ -83,7 +83,7 @@ class BaseController
      */
     protected function validated(array $data, string $validatorClass, ?string $scene = null): array
     {
-        $validator = $validatorClass::make($data);
+        $validator = $validatorClass::make($this->normalizeValidationInput($data));
 
         if ($scene !== null) {
             $validator = $validator->withScene($scene);
@@ -92,6 +92,22 @@ class BaseController
         return $validator
             ->withException(ValidationException::class)
             ->validate();
+    }
+
+    /**
+     * 标准化校验输入。
+     *
+     * 前端选择器清空时通常会传空字符串。这里统一把顶层空字符串转为 null，让
+     * required/integer/nullable 等规则按一致语义工作，避免空字符串继续进入写库流程。
+     *
+     * @param array $data 原始请求数据
+     * @return array 标准化后的请求数据
+     */
+    private function normalizeValidationInput(array $data): array
+    {
+        return array_map(function ($value) {
+            return $value === '' ? null : $value;
+        }, $data);
     }
 
     /**

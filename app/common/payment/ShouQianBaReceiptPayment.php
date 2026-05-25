@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\FileConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\ChannelNotifyPayloadInterface;
 use app\common\interface\PaymentInterface;
@@ -171,12 +172,24 @@ class ShouQianBaReceiptPayment extends BasePayment implements PaymentInterface, 
                 ],
             ],
             [
-                'type' => 'input',
+                'type' => 'upload',
                 'field' => 'receipt_qrcode_image',
                 'title' => '二维码牌图片',
                 'value' => '',
                 'props' => [
-                    'placeholder' => '二维码图片 URL，未配置二维码内容时使用',
+                    'fileUpload' => [
+                        'selectorType' => 'image',
+                        'scene' => FileConstant::SCENE_IMAGE,
+                        'visibility' => FileConstant::VISIBILITY_PUBLIC,
+                        'getKey' => 'url',
+                        'accept' => '.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg',
+                        'listType' => 'picture-card',
+                        'showFileList' => true,
+                        'imagePreview' => true,
+                        'limit' => 1,
+                        'multiple' => false,
+                    ],
+                    'tip' => '上传收款码图片，未配置收款码内容时用于收银台展示。',
                 ],
             ],
         ],
