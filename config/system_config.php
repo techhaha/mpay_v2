@@ -272,8 +272,6 @@ return [
                         'rule' => [
                             '__storage_local_divider__',
                             'file_storage_local_public_base_url',
-                            'file_storage_local_public_dir',
-                            'file_storage_local_private_dir',
                         ],
                         'value' => (string) FileConstant::STORAGE_LOCAL,
                         'method' => 'display',
@@ -349,24 +347,6 @@ return [
                 'value' => '',
                 'props' => [
                     'placeholder' => '请输入本地公开访问前缀，留空时自动使用站点 URL',
-                ],
-            ],
-            [
-                'type' => 'input',
-                'field' => 'file_storage_local_public_dir',
-                'title' => '本地公开目录',
-                'value' => 'storage/uploads',
-                'props' => [
-                    'placeholder' => '请输入本地公开目录，例如 storage/uploads',
-                ],
-            ],
-            [
-                'type' => 'input',
-                'field' => 'file_storage_local_private_dir',
-                'title' => '本地私有目录',
-                'value' => 'storage/private',
-                'props' => [
-                    'placeholder' => '请输入本地私有目录，例如 storage/private',
                 ],
             ],
             [
@@ -895,7 +875,7 @@ return [
                 'type' => 'textarea',
                 'field' => 'receipt_watcher_plugin_codes',
                 'title' => '监听插件标识',
-                'value' => "shouqianba_receipt\npostar_receipt\nalipay_bill_receipt",
+                'value' => "shouqianba_receipt\npostar_receipt\nalipay_bill_receipt\nhaike_maqian_receipt\nlakala_receipt\ntianque_receipt\nfubei_receipt\nyisheng_receipt\nyeepay_boss_receipt",
                 'props' => [
                     'placeholder' => '请输入支持网页流水监听的插件标识，多个用逗号或换行分隔',
                     'autoSize' => [

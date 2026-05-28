@@ -1,1 +1,0 @@
-import{af as a}from"./index-BOjxigp8.js";const t=()=>a({url:"/merchant/profile",method:"get"}),e=t=>a({url:"/merchant/profile",method:"put",data:t}),r=t=>a({url:"/merchant/change-password",method:"post",data:t});export{r as c,t as g,e as u};

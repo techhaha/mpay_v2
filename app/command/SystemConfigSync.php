@@ -19,6 +19,14 @@ use Symfony\Component\Console\Output\OutputInterface;
 class SystemConfigSync extends Command
 {
     /**
+     * 已改为代码常量维护的历史配置键。
+     */
+    private const OBSOLETE_CONFIG_KEYS = [
+        'file_storage_local_public_dir',
+        'file_storage_local_private_dir',
+    ];
+
+    /**
      * 配置命令说明。
      *
      * @return void
@@ -63,9 +71,11 @@ class SystemConfigSync extends Command
                 }
             }
 
+            $deleted = $repository->deleteByConfigKeys(self::OBSOLETE_CONFIG_KEYS);
+
             $runtimeService->refresh();
 
-            $output->writeln(sprintf('<info>系统配置同步完成</info>，写入 %d 项。', $written));
+            $output->writeln(sprintf('<info>系统配置同步完成</info>，写入 %d 项，清理历史配置 %d 项。', $written, $deleted));
 
             return self::SUCCESS;
         } catch (\Throwable $e) {

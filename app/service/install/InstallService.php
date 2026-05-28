@@ -4,6 +4,7 @@ namespace app\service\install;
 
 use app\common\base\BaseService;
 use app\common\constant\EventConstant;
+use app\common\constant\FileConstant;
 use app\service\database\MigrationRunner;
 use app\service\database\SeederRunner;
 use PDO;
@@ -184,8 +185,9 @@ class InstallService extends BaseService
             base_path(false) . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'logs',
             base_path(false) . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'cache',
             base_path(false) . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'storage',
+            runtime_path(FileConstant::LOCAL_PRIVATE_DIR),
             public_path('storage'),
-            public_path('storage/uploads'),
+            public_path(FileConstant::LOCAL_PUBLIC_DIR),
         ];
 
         foreach ($directories as $directory) {

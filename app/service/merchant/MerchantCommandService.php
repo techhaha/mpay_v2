@@ -81,20 +81,9 @@ class MerchantCommandService extends BaseService
     {
         return $this->transaction(function () use ($data) {
             $merchantName = trim((string) ($data['merchant_name'] ?? ''));
-            $contactName = trim((string) ($data['contact_name'] ?? ''));
-            $contactPhone = trim((string) ($data['contact_phone'] ?? ''));
             $groupId = (int) ($data['group_id'] ?? 0);
             if ($merchantName === '') {
                 throw new ValidationException('商户名称不能为空');
-            }
-            if ($groupId <= 0) {
-                throw new ValidationException('请选择商户分组');
-            }
-            if ($contactName === '') {
-                throw new ValidationException('联系人不能为空');
-            }
-            if ($contactPhone === '') {
-                throw new ValidationException('联系电话不能为空');
             }
             if ($groupId > 0) {
                 $this->ensureMerchantGroupEnabled($groupId);
@@ -111,8 +100,8 @@ class MerchantCommandService extends BaseService
                 'merchant_type' => (int) ($data['merchant_type'] ?? 0),
                 'group_id' => $groupId,
                 'risk_level' => (int) ($data['risk_level'] ?? 0),
-                'contact_name' => $contactName,
-                'contact_phone' => $contactPhone,
+                'contact_name' => trim((string) ($data['contact_name'] ?? '')),
+                'contact_phone' => trim((string) ($data['contact_phone'] ?? '')),
                 'contact_email' => trim((string) ($data['contact_email'] ?? '')),
                 'settlement_account_name' => trim((string) ($data['settlement_account_name'] ?? '')),
                 'settlement_account_no' => trim((string) ($data['settlement_account_no'] ?? '')),

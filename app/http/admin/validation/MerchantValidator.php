@@ -19,11 +19,11 @@ class MerchantValidator extends Validator
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
-        'group_id' => 'sometimes|integer|min:1',
+        'group_id' => 'sometimes|integer|min:0',
         'status' => 'sometimes|integer|in:0,1',
         'merchant_type' => 'sometimes|integer|in:0,1,2',
         'merchant_no' => 'sometimes|string|max:32',
-        'merchant_name' => 'sometimes|string|max:100',
+        'merchant_name' => 'sometimes|required|string|max:100',
         'merchant_short_name' => 'sometimes|string|max:60',
         'password' => 'sometimes|string|min:6|max:32',
         'password_confirm' => 'sometimes|string|min:6|max:32|same:password',
@@ -126,12 +126,6 @@ class MerchantValidator extends Validator
     {
         return $this->appendRules([
             'merchant_name' => 'required|string|max:100',
-            'merchant_type' => 'required|integer|in:0,1,2',
-            'group_id' => 'required|integer|min:1|exists:ma_merchant_group,id',
-            'risk_level' => 'required|integer|in:0,1,2',
-            'contact_name' => 'required|string|max:50',
-            'contact_phone' => 'required|string|max:20',
-            'status' => 'required|integer|in:0,1',
         ]);
     }
 
@@ -144,13 +138,6 @@ class MerchantValidator extends Validator
     {
         return $this->appendRules([
             'id' => 'required|integer|min:1',
-            'merchant_name' => 'required|string|max:100',
-            'merchant_type' => 'required|integer|in:0,1,2',
-            'group_id' => 'required|integer|min:1|exists:ma_merchant_group,id',
-            'risk_level' => 'required|integer|in:0,1,2',
-            'contact_name' => 'required|string|max:50',
-            'contact_phone' => 'required|string|max:20',
-            'status' => 'required|integer|in:0,1',
         ]);
     }
 

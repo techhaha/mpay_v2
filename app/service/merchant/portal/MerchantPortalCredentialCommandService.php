@@ -88,7 +88,7 @@ class MerchantPortalCredentialCommandService extends BaseService
             'id' => (int) $credential->id,
             'merchant_id' => (int) $credential->merchant_id,
             'api_key_preview' => $this->maskCredentialValue($apiKey),
-            'api_key_full' => '',
+            'api_key_full' => $apiKey,
             'merchant_public_key_full' => $merchantPublicKey,
             'merchant_public_key_preview' => $this->maskCredentialValue($merchantPublicKey),
             'platform_public_key_full' => $platformPublicKey,

@@ -35,7 +35,7 @@ class MerchantPortalValidator extends Validator
         'config' => 'nullable|array',
         'settlement_cycle_type' => 'sometimes|integer|in:0,1,2,3,4',
         'settlement_cutoff_time' => 'nullable|date_format:H:i:s',
-        'name' => 'sometimes|string|min:2|max:128',
+        'name' => 'sometimes|string|min:2|max:100',
         'api_config_id' => 'sometimes|integer|min:1',
         'daily_limit_amount' => 'nullable|integer|min:0',
         'daily_limit_count' => 'nullable|integer|min:0',
@@ -139,7 +139,7 @@ class MerchantPortalValidator extends Validator
                 'id' => 'required|integer|min:1',
             ]),
             'channelStore' => array_merge($rules, [
-                'name' => 'required|string|min:2|max:128',
+                'name' => 'required|string|min:2|max:100',
                 'pay_type_id' => 'required|integer|min:1',
                 'plugin_code' => 'required|string|alpha_dash|min:2|max:32',
                 'api_config_id' => 'required|integer|min:1',
@@ -147,7 +147,7 @@ class MerchantPortalValidator extends Validator
             ]),
             'channelUpdate' => array_merge($rules, [
                 'id' => 'required|integer|min:1',
-                'name' => 'required|string|min:2|max:128',
+                'name' => 'required|string|min:2|max:100',
                 'pay_type_id' => 'required|integer|min:1',
                 'plugin_code' => 'required|string|alpha_dash|min:2|max:32',
                 'api_config_id' => 'required|integer|min:1',

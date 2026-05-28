@@ -8,6 +8,7 @@ use app\http\api\validation\EpayV1Validator;
 use support\limiter\Limiter;
 use support\Request;
 use support\Response;
+use Throwable;
 
 /**
  * ePay V1 控制器。
@@ -35,13 +36,18 @@ class EpayV1Controller extends BaseController
     public function submit(Request $request): Response
     {
         $payload = $request->all();
-        Limiter::check('epay-v1-submit-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
-        if ((int) ($payload['pid'] ?? 0) > 0) {
-            Limiter::check('epay-v1-submit-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
-        }
-        $payload = $this->validated($payload, EpayV1Validator::class, 'submit');
 
-        return $this->epayV1ProtocolService->submit($payload, $request);
+        try {
+            Limiter::check('epay-v1-submit-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
+            if ((int) ($payload['pid'] ?? 0) > 0) {
+                Limiter::check('epay-v1-submit-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
+            }
+            $payload = $this->validated($payload, EpayV1Validator::class, 'submit');
+
+            return $this->epayV1ProtocolService->submit($payload, $request);
+        } catch (Throwable $e) {
+            return $this->epayV1ProtocolService->entryErrorResponse($payload, $e);
+        }
     }
 
     /**

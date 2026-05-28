@@ -19,11 +19,11 @@ class PaymentPollGroupValidator extends Validator
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
-        'group_name' => 'sometimes|string|min:2|max:128',
+        'group_name' => 'sometimes|string|min:2|max:100',
         'pay_type_id' => 'sometimes|integer|min:1|exists:ma_payment_type,id',
         'route_mode' => 'sometimes|integer|in:0,1,2',
         'status' => 'sometimes|integer|in:0,1',
-        'remark' => 'nullable|string|max:255',
+        'remark' => 'nullable|string|max:500',
         'page' => 'sometimes|integer|min:1',
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
@@ -70,17 +70,13 @@ class PaymentPollGroupValidator extends Validator
 
         return match ($this->scene()) {
             'store' => array_merge($rules, [
-                'group_name' => 'required|string|min:2|max:128',
+                'group_name' => 'required|string|min:2|max:100',
                 'pay_type_id' => 'required|integer|min:1|exists:ma_payment_type,id',
-                'route_mode' => 'required|integer|in:0,1,2',
-                'status' => 'required|integer|in:0,1',
             ]),
             'update' => array_merge($rules, [
                 'id' => 'required|integer|min:1',
-                'group_name' => 'required|string|min:2|max:128',
+                'group_name' => 'required|string|min:2|max:100',
                 'pay_type_id' => 'required|integer|min:1|exists:ma_payment_type,id',
-                'route_mode' => 'required|integer|in:0,1,2',
-                'status' => 'required|integer|in:0,1',
             ]),
             'updateStatus' => array_merge($rules, [
                 'id' => 'required|integer|min:1',

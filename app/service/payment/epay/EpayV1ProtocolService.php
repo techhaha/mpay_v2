@@ -82,7 +82,7 @@ class EpayV1ProtocolService extends BaseService
      *
      * @param array $payload 请求载荷
      * @param Request $request 请求对象
-     * @return Response 跳转响应或错误 JSON
+     * @return Response 跳转响应
      * @throws ValidationException
      */
     public function submit(array $payload, Request $request): Response
@@ -111,17 +111,28 @@ class EpayV1ProtocolService extends BaseService
 
             return redirect((string) $attempt['payment_page_url']);
         } catch (Throwable $e) {
-            $data = method_exists($e, 'getData') ? $e->getData() : [];
-            $payNo = trim((string) ($data['pay_no'] ?? ''));
-            if ($payNo !== '') {
-                return redirect($this->buildPaymentPageUrl($payNo));
-            }
-
-            return json([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->entryErrorResponse($payload, $e);
         }
+    }
+
+    /**
+     * 构建页面支付入口级错误跳转。
+     *
+     * 支付单创建前没有 presentation 可承接，只能跳入口错误页；已创建支付单的异常继续回到支付承接页。
+     *
+     * @param array $payload 请求载荷
+     * @param Throwable $e 异常
+     * @return Response 跳转响应
+     */
+    public function entryErrorResponse(array $payload, Throwable $e): Response
+    {
+        $data = method_exists($e, 'getData') ? $e->getData() : [];
+        $payNo = trim((string) ($data['pay_no'] ?? ''));
+        if ($payNo !== '') {
+            return redirect($this->buildPaymentPageUrl($payNo));
+        }
+
+        return redirect($this->buildEntryErrorPageUrl($payload, $e));
     }
 
     /**
@@ -668,6 +679,49 @@ class EpayV1ProtocolService extends BaseService
     private function buildPaymentPageUrl(string $payNo): string
     {
         return rtrim((string) sys_config('site_url'), '/') . '/payment/' . rawurlencode($payNo);
+    }
+
+    /**
+     * 构建支付入口错误页地址。
+     *
+     * @param array $payload 原始请求载荷
+     * @param Throwable $e 异常
+     * @return string 错误页地址
+     */
+    private function buildEntryErrorPageUrl(array $payload, Throwable $e): string
+    {
+        $query = [
+            'msg' => $this->safeEntryErrorMessage($e),
+        ];
+
+        $code = (string) $e->getCode();
+        if ($code !== '' && $code !== '0') {
+            $query['code'] = $code;
+        }
+
+        foreach (['out_trade_no', 'pid'] as $key) {
+            if (($payload[$key] ?? '') !== '') {
+                $query[$key] = (string) $payload[$key];
+            }
+        }
+
+        return rtrim((string) sys_config('site_url'), '/') . '/payment/entry/error?' . http_build_query($query);
+    }
+
+    /**
+     * 生成可展示的入口错误信息。
+     *
+     * @param Throwable $e 异常
+     * @return string 安全错误信息
+     */
+    private function safeEntryErrorMessage(Throwable $e): string
+    {
+        $message = trim(preg_replace('/\s+/', ' ', strip_tags($e->getMessage())) ?? '');
+        if ($message === '') {
+            $message = '支付发起失败，请检查请求参数或商户配置';
+        }
+
+        return mb_strcut($message, 0, 240, 'UTF-8');
     }
 
     /**

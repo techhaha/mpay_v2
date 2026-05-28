@@ -149,6 +149,28 @@ class MerchantNotifyDispatcherService extends BaseService
     }
 
     /**
+     * 构建支付成功后的页面跳转通知地址。
+     *
+     * V1/V2 的 return_url 与 notify_url 使用同一套成功通知参数和签名，
+     * 只是 return_url 由收银台前端跳转给商户，不创建通知任务。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @param BizOrder|null $bizOrder 业务单
+     * @return string 带协议参数的 return_url；未配置时返回空字符串
+     * @throws ValidationException
+     */
+    public function buildPaySuccessReturnUrl(PayOrder $payOrder, ?BizOrder $bizOrder = null): string
+    {
+        $bizOrder ??= $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
+        $returnUrl = trim((string) ($payOrder->return_url ?: ($bizOrder?->return_url ?? '')));
+        if ($returnUrl === '') {
+            return '';
+        }
+
+        return $this->appendQuery($returnUrl, $this->buildPaySuccessPayload($payOrder, $bizOrder));
+    }
+
+    /**
      * 为退款成功创建通知任务。
      *
      * @param RefundOrder $refundOrder 退款单
@@ -581,6 +603,34 @@ class MerchantNotifyDispatcherService extends BaseService
         unset($params['sign'], $params['sign_type']);
 
         return $params;
+    }
+
+    /**
+     * 追加 URL 查询参数。
+     *
+     * @param string $url 原始地址
+     * @param array<string, mixed> $params 查询参数
+     * @return string 追加后的地址
+     */
+    private function appendQuery(string $url, array $params): string
+    {
+        $query = http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+        if ($query === '') {
+            return $url;
+        }
+
+        $fragment = '';
+        $fragmentPosition = strpos($url, '#');
+        if ($fragmentPosition !== false) {
+            $fragment = substr($url, $fragmentPosition);
+            $url = substr($url, 0, $fragmentPosition);
+        }
+
+        $separator = str_contains($url, '?')
+            ? (str_ends_with($url, '?') || str_ends_with($url, '&') ? '' : '&')
+            : '?';
+
+        return $url . $separator . $query . $fragment;
     }
 
     /**

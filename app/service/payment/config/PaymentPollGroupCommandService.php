@@ -36,7 +36,14 @@ class PaymentPollGroupCommandService extends BaseService
     {
         // 新增前先确保轮询组名称不冲突，避免后台同时出现两个同名配置。
         $this->assertGroupNameUnique((string) ($data['group_name'] ?? ''));
-        return $this->paymentPollGroupRepository->create($data);
+
+        return $this->paymentPollGroupRepository->create([
+            'group_name' => (string) $data['group_name'],
+            'pay_type_id' => (int) $data['pay_type_id'],
+            'route_mode' => (int) ($data['route_mode'] ?? 0),
+            'status' => (int) ($data['status'] ?? 1),
+            'remark' => (string) ($data['remark'] ?? ''),
+        ]);
     }
 
     /**
@@ -49,9 +56,25 @@ class PaymentPollGroupCommandService extends BaseService
      */
     public function update(int $id, array $data): ?PaymentPollGroup
     {
+        $current = $this->paymentPollGroupRepository->find($id);
+        if (!$current) {
+            return null;
+        }
+
+        $nextData = array_merge($current->toArray(), $data);
+
         // 更新时同样要排除自身后再做唯一性判断，防止修改回原名时误报冲突。
-        $this->assertGroupNameUnique((string) ($data['group_name'] ?? ''), $id);
-        if (!$this->paymentPollGroupRepository->updateById($id, $data)) {
+        $this->assertGroupNameUnique((string) ($nextData['group_name'] ?? ''), $id);
+
+        $payload = [
+            'group_name' => (string) $nextData['group_name'],
+            'pay_type_id' => (int) $nextData['pay_type_id'],
+            'route_mode' => (int) ($nextData['route_mode'] ?? 0),
+            'status' => (int) ($nextData['status'] ?? 1),
+            'remark' => (string) ($nextData['remark'] ?? ''),
+        ];
+
+        if (!$this->paymentPollGroupRepository->updateById($id, $payload)) {
             return null;
         }
 
@@ -92,6 +115,3 @@ class PaymentPollGroupCommandService extends BaseService
         }
     }
 }
-
-
-

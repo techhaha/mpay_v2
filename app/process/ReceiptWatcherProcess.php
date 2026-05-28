@@ -54,9 +54,9 @@ class ReceiptWatcherProcess
     }
 
     /**
-     * Worker 启动。
+     * 进程启动后初始化账号缓存和调度定时器。
      *
-     * @param Worker $worker Worker 实例
+     * @param Worker $worker Workerman 进程实例
      * @return void
      */
     public function onWorkerStart(Worker $worker): void
@@ -98,6 +98,10 @@ class ReceiptWatcherProcess
 
             $this->runIfDue('sync_pending_orders', $this->scanIntervalSeconds(), function (): array {
                 return $this->watcherService()->syncPendingOrders($this->scanBatchSize());
+            });
+
+            $this->runIfDue('dispatch_due_accounts', 1, function (): array {
+                return $this->watcherService()->dispatchDueAccountTasks($this->scanBatchSize());
             });
         } catch (\Throwable $e) {
             $this->reportHeartbeat([
@@ -157,12 +161,17 @@ class ReceiptWatcherProcess
     }
 
     /**
+     * 判断任务摘要中是否包含有效工作量。
+     *
      * @param array<string, int> $summary 任务摘要
      * @return bool 是否有实际工作量
      */
     private function hasWork(array $summary): bool
     {
-        foreach ($summary as $value) {
+        foreach ($summary as $key => $value) {
+            if (in_array((string) $key, ['due', 'locked', 'deduped'], true)) {
+                continue;
+            }
             if ((int) $value > 0) {
                 return true;
             }
@@ -197,6 +206,8 @@ class ReceiptWatcherProcess
     }
 
     /**
+     * 将任务摘要编码为日志文本。
+     *
      * @param array<string, int> $summary 任务摘要
      * @return string JSON 文本
      */
@@ -206,6 +217,8 @@ class ReceiptWatcherProcess
     }
 
     /**
+     * 读取待支付订单扫描间隔。
+     *
      * @return int 待支付订单扫描间隔
      */
     private function scanIntervalSeconds(): int
@@ -214,6 +227,8 @@ class ReceiptWatcherProcess
     }
 
     /**
+     * 读取待支付订单扫描批量。
+     *
      * @return int 待支付订单扫描批量
      */
     private function scanBatchSize(): int
@@ -222,6 +237,8 @@ class ReceiptWatcherProcess
     }
 
     /**
+     * 读取并约束进程选项中的整数配置。
+     *
      * @param string $key 配置键
      * @param int $default 默认值
      * @param int $min 最小值
@@ -236,6 +253,8 @@ class ReceiptWatcherProcess
     }
 
     /**
+     * 获取网页流水监听服务。
+     *
      * @return ReceiptWatcherService 网页流水监听服务
      */
     private function watcherService(): ReceiptWatcherService

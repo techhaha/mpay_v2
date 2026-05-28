@@ -70,6 +70,16 @@ final class FileConstant
     public const STORAGE_REMOTE_URL = 4;
 
     /**
+     * 本地公开文件固定目录，位于 public/ 下。
+     */
+    public const LOCAL_PUBLIC_DIR = 'storage/uploads';
+
+    /**
+     * 本地私有文件固定目录，位于 runtime/ 下。
+     */
+    public const LOCAL_PRIVATE_DIR = 'storage/private';
+
+    /**
      * 文件存储默认引擎配置 key。
      */
     public const CONFIG_DEFAULT_ENGINE = 'file_storage_default_engine';
@@ -77,14 +87,6 @@ final class FileConstant
      * 本地公开目录访问地址配置 key。
      */
     public const CONFIG_LOCAL_PUBLIC_BASE_URL = 'file_storage_local_public_base_url';
-    /**
-     * 本地公开目录路径配置 key。
-     */
-    public const CONFIG_LOCAL_PUBLIC_DIR = 'file_storage_local_public_dir';
-    /**
-     * 本地私有目录路径配置 key。
-     */
-    public const CONFIG_LOCAL_PRIVATE_DIR = 'file_storage_local_private_dir';
     /**
      * 上传文件大小上限配置 key，单位 MB。
      */
@@ -274,5 +276,4 @@ final class FileConstant
         return array_keys(self::imageExtensionMap() + self::certificateExtensionMap() + self::textExtensionMap());
     }
 }
-
 

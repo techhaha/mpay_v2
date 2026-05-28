@@ -7,6 +7,7 @@ use app\queue\support\AbstractQueueJob;
 use app\service\payment\order\PayOrderCallbackService;
 use app\service\payment\receipt\ReceiptWatcherService;
 use RuntimeException;
+use support\Log;
 
 /**
  * 网页流水监听通知任务。
@@ -68,6 +69,14 @@ class ReceiptFlowNotifyJob extends AbstractQueueJob
             return;
         }
 
+        $startedAt = microtime(true);
+        $orderNo = trim((string) ($record['order_no'] ?? ''));
+        $pushedAt = (int) ($data['pushed_at'] ?? 0);
+        $firstPushedAt = (int) ($data['first_pushed_at'] ?? $pushedAt);
+        $pushAttempt = (int) ($data['push_attempt'] ?? 1);
+        $queryStartedAt = (int) ($data['query_started_at'] ?? 0);
+        $queryFinishedAt = (int) ($data['query_finished_at'] ?? 0);
+        $queryDurationMs = (int) ($data['query_duration_ms'] ?? 0);
         try {
             $payType = trim((string) ($record['pay_type'] ?? ''));
             $channel = $this->receiptWatcherService->resolveChannelForFlow($pluginCode, $apiConfigId, $payType);
@@ -87,6 +96,22 @@ class ReceiptFlowNotifyJob extends AbstractQueueJob
                 throw new RuntimeException('流水通知未确认支付成功');
             }
             $this->receiptWatcherService->markFlowSeen($pluginCode, $apiConfigId, $record);
+            Log::info(sprintf(
+                '[ReceiptFlowNotifyQueue] 消费成功 plugin=%s api_config_id=%s order_no=%s pay_type=%s price=%s pay_no=%s query_duration=%sms query_to_push=%ss query_finish_to_push=%ss first_pushed_lag=%ss pushed_lag=%ss push_attempt=%s duration=%sms',
+                $pluginCode,
+                $apiConfigId,
+                $orderNo,
+                $payType,
+                (string) ($record['price'] ?? ''),
+                (string) ($callbackPayload['pay_no'] ?? ''),
+                $queryDurationMs > 0 ? (string) $queryDurationMs : '-',
+                ($queryStartedAt > 0 && $pushedAt > 0) ? (string) max(0, $pushedAt - $queryStartedAt) : '-',
+                ($queryFinishedAt > 0 && $pushedAt > 0) ? (string) max(0, $pushedAt - $queryFinishedAt) : '-',
+                $firstPushedAt > 0 ? (string) max(0, time() - $firstPushedAt) : '-',
+                $pushedAt > 0 ? (string) max(0, time() - $pushedAt) : '-',
+                $pushAttempt > 0 ? (string) $pushAttempt : '-',
+                (string) (int) ((microtime(true) - $startedAt) * 1000)
+            ));
         } finally {
             $this->receiptWatcherService->releaseFlowLock($pluginCode, $apiConfigId, $record, $token);
         }

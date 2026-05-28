@@ -76,19 +76,11 @@ class PaymentPollGroupChannelValidator extends Validator
             'store' => array_merge($rules, [
                 'poll_group_id' => 'required|integer|min:1|exists:ma_payment_poll_group,id',
                 'channel_id' => 'required|integer|min:1|exists:ma_payment_channel,id',
-                'sort_no' => 'required|integer|min:0',
-                'weight' => 'required|integer|min:1',
-                'is_default' => 'required|integer|in:0,1',
-                'status' => 'required|integer|in:0,1',
             ]),
             'update' => array_merge($rules, [
                 'id' => 'required|integer|min:1',
                 'poll_group_id' => 'required|integer|min:1|exists:ma_payment_poll_group,id',
                 'channel_id' => 'required|integer|min:1|exists:ma_payment_channel,id',
-                'sort_no' => 'required|integer|min:0',
-                'weight' => 'required|integer|min:1',
-                'is_default' => 'required|integer|in:0,1',
-                'status' => 'required|integer|in:0,1',
             ]),
             'updateStatus' => array_merge($rules, [
                 'id' => 'required|integer|min:1',

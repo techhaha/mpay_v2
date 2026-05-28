@@ -72,14 +72,12 @@ class PaymentPollGroupBindValidator extends Validator
                 'merchant_group_id' => 'required|integer|min:1|exists:ma_merchant_group,id',
                 'pay_type_id' => 'required|integer|min:1|exists:ma_payment_type,id',
                 'poll_group_id' => 'required|integer|min:1|exists:ma_payment_poll_group,id',
-                'status' => 'required|integer|in:0,1',
             ]),
             'update' => array_merge($rules, [
                 'id' => 'required|integer|min:1',
                 'merchant_group_id' => 'required|integer|min:1|exists:ma_merchant_group,id',
                 'pay_type_id' => 'required|integer|min:1|exists:ma_payment_type,id',
                 'poll_group_id' => 'required|integer|min:1|exists:ma_payment_poll_group,id',
-                'status' => 'required|integer|in:0,1',
             ]),
             'show', 'destroy' => array_merge($rules, [
                 'id' => 'required|integer|min:1',

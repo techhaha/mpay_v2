@@ -74,13 +74,11 @@ class PaymentTypeValidator extends Validator
             'store' => array_merge($rules, [
                 'code' => 'required|string|alpha_dash|min:2|max:32',
                 'name' => 'required|string|min:2|max:50',
-                'status' => 'required|integer|in:0,1',
             ]),
             'update' => array_merge($rules, [
                 'id' => 'required|integer|min:1',
                 'code' => 'required|string|alpha_dash|min:2|max:32',
                 'name' => 'required|string|min:2|max:50',
-                'status' => 'required|integer|in:0,1',
             ]),
             'updateStatus' => array_merge($rules, [
                 'id' => 'required|integer|min:1',
@@ -93,4 +91,3 @@ class PaymentTypeValidator extends Validator
         };
     }
 }
-

@@ -21,6 +21,7 @@ use app\service\merchant\MerchantService;
 use app\service\payment\config\PaymentTypeService;
 use app\service\payment\identity\PaymentIdentityService;
 use app\service\payment\order\PayOrderService;
+use app\service\payment\runtime\MerchantNotifyDispatcherService;
 use app\service\payment\runtime\PaymentRouteService;
 use app\service\system\config\SystemPublicConfigService;
 use support\Request;
@@ -42,6 +43,7 @@ class CashierService extends BaseService
         protected PayOrderRepository $payOrderRepository,
         protected PayOrderService $payOrderService,
         protected PaymentIdentityService $paymentIdentityService,
+        protected MerchantNotifyDispatcherService $merchantNotifyDispatcherService,
         protected SystemPublicConfigService $systemPublicConfigService
     ) {
     }
@@ -310,6 +312,9 @@ class CashierService extends BaseService
         $merchant = $this->merchantService->ensureMerchantEnabled((int) $payOrder->merchant_id);
         $paymentType = $this->paymentTypeService->findById((int) $payOrder->pay_type_id);
         $presentation = $this->resolvePresentation($payOrder);
+        $returnUrl = (int) $payOrder->status === TradeConstant::ORDER_STATUS_SUCCESS
+            ? $this->merchantNotifyDispatcherService->buildPaySuccessReturnUrl($payOrder, $bizOrder)
+            : (string) ($payOrder->return_url ?: $bizOrder->return_url);
 
         return [
             'order' => [
@@ -323,7 +328,7 @@ class CashierService extends BaseService
                 'created_at' => FormatHelper::dateTime($payOrder->request_at ?: $payOrder->created_at),
                 'expire_at' => FormatHelper::dateTime($payOrder->expire_at),
                 'updated_at' => FormatHelper::dateTime($payOrder->updated_at),
-                'return_url' => (string) ($payOrder->return_url ?: $bizOrder->return_url),
+                'return_url' => $returnUrl,
             ],
             'merchant' => [
                 'merchant_id' => (int) $merchant->id,

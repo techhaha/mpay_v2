@@ -51,9 +51,7 @@ class StorageConfigService extends BaseService
      */
     public function localPublicDir(): string
     {
-        $dir = trim((string) sys_config(FileConstant::CONFIG_LOCAL_PUBLIC_DIR, 'storage/uploads'), "/ \t\n\r\0\x0B");
-
-        return $dir !== '' ? $dir : 'storage/uploads';
+        return FileConstant::LOCAL_PUBLIC_DIR;
     }
 
     /**
@@ -63,9 +61,7 @@ class StorageConfigService extends BaseService
      */
     public function localPrivateDir(): string
     {
-        $dir = trim((string) sys_config(FileConstant::CONFIG_LOCAL_PRIVATE_DIR, 'storage/private'), "/ \t\n\r\0\x0B");
-
-        return $dir !== '' ? $dir : 'storage/private';
+        return FileConstant::LOCAL_PRIVATE_DIR;
     }
 
     /**
@@ -296,6 +292,5 @@ class StorageConfigService extends BaseService
         };
     }
 }
-
 
 

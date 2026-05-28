@@ -19,9 +19,9 @@ class MerchantGroupValidator extends Validator
     protected array $rules = [
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
-        'group_name' => 'sometimes|string|min:2|max:128',
+        'group_name' => 'sometimes|string|max:100',
         'status' => 'sometimes|integer|in:0,1',
-        'remark' => 'nullable|string|max:255',
+        'remark' => 'nullable|string|max:500',
         'page' => 'sometimes|integer|min:1',
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
@@ -62,8 +62,7 @@ class MerchantGroupValidator extends Validator
     public function sceneStore(): static
     {
         return $this->appendRules([
-            'group_name' => 'required|string|min:2|max:128',
-            'status' => 'required|integer|in:0,1',
+            'group_name' => 'required|string|max:100',
         ]);
     }
 
@@ -76,8 +75,7 @@ class MerchantGroupValidator extends Validator
     {
         return $this->appendRules([
             'id' => 'required|integer|min:1',
-            'group_name' => 'required|string|min:2|max:128',
-            'status' => 'required|integer|in:0,1',
+            'group_name' => 'required|string|max:100',
         ]);
     }
 

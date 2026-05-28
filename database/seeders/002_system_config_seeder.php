@@ -19,6 +19,14 @@ return new class {
     ];
 
     /**
+     * 已改为代码常量维护的历史配置项。
+     */
+    private const OBSOLETE_KEYS = [
+        'file_storage_local_public_dir',
+        'file_storage_local_private_dir',
+    ];
+
+    /**
      * 基于 v2_mpay_com 初始化的系统配置默认值。
      *
      * @var array<string, array<string, string>>
@@ -85,7 +93,7 @@ return new class {
             'receipt_watcher_enabled' => '0',
             'receipt_watcher_order_scan_batch_size' => '500',
             'receipt_watcher_order_scan_interval_seconds' => '3',
-            'receipt_watcher_plugin_codes' => "shouqianba_receipt\npostar_receipt",
+            'receipt_watcher_plugin_codes' => "shouqianba_receipt\npostar_receipt\nalipay_bill_receipt\nhaike_maqian_receipt\nlakala_receipt\ntianque_receipt\nfubei_receipt\nyisheng_receipt\nyeepay_boss_receipt",
         ],
         'storage' => [
             'file_storage_aliyun_oss_access_key_id' => '',
@@ -95,9 +103,7 @@ return new class {
             'file_storage_aliyun_oss_public_domain' => '',
             'file_storage_aliyun_oss_region' => '',
             'file_storage_default_engine' => '1',
-            'file_storage_local_private_dir' => 'storage/private',
             'file_storage_local_public_base_url' => '',
-            'file_storage_local_public_dir' => 'storage/uploads',
             'file_storage_remote_download_limit_mb' => '10',
             'file_storage_tencent_cos_bucket' => '',
             'file_storage_tencent_cos_public_domain' => '',
@@ -117,6 +123,12 @@ return new class {
      */
     public function run(\PDO $pdo, array $context = []): array
     {
+        $deleteStatement = $pdo->prepare(
+            'DELETE FROM `ma_system_config` WHERE `config_key` IN (?, ?)'
+        );
+        $deleteStatement->execute(self::OBSOLETE_KEYS);
+        $deleted = $deleteStatement->rowCount();
+
         $statement = $pdo->prepare(
             'INSERT INTO `ma_system_config` (`config_key`, `config_value`, `group_code`, `created_at`, `updated_at`) VALUES (?, ?, ?, NOW(), NOW()) ' .
             'ON DUPLICATE KEY UPDATE `config_value` = VALUES(`config_value`), `group_code` = VALUES(`group_code`), `updated_at` = NOW()'
@@ -133,6 +145,6 @@ return new class {
             }
         }
 
-        return ['count' => $written];
+        return ['count' => $written, 'deleted' => $deleted];
     }
 };

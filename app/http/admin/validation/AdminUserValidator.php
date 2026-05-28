@@ -19,7 +19,7 @@ class AdminUserValidator extends Validator
         'keyword' => 'sometimes|string|max:128',
         'username' => 'sometimes|string|alpha_dash|min:2|max:32',
         'password' => 'nullable|string|min:6|max:64',
-        'real_name' => 'sometimes|string|min:2|max:50',
+        'real_name' => 'sometimes|string|max:50',
         'mobile' => 'nullable|string|max:20',
         'email' => 'nullable|email|max:100',
         'is_super' => 'sometimes|integer|in:0,1',
@@ -72,9 +72,6 @@ class AdminUserValidator extends Validator
         return $this->appendRules([
             'username' => 'required|string|alpha_dash|min:2|max:32',
             'password' => 'required|string|min:6|max:64',
-            'real_name' => 'required|string|min:2|max:50',
-            'is_super' => 'required|integer|in:0,1',
-            'status' => 'required|integer|in:0,1',
         ]);
     }
 
@@ -88,9 +85,6 @@ class AdminUserValidator extends Validator
         return $this->appendRules([
             'id' => 'required|integer|min:1',
             'username' => 'required|string|alpha_dash|min:2|max:32',
-            'real_name' => 'required|string|min:2|max:50',
-            'is_super' => 'required|integer|in:0,1',
-            'status' => 'required|integer|in:0,1',
         ]);
     }
 
@@ -116,4 +110,3 @@ class AdminUserValidator extends Validator
         return $this->sceneShow();
     }
 }
-

@@ -243,7 +243,7 @@ class PaymentRouteResolverService extends BaseService
 
         $candidateRows = $this->mergeMerchantSelfCandidates($candidateRows, $payTypeId, $merchantId, $pollGroupId);
         if ($candidateRows->isEmpty()) {
-            throw new BusinessStateException('支付通道不可用', [
+            throw new BusinessStateException('未配置可用支付通道', [
                 'poll_group_id' => $pollGroup ? (int) $pollGroup->id : 0,
                 'merchant_id' => $merchantId,
             ]);
@@ -317,10 +317,11 @@ class PaymentRouteResolverService extends BaseService
         }
 
         if (empty($eligible)) {
+            $message = $this->buildUnavailableRouteMessage($rejected);
             if (!empty($context['_preview'])) {
                 return [
                     'available' => false,
-                    'reason' => '支付通道不可用',
+                    'reason' => $message,
                     'poll_group' => $pollGroup,
                     'candidates' => [],
                     'rejected_candidates' => $rejected,
@@ -328,10 +329,11 @@ class PaymentRouteResolverService extends BaseService
                 ];
             }
 
-            throw new BusinessStateException('支付通道不可用', [
+            throw new BusinessStateException($message, [
                 'poll_group_id' => $pollGroup ? (int) $pollGroup->id : 0,
                 'merchant_group_id' => $merchantGroupId,
                 'pay_type_id' => $payTypeId,
+                'reject_reasons' => $this->uniqueRejectedReasons($rejected),
             ]);
         }
 
@@ -556,6 +558,43 @@ class PaymentRouteResolverService extends BaseService
         }
 
         return $reasons;
+    }
+
+    /**
+     * 构建路由不可用的业务提示。
+     *
+     * @param array<int, array<string, mixed>> $rejected 被过滤的候选通道
+     * @return string 业务提示
+     */
+    private function buildUnavailableRouteMessage(array $rejected): string
+    {
+        $reasons = $this->uniqueRejectedReasons($rejected);
+        if ($reasons === []) {
+            return '未找到可用支付通道';
+        }
+
+        return '未找到可用支付通道：' . implode('；', array_slice($reasons, 0, 5));
+    }
+
+    /**
+     * 汇总候选通道被过滤的原因。
+     *
+     * @param array<int, array<string, mixed>> $rejected 被过滤的候选通道
+     * @return array<int, string> 去重后的原因
+     */
+    private function uniqueRejectedReasons(array $rejected): array
+    {
+        $reasons = [];
+        foreach ($rejected as $candidate) {
+            foreach ((array) ($candidate['reject_reasons'] ?? []) as $reason) {
+                $reason = trim((string) $reason);
+                if ($reason !== '') {
+                    $reasons[] = $reason;
+                }
+            }
+        }
+
+        return array_values(array_unique($reasons));
     }
 
     /**

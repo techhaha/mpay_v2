@@ -52,8 +52,33 @@ class SystemConfigRepository extends BaseRepository
 
         return $values;
     }
-}
 
+    /**
+     * 按配置键批量删除配置。
+     *
+     * @param array<int, string> $keys 配置键列表
+     * @return int 删除数量
+     */
+    public function deleteByConfigKeys(array $keys): int
+    {
+        $normalizedKeys = [];
+        foreach ($keys as $key) {
+            $configKey = strtolower(trim((string) $key));
+            if ($configKey !== '') {
+                $normalizedKeys[$configKey] = true;
+            }
+        }
+
+        $keys = array_keys($normalizedKeys);
+        if ($keys === []) {
+            return 0;
+        }
+
+        return (int) $this->query()
+            ->whereIn('config_key', $keys)
+            ->delete();
+    }
+}
 
 
 

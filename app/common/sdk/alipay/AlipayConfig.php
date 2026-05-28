@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace app\common\sdk\alipay;
 
+use app\common\constant\FileConstant;
+
 /**
  * 支付宝 SDK 配置对象。
  *
@@ -407,10 +409,10 @@ class AlipayConfig
         }
 
         $relativePath = trim($path, '/');
-        if (str_starts_with($relativePath, 'storage/private/') && function_exists('runtime_path')) {
+        if (str_starts_with($relativePath, FileConstant::LOCAL_PRIVATE_DIR . '/') && function_exists('runtime_path')) {
             $candidates[] = runtime_path($relativePath);
         }
-        if (str_starts_with($relativePath, 'storage/uploads/') && function_exists('public_path')) {
+        if (str_starts_with($relativePath, FileConstant::LOCAL_PUBLIC_DIR . '/') && function_exists('public_path')) {
             $candidates[] = public_path($relativePath);
         }
         if (str_starts_with($relativePath, 'runtime/') && function_exists('base_path')) {

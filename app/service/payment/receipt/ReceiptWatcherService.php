@@ -22,10 +22,19 @@ use Throwable;
  */
 class ReceiptWatcherService extends BaseService
 {
+    /**
+     * Redis Key 协议常量。
+     *
+     * 这些名称必须与 Python receipt_watcher 保持一致，详细含义见
+     * watcher/docs/COMMON_CONSTANTS.md。修改时需要同步两端代码并清理旧 Redis 数据。
+     */
     private const ACCOUNTS_KEY = 'receipt_watcher_accounts';
     private const QUERY_ACCOUNTS_KEY = 'receipt_watcher_query_accounts';
+    private const ACCOUNT_STREAM_KEY = 'receipt_watcher_account_stream';
+    private const ACCOUNT_ENQUEUED_KEY_PREFIX = 'receipt_watcher_account_enqueued_';
     private const ACCOUNT_TASK_KEY_PREFIX = 'receipt_watcher_account_';
     private const ORDERS_KEY_PREFIX = 'receipt_watcher_orders_';
+    private const LOCK_KEY_PREFIX = 'receipt_watcher_lock_';
     private const FLOW_SEEN_KEY_PREFIX = 'receipt_watcher_flow_seen_';
     private const FLOW_LOCK_KEY_PREFIX = 'receipt_watcher_flow_lock_';
 
@@ -185,6 +194,110 @@ class ReceiptWatcherService extends BaseService
             'accounts' => count($ordersByAccount),
             'orders' => array_sum(array_map('count', $ordersByAccount)),
         ];
+    }
+
+    /**
+     * 将到期账号查询任务投放到 Redis 账号任务流。
+     *
+     * @param int $limit 单轮最多投放账号数
+     * @return array<string, int> 执行摘要
+     */
+    public function dispatchDueAccountTasks(int $limit = 100): array
+    {
+        if (!$this->watcherEnabled()) {
+            return [
+                'due' => 0,
+                'queued' => 0,
+                'stale' => 0,
+                'locked' => 0,
+                'deduped' => 0,
+            ];
+        }
+
+        $now = time();
+        $accountKeys = $this->redisRaw(
+            'ZRANGEBYSCORE',
+            self::QUERY_ACCOUNTS_KEY,
+            '-inf',
+            (string) $now,
+            'LIMIT',
+            '0',
+            (string) max(1, $limit)
+        );
+        if (!is_array($accountKeys) || $accountKeys === []) {
+            return [
+                'due' => 0,
+                'queued' => 0,
+                'stale' => 0,
+                'locked' => 0,
+                'deduped' => 0,
+            ];
+        }
+
+        $summary = [
+            'due' => count($accountKeys),
+            'queued' => 0,
+            'stale' => 0,
+            'locked' => 0,
+            'deduped' => 0,
+        ];
+        foreach ($accountKeys as $rawAccountKey) {
+            $accountKey = (string) $rawAccountKey;
+            $task = $this->accountTask($accountKey);
+            $orderCount = (int) Redis::hLen($this->ordersKey($accountKey));
+            if ($task === null || $orderCount <= 0) {
+                $summary['stale']++;
+                $this->removeAccountQueryTask($accountKey);
+                continue;
+            }
+
+            if ((bool) Redis::exists($this->lockKey($accountKey))) {
+                $summary['locked']++;
+                continue;
+            }
+
+            $enqueuedKey = $this->accountEnqueuedKey($accountKey);
+            $enqueuedTtl = $this->accountEnqueuedTtl($task);
+            $enqueued = $this->redisRaw('SET', $enqueuedKey, (string) $now, 'NX', 'EX', (string) $enqueuedTtl);
+            if ($enqueued !== true && strtoupper((string) $enqueued) !== 'OK') {
+                $summary['deduped']++;
+                continue;
+            }
+
+            try {
+                $streamId = $this->redisRaw(
+                    'XADD',
+                    self::ACCOUNT_STREAM_KEY,
+                    'MAXLEN',
+                    '~',
+                    '10000',
+                    '*',
+                    'account_key',
+                    $accountKey,
+                    'plugin_code',
+                    (string) ($task['plugin_code'] ?? ''),
+                    'api_config_id',
+                    (string) ((int) ($task['api_config_id'] ?? 0)),
+                    'order_count',
+                    (string) $orderCount,
+                    'due_at',
+                    (string) $now,
+                    'enqueued_at',
+                    (string) $now,
+                    'trace_id',
+                    bin2hex(random_bytes(8))
+                );
+                if ($streamId === false || $streamId === null || $streamId === '') {
+                    throw new RuntimeException('Redis XADD 返回空结果');
+                }
+                $summary['queued']++;
+            } catch (Throwable $e) {
+                Redis::del($enqueuedKey);
+                Log::warning('[ReceiptWatcherService] 投放账号查询任务失败：' . $e->getMessage());
+            }
+        }
+
+        return $summary;
     }
 
     /**
@@ -350,6 +463,20 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 读取账号查询任务元信息。
+     *
+     * @param string $accountKey 账号键
+     * @return array<string, mixed>|null 任务元信息
+     */
+    private function accountTask(string $accountKey): ?array
+    {
+        $raw = Redis::get($this->accountTaskKey($accountKey));
+        $decoded = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
      * 写入账号订单与查询任务。
      *
      * @param array<string, mixed> $account 账号缓存
@@ -396,6 +523,8 @@ class ReceiptWatcherService extends BaseService
         Redis::zRem(self::QUERY_ACCOUNTS_KEY, $accountKey);
         Redis::del($this->accountTaskKey($accountKey));
         Redis::del($this->ordersKey($accountKey));
+        Redis::del($this->accountEnqueuedKey($accountKey));
+        Redis::del($this->lockKey($accountKey));
     }
 
     /**
@@ -441,6 +570,8 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 计算账号订单快照的最大过期时间。
+     *
      * @param array<int, array<string, mixed>> $orders 订单列表
      * @return int 最大过期时间戳
      */
@@ -459,6 +590,8 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 读取插件配置中的账号查询间隔。
+     *
      * @param array<string, mixed> $config 插件配置
      * @return int 查询间隔秒数
      */
@@ -468,6 +601,8 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 生成平台账号缓存键。
+     *
      * @param string $pluginCode 插件编码
      * @param int $apiConfigId 插件配置ID
      * @return string 账号键
@@ -478,6 +613,8 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 生成账号任务元信息键。
+     *
      * @param string $accountKey 账号键
      * @return string 账号任务键
      */
@@ -487,6 +624,30 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 生成账号任务投放标记键。
+     *
+     * @param string $accountKey 账号键
+     * @return string 已投放标记键
+     */
+    private function accountEnqueuedKey(string $accountKey): string
+    {
+        return self::ACCOUNT_ENQUEUED_KEY_PREFIX . $this->safeKeyPart($accountKey);
+    }
+
+    /**
+     * 生成账号查询锁键。
+     *
+     * @param string $accountKey 账号键
+     * @return string 账号查询锁键
+     */
+    private function lockKey(string $accountKey): string
+    {
+        return self::LOCK_KEY_PREFIX . $this->safeKeyPart($accountKey);
+    }
+
+    /**
+     * 生成账号订单快照键。
+     *
      * @param string $accountKey 账号键
      * @return string 订单集合键
      */
@@ -496,6 +657,21 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 计算账号任务投放标记过期时间。
+     *
+     * @param array<string, mixed> $task 账号任务元信息
+     * @return int 已投放标记过期时间
+     */
+    private function accountEnqueuedTtl(array $task): int
+    {
+        $interval = max(2, (int) ($task['query_interval_seconds'] ?? 3));
+
+        return max(300, $interval * 4);
+    }
+
+    /**
+     * 生成流水已处理标记键。
+     *
      * @param string $pluginCode 插件编码
      * @param int $apiConfigId 插件配置ID
      * @param array<string, mixed> $record 流水记录
@@ -507,6 +683,8 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 生成流水处理锁键。
+     *
      * @param string $pluginCode 插件编码
      * @param int $apiConfigId 插件配置ID
      * @param array<string, mixed> $record 流水记录
@@ -518,6 +696,8 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 生成流水幂等身份。
+     *
      * @param string $pluginCode 插件编码
      * @param int $apiConfigId 插件配置ID
      * @param array<string, mixed> $record 流水记录
@@ -534,6 +714,8 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 把业务标识转换成 Redis 安全键片段。
+     *
      * @param string $value 原始键片段
      * @return string 安全键片段
      */
@@ -545,6 +727,20 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 执行 Redis 原生命令。
+     *
+     * @param string $command 命令
+     * @param mixed ...$arguments 参数
+     * @return mixed 命令结果
+     */
+    private function redisRaw(string $command, mixed ...$arguments): mixed
+    {
+        return Redis::connection()->rawCommand($command, ...$arguments);
+    }
+
+    /**
+     * 编码 Redis 中保存的 JSON 载荷。
+     *
      * @param array<string, mixed> $payload 载荷
      * @return string JSON 字符串
      */

@@ -147,7 +147,7 @@ class MerchantApiCredentialQueryService extends BaseService
         }
 
         $row->api_key_preview = $this->maskCredentialValue((string) ($row->api_key ?? ''), false);
-        $row->api_key_full = '';
+        $row->api_key_full = (string) ($row->api_key ?? '');
         $row->merchant_public_key_preview = $this->maskCredentialValue((string) ($row->merchant_public_key ?? ''), false);
         $row->status_text = $this->textFromMap((int) $row->status, AuthConstant::credentialStatusMap());
         $row->platform_public_key_full = trim((string) config('epay.v2.platform_public_key', ''));

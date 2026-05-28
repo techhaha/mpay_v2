@@ -200,6 +200,7 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
                         'code' => $code,
                         'name' => (string) ($plugin['name'] ?? $code),
                         'class' => (string) ($plugin['class'] ?? ''),
+                        'collect_mode_values' => [],
                         'concurrency_values' => [],
                         'features' => [],
                         'instances' => [],
@@ -207,6 +208,10 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
                 }
 
                 $plugins[$code]['instances'][] = (string) ($instance['instance_id'] ?? '');
+                $collectMode = trim((string) ($plugin['collect_mode'] ?? ''));
+                if ($collectMode !== '') {
+                    $plugins[$code]['collect_mode_values'][] = $collectMode;
+                }
                 $plugins[$code]['concurrency_values'][] = (int) ($plugin['concurrency'] ?? 0);
                 foreach ((array) ($plugin['features'] ?? []) as $feature) {
                     $feature = trim((string) $feature);
@@ -220,7 +225,12 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
         foreach ($plugins as &$plugin) {
             $plugin['instances'] = array_values(array_unique(array_filter($plugin['instances'])));
             $plugin['features'] = array_values(array_unique($plugin['features']));
+            $plugin['collect_mode_values'] = array_values(array_unique(array_filter($plugin['collect_mode_values'])));
             $plugin['concurrency_values'] = array_values(array_unique(array_filter($plugin['concurrency_values'])));
+            $plugin['collect_mode'] = (string) ($plugin['collect_mode_values'][0] ?? 'unknown');
+            $plugin['collect_mode_text'] = $plugin['collect_mode_values'] === []
+                ? $this->collectModeText('unknown')
+                : implode(' / ', array_map(fn (string $mode): string => $this->collectModeText($mode), $plugin['collect_mode_values']));
             $plugin['instance_count'] = count($plugin['instances']);
             $plugin['concurrency_text'] = $plugin['concurrency_values'] === []
                 ? '—'
@@ -302,6 +312,8 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
                 'code' => $code,
                 'name' => (string) ($plugin['name'] ?? $code),
                 'class' => (string) ($plugin['class'] ?? ''),
+                'collect_mode' => (string) ($plugin['collect_mode'] ?? 'unknown'),
+                'collect_mode_text' => $this->collectModeText((string) ($plugin['collect_mode'] ?? 'unknown')),
                 'concurrency' => (int) ($plugin['concurrency'] ?? 0),
                 'features' => array_values(array_unique($features)),
                 'features_text' => $this->featuresText($features),
@@ -437,9 +449,15 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
     private function featuresText(array $features): string
     {
         $map = [
-            'api_request' => '接口查询',
-            'browser' => '浏览器',
+            'amount_only' => '仅金额',
             'captcha' => '验证码',
+            'iframe' => 'Iframe',
+            'multi_merchant' => '多商户',
+            'rsa2' => 'RSA2',
+            'signed_api' => '签名接口',
+            'slide_captcha' => '滑块',
+            'table_parse' => '表格解析',
+            'token_refresh' => 'Token 刷新',
         ];
         $texts = [];
         foreach (array_values(array_unique($features)) as $feature) {
@@ -447,6 +465,23 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
         }
 
         return $texts === [] ? '—' : implode('、', $texts);
+    }
+
+    /**
+     * 采集方式标识转展示文案。
+     *
+     * @param string $mode 采集方式
+     * @return string 展示文案
+     */
+    private function collectModeText(string $mode): string
+    {
+        return match ($mode) {
+            'direct_api' => '接口直连',
+            'browser_api' => '浏览器接口',
+            'browser_dom' => '页面解析',
+            'browser_special' => '特殊页面',
+            default => $mode !== '' ? $mode : '未知',
+        };
     }
 
     /**

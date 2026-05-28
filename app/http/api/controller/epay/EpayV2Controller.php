@@ -9,6 +9,7 @@ use app\service\payment\order\PayOrderService;
 use support\limiter\Limiter;
 use support\Request;
 use support\Response;
+use Throwable;
 
 /**
  * ePay V2 控制器。
@@ -37,13 +38,18 @@ class EpayV2Controller extends BaseController
     public function submit(Request $request): Response
     {
         $payload = $request->all();
-        Limiter::check('epay-v2-pay-submit-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
-        if ((int) ($payload['pid'] ?? 0) > 0) {
-            Limiter::check('epay-v2-pay-submit-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
-        }
-        $payload = $this->validated($payload, EpayV2Validator::class, 'submit');
 
-        return $this->epayV2ProtocolService->submit($payload, $request);
+        try {
+            Limiter::check('epay-v2-pay-submit-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
+            if ((int) ($payload['pid'] ?? 0) > 0) {
+                Limiter::check('epay-v2-pay-submit-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
+            }
+            $payload = $this->validated($payload, EpayV2Validator::class, 'submit');
+
+            return $this->epayV2ProtocolService->submit($payload, $request);
+        } catch (Throwable $e) {
+            return $this->epayV2ProtocolService->entryErrorResponse($payload, $e);
+        }
     }
 
     /**

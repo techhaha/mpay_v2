@@ -20,7 +20,7 @@ class PaymentChannelValidator extends Validator
         'id' => 'sometimes|integer|min:1',
         'keyword' => 'sometimes|string|max:128',
         'merchant_id' => 'sometimes|integer|min:0',
-        'name' => 'sometimes|string|min:2|max:128',
+        'name' => 'sometimes|string|min:2|max:100',
         'split_rate_bp' => 'sometimes|integer|min:0|max:10000',
         'cost_rate_bp' => 'sometimes|integer|min:0|max:10000',
         'channel_mode' => 'sometimes|integer|in:0,1',
@@ -31,7 +31,7 @@ class PaymentChannelValidator extends Validator
         'daily_limit_count' => 'nullable|integer|min:0',
         'min_amount' => 'nullable|integer|min:0',
         'max_amount' => 'nullable|integer|min:0',
-        'remark' => 'nullable|string|max:255',
+        'remark' => 'nullable|string|max:500',
         'status' => 'sometimes|integer|in:0,1',
         'sort_no' => 'nullable|integer|min:0',
         'money' => 'sometimes|numeric|min:0.01',
@@ -94,7 +94,7 @@ class PaymentChannelValidator extends Validator
         return match ($this->scene()) {
             'store' => array_merge($rules, [
                 'merchant_id' => 'required|integer|min:0',
-                'name' => 'required|string|min:2|max:128',
+                'name' => 'required|string|min:2|max:100',
                 'split_rate_bp' => 'required|integer|min:0|max:10000',
                 'cost_rate_bp' => 'required|integer|min:0|max:10000',
                 'channel_mode' => 'required|integer|in:0,1',
@@ -106,7 +106,7 @@ class PaymentChannelValidator extends Validator
             'update' => array_merge($rules, [
                 'id' => 'required|integer|min:1',
                 'merchant_id' => 'required|integer|min:0',
-                'name' => 'required|string|min:2|max:128',
+                'name' => 'required|string|min:2|max:100',
                 'split_rate_bp' => 'required|integer|min:0|max:10000',
                 'cost_rate_bp' => 'required|integer|min:0|max:10000',
                 'channel_mode' => 'required|integer|in:0,1',
