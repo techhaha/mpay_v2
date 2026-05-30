@@ -45,12 +45,14 @@ class ReceiptWatcherService extends BaseService
      * @param PaymentPluginConfRepository $paymentPluginConfRepository 支付插件配置仓库
      * @param PaymentTypeRepository $paymentTypeRepository 支付方式仓库
      * @param PayOrderRepository $payOrderRepository 支付单仓库
+     * @param ReceiptWatcherLicenseService $receiptWatcherLicenseService 网页监听授权服务
      */
     public function __construct(
         protected PaymentChannelRepository $paymentChannelRepository,
         protected PaymentPluginConfRepository $paymentPluginConfRepository,
         protected PaymentTypeRepository $paymentTypeRepository,
-        protected PayOrderRepository $payOrderRepository
+        protected PayOrderRepository $payOrderRepository,
+        protected ReceiptWatcherLicenseService $receiptWatcherLicenseService
     ) {
     }
 
@@ -61,6 +63,7 @@ class ReceiptWatcherService extends BaseService
      */
     public function refreshChannelCache(): array
     {
+        $this->receiptWatcherLicenseService->publishRuntimeSnapshot();
         $pluginCodes = $this->supportedPluginCodes();
         if ($pluginCodes === []) {
             $this->clearQueryTasks();
@@ -211,6 +214,7 @@ class ReceiptWatcherService extends BaseService
                 'stale' => 0,
                 'locked' => 0,
                 'deduped' => 0,
+                'unauthorized' => 0,
             ];
         }
 
@@ -231,6 +235,7 @@ class ReceiptWatcherService extends BaseService
                 'stale' => 0,
                 'locked' => 0,
                 'deduped' => 0,
+                'unauthorized' => 0,
             ];
         }
 
@@ -240,6 +245,7 @@ class ReceiptWatcherService extends BaseService
             'stale' => 0,
             'locked' => 0,
             'deduped' => 0,
+            'unauthorized' => 0,
         ];
         foreach ($accountKeys as $rawAccountKey) {
             $accountKey = (string) $rawAccountKey;
@@ -247,6 +253,12 @@ class ReceiptWatcherService extends BaseService
             $orderCount = (int) Redis::hLen($this->ordersKey($accountKey));
             if ($task === null || $orderCount <= 0) {
                 $summary['stale']++;
+                $this->removeAccountQueryTask($accountKey);
+                continue;
+            }
+
+            if (!$this->receiptWatcherLicenseService->isPluginAuthorized((string) ($task['plugin_code'] ?? ''))) {
+                $summary['unauthorized']++;
                 $this->removeAccountQueryTask($accountKey);
                 continue;
             }
@@ -424,7 +436,7 @@ class ReceiptWatcherService extends BaseService
             }
         }
 
-        return array_values(array_unique($codes));
+        return $this->receiptWatcherLicenseService->authorizedPluginCodes(array_values(array_unique($codes)));
     }
 
     /**

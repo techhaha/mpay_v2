@@ -19,6 +19,16 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
     private const HEARTBEAT_MAX_AGE = 60;
 
     /**
+     * 构造方法。
+     *
+     * @param ReceiptWatcherLicenseService $receiptWatcherLicenseService 网页监听授权服务
+     */
+    public function __construct(
+        protected ReceiptWatcherLicenseService $receiptWatcherLicenseService
+    ) {
+    }
+
+    /**
      * 获取网页监听工具运行总览。
      *
      * @return array<string, mixed>
@@ -43,6 +53,7 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
                 'configured_plugins' => $this->configuredPluginCodes(),
                 'missing_plugins' => [],
                 'extra_plugins' => [],
+                'license' => $this->receiptWatcherLicenseService->status(),
                 'plugins' => [],
                 'instances' => [],
             ];
@@ -65,9 +76,12 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
         ));
         $supportedPlugins = $this->supportedPlugins($liveInstances);
         $supportedCodes = array_column($supportedPlugins, 'code');
-        $missingCodes = $enabled ? array_values(array_diff($configuredCodes, $supportedCodes)) : [];
+        $license = $this->runtimeLicense($liveInstances);
+        $authorizedCodes = array_map('strval', (array) ($license['authorized_plugins'] ?? []));
+        $unauthorizedCodes = $enabled ? array_values(array_diff($configuredCodes, $authorizedCodes)) : [];
+        $missingCodes = $enabled ? array_values(array_diff(array_diff($configuredCodes, $unauthorizedCodes), $supportedCodes)) : [];
         $extraCodes = array_values(array_diff($supportedCodes, $configuredCodes));
-        $status = $this->status($enabled, count($liveInstances), count($configuredCodes), $missingCodes);
+        $status = $this->status($enabled, count($liveInstances), count($configuredCodes), $missingCodes, $unauthorizedCodes);
 
         return [
             'enabled' => $enabled,
@@ -84,7 +98,9 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
             'configured_plugins' => $configuredCodes,
             'missing_plugins' => $missingCodes,
             'extra_plugins' => $extraCodes,
-            'plugins' => $this->pluginRows($configuredCodes, $supportedPlugins, $enabled),
+            'unauthorized_plugins' => $unauthorizedCodes,
+            'license' => $license,
+            'plugins' => $this->pluginRows($configuredCodes, $supportedPlugins, $enabled, $authorizedCodes),
             'instances' => $instances,
         ];
     }
@@ -137,6 +153,7 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
                 'poll_interval_seconds' => (float) ($data['poll_interval_seconds'] ?? 0),
                 'account_fetch_limit' => (int) ($data['account_fetch_limit'] ?? 0),
                 'account_concurrency' => (int) ($data['account_concurrency'] ?? 0),
+                'license' => is_array($data['license'] ?? null) ? $data['license'] : [],
                 'plugin_count' => count($plugins),
                 'plugins_text' => implode('、', array_column($plugins, 'code')),
                 'plugins' => $plugins,
@@ -148,6 +165,27 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
         });
 
         return $rows;
+    }
+
+    /**
+     * 读取在线 watcher 上报的授权状态。
+     *
+     * @param array<int, array<string, mixed>> $liveInstances 在线实例
+     * @return array<string, mixed> 授权状态
+     */
+    private function runtimeLicense(array $liveInstances): array
+    {
+        foreach ($liveInstances as $instance) {
+            $license = $instance['license'] ?? null;
+            if (is_array($license) && $license !== []) {
+                $license['source'] = 'watcher';
+                return $license;
+            }
+        }
+
+        $license = $this->receiptWatcherLicenseService->status();
+        $license['source'] = 'webman_config';
+        return $license;
     }
 
     /**
@@ -248,27 +286,32 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
      * @param array<int, string> $configuredCodes 后台配置插件
      * @param array<int, array<string, mixed>> $supportedPlugins watcher 支持插件
      * @param bool $enabled 总开关是否开启
+     * @param array<int, string> $authorizedCodes watcher 授权插件
      * @return array<int, array<string, mixed>>
      */
-    private function pluginRows(array $configuredCodes, array $supportedPlugins, bool $enabled): array
+    private function pluginRows(array $configuredCodes, array $supportedPlugins, bool $enabled, array $authorizedCodes): array
     {
         $supportedByCode = [];
         foreach ($supportedPlugins as $plugin) {
             $supportedByCode[(string) $plugin['code']] = $plugin;
         }
 
+        $authorizedByCode = array_fill_keys($authorizedCodes, true);
         $codes = array_values(array_unique(array_merge($configuredCodes, array_keys($supportedByCode))));
         $rows = [];
         foreach ($codes as $code) {
             $configured = in_array($code, $configuredCodes, true);
             $supported = isset($supportedByCode[$code]);
+            $authorized = isset($authorizedByCode[$code]);
             $plugin = $supportedByCode[$code] ?? ['code' => $code, 'name' => $code];
-            $status = $this->pluginStatus($enabled, $configured, $supported);
+            $status = $this->pluginStatus($enabled, $configured, $supported, $authorized);
 
             $rows[] = array_merge($plugin, [
                 'code' => $code,
                 'configured' => $configured,
                 'configured_text' => $configured ? ($enabled ? '已启用' : '已配置') : '未配置',
+                'authorized' => $authorized,
+                'authorized_text' => $authorized ? '已授权' : '未授权',
                 'supported' => $supported,
                 'supported_text' => $supported ? '已支持' : '未上报',
                 'status' => $status['status'],
@@ -332,9 +375,10 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
      * @param int $liveInstances 在线实例数
      * @param int $configuredCount 已配置插件数
      * @param array<int, string> $missingCodes 缺失插件
+     * @param array<int, string> $unauthorizedCodes 未授权插件
      * @return array<string, string>
      */
-    private function status(bool $enabled, int $liveInstances, int $configuredCount, array $missingCodes): array
+    private function status(bool $enabled, int $liveInstances, int $configuredCount, array $missingCodes, array $unauthorizedCodes): array
     {
         if (!$enabled) {
             return [
@@ -366,6 +410,16 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
             ];
         }
 
+        if ($unauthorizedCodes !== []) {
+            return [
+                'status' => 'unauthorized_plugin',
+                'status_text' => '部分插件未授权',
+                'summary_value' => '未授权 ' . count($unauthorizedCodes),
+                'tone' => 'danger',
+                'message' => '后台配置的插件未获得 receipt_watcher 授权：' . implode('、', $unauthorizedCodes),
+            ];
+        }
+
         if ($missingCodes !== []) {
             return [
                 'status' => 'missing_plugin',
@@ -393,10 +447,13 @@ class ReceiptWatcherRuntimeStatusService extends BaseService
      * @param bool $supported watcher 是否支持
      * @return array<string, string>
      */
-    private function pluginStatus(bool $enabled, bool $configured, bool $supported): array
+    private function pluginStatus(bool $enabled, bool $configured, bool $supported, bool $authorized): array
     {
         if (!$enabled) {
             return ['status' => 'disabled', 'status_text' => '总开关关闭', 'tone' => 'gray'];
+        }
+        if ($configured && !$authorized) {
+            return ['status' => 'unauthorized', 'status_text' => '未授权', 'tone' => 'danger'];
         }
         if ($configured && $supported) {
             return ['status' => 'ok', 'status_text' => '可用', 'tone' => 'success'];

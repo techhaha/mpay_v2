@@ -1,0 +1,315 @@
+<?php
+
+declare(strict_types=1);
+
+namespace app\common\payment;
+
+use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginStatusConstant;
+use app\common\interface\PaymentInterface;
+use app\common\interface\PayPluginInterface;
+use app\common\sdk\unionpay\UnionpayClient;
+use app\common\sdk\unionpay\UnionpaySdkException;
+use app\exception\PaymentException;
+use support\Request;
+use support\Response;
+
+/**
+ * 银联前置支付 API 插件。
+ */
+class UnionpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
+{
+    private ?UnionpayClient $client = null;
+
+    /**
+     * 插件元信息。
+     *
+     * @var array<string, mixed>
+     */
+    protected array $paymentInfo = [
+        'code' => 'unionpay_api',
+        'name' => '银联前置支付API',
+        'author' => 'MPAY',
+        'link' => 'http://www.95516.com/',
+        'version' => '1.0.0',
+        'pay_types' => ['alipay', 'wxpay', 'qqpay', 'bank', 'jdpay'],
+        'transfer_types' => [],
+        'config_schema' => [],
+    ];
+
+    /**
+     * 获取后台配置表单。
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getConfigSchema(): array
+    {
+        return [
+            ['type' => 'input', 'field' => 'mch_id', 'title' => '商户号', 'value' => '', 'validate' => [['required' => true, 'message' => '商户号不能为空']]],
+            ['type' => 'password', 'field' => 'key', 'title' => '商户密钥', 'value' => '', 'validate' => [['required' => true, 'message' => '商户密钥不能为空']]],
+            ['type' => 'input', 'field' => 'gateway_url', 'title' => '自定义网关', 'value' => '', 'props' => ['placeholder' => '留空使用银联默认网关']],
+        ];
+    }
+
+    /**
+     * 发起支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    public function pay(array $order): array
+    {
+        $payType = (string) $order['pay_type_code'];
+        $method = (string) ($order['extra']['payment']['method'] ?? '');
+        if ($method === 'jsapi') {
+            return $this->jsapiPay($order);
+        }
+        if ($payType === 'wxpay' && $method === 'h5') {
+            return $this->wxH5Pay($order);
+        }
+
+        try {
+            $data = $this->client()->request($this->basePayload($order) + [
+                'service' => 'unified.trade.native',
+            ]);
+        } catch (UnionpaySdkException $e) {
+            throw new PaymentException('银联前置下单失败：' . $e->getMessage(), 40200);
+        }
+
+        $qrcode = (string) ($data['code_url'] ?? '');
+        if (str_contains($qrcode, 'myun.tenpay.com')) {
+            $parts = explode('&t=', $qrcode);
+            $qrcode = isset($parts[1]) ? 'https://qpay.qq.com/qr/' . $parts[1] : $qrcode;
+        }
+        if ($qrcode === '') {
+            throw new PaymentException('银联前置未返回二维码链接', 40200, ['response' => $data]);
+        }
+
+        return $this->payResult('qrcode', $payType, 'native', 'unified.trade.native', ['qrcode' => $qrcode, 'raw' => $data], $data, $order);
+    }
+
+    /**
+     * 银联前置旧插件未提供主动查单链路。
+     *
+     * @param array<string, mixed> $order 标准插件查单参数
+     * @return array<string, mixed>
+     */
+    public function query(array $order): array
+    {
+        return ['success' => false, 'status' => PaymentPluginStatusConstant::PENDING, 'msg' => '银联前置插件暂不支持主动查单'];
+    }
+
+    /**
+     * 银联前置旧插件未提供关单链路。
+     *
+     * @param array<string, mixed> $order 标准插件关单参数
+     * @return array<string, mixed>
+     */
+    public function close(array $order): array
+    {
+        return ['success' => false, 'msg' => '银联前置插件暂不支持关单'];
+    }
+
+    /**
+     * 申请退款。
+     *
+     * @param array<string, mixed> $order 标准插件退款参数
+     * @return array<string, mixed>
+     */
+    public function refund(array $order): array
+    {
+        try {
+            $data = $this->client()->request([
+                'service' => 'unified.trade.refund',
+                'transaction_id' => (string) ($order['chan_trade_no'] ?? ''),
+                'out_refund_no' => (string) $order['refund_no'],
+                'total_fee' => (string) (int) $order['amount'],
+                'refund_fee' => (string) (int) $order['refund_amount'],
+                'op_user_id' => $this->configText('mch_id'),
+            ]);
+        } catch (UnionpaySdkException $e) {
+            return ['success' => false, 'msg' => $e->getMessage()];
+        }
+
+        return [
+            'success' => true,
+            'msg' => '退款申请成功',
+            'chan_refund_no' => (string) ($data['refund_id'] ?? $order['refund_no']),
+            'refund_amount' => (int) ($data['refund_fee'] ?? $order['refund_amount']),
+            'raw_data' => $data,
+        ];
+    }
+
+    /**
+     * 解析支付回调。
+     *
+     * @param Request $request 回调请求
+     * @return array<string, mixed>
+     */
+    public function notify(Request $request): array
+    {
+        try {
+            $payload = $this->client()->notify($request->rawBody());
+        } catch (UnionpaySdkException $e) {
+            throw new PaymentException($e->getMessage(), 40200);
+        }
+
+        $success = (string) ($payload['status'] ?? '') === '0' && (string) ($payload['result_code'] ?? '') === '0';
+
+        return [
+            'status' => $success ? PaymentPluginStatusConstant::SUCCESS : PaymentPluginStatusConstant::FAILED,
+            'message' => (string) ($payload['err_msg'] ?? $payload['message'] ?? ''),
+            'channel_order_no' => (string) ($payload['out_trade_no'] ?? ''),
+            'channel_trade_no' => (string) ($payload['transaction_id'] ?? ''),
+            'channel_status' => (string) ($payload['result_code'] ?? $payload['status'] ?? ''),
+        ];
+    }
+
+    /**
+     * 返回银联前置成功应答。
+     */
+    public function notifySuccess(): string|Response
+    {
+        return 'success';
+    }
+
+    /**
+     * 返回银联前置失败应答。
+     */
+    public function notifyFail(): string|Response
+    {
+        return 'failure';
+    }
+
+    /**
+     * JSAPI 支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function jsapiPay(array $order): array
+    {
+        $payType = (string) $order['pay_type_code'];
+        $payment = (array) ($order['extra']['payment'] ?? []);
+        $service = match ($payType) {
+            'wxpay' => 'pay.weixin.jspay',
+            'bank' => 'pay.unionpay.jspay',
+            default => 'pay.alipay.jspay',
+        };
+
+        $payload = $this->basePayload($order) + ['service' => $service];
+        if ($payType === 'wxpay') {
+            $payload['is_raw'] = '1';
+            $payload['is_minipg'] = '0';
+            $payload['sub_appid'] = (string) ($payment['sub_appid'] ?? '');
+            $payload['sub_openid'] = (string) ($payment['sub_openid'] ?? '');
+        } elseif ($payType === 'bank') {
+            $payload['user_id'] = (string) ($payment['sub_openid'] ?? '');
+        } else {
+            $payload['buyer_id'] = (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? '');
+        }
+
+        try {
+            $data = $this->client()->request($payload);
+        } catch (UnionpaySdkException $e) {
+            throw new PaymentException('银联前置JSAPI下单失败：' . $e->getMessage(), 40200);
+        }
+
+        if ($payType === 'bank') {
+            return $this->payResult('jump', $payType, 'jsapi', $service, ['url' => (string) ($data['pay_url'] ?? ''), 'raw' => $data], $data, $order);
+        }
+
+        $payInfo = $data['pay_info'] ?? [];
+        if (is_string($payInfo)) {
+            $decoded = json_decode($payInfo, true);
+            $payInfo = is_array($decoded) ? $decoded : ['tradeNO' => $payInfo];
+        }
+
+        return $this->payResult('jsapi', $payType, 'jsapi', $service, ((array) $payInfo) + ['raw' => $data], $data, $order);
+    }
+
+    /**
+     * 微信 H5 支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function wxH5Pay(array $order): array
+    {
+        try {
+            $data = $this->client()->request($this->basePayload($order) + [
+                'service' => 'pay.weixin.wappay',
+                'device_info' => 'AND_WAP',
+                'mch_app_name' => mb_strcut((string) $order['subject'], 0, 32, 'UTF-8'),
+                'mch_app_id' => (string) $order['return_url'],
+                'callback_url' => (string) $order['return_url'],
+            ]);
+        } catch (UnionpaySdkException $e) {
+            throw new PaymentException('银联前置微信H5下单失败：' . $e->getMessage(), 40200);
+        }
+
+        return $this->payResult('jump', 'wxpay', 'h5', 'pay.weixin.wappay', ['url' => (string) ($data['pay_info'] ?? ''), 'raw' => $data], $data, $order);
+    }
+
+    /**
+     * 构造通用下单参数。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function basePayload(array $order): array
+    {
+        return [
+            'body' => mb_strcut((string) $order['subject'], 0, 127, 'UTF-8'),
+            'total_fee' => (string) (int) $order['amount'],
+            'mch_create_ip' => (string) $order['client_ip'],
+            'out_trade_no' => (string) $order['pay_no'],
+            'notify_url' => (string) $order['callback_url'],
+        ];
+    }
+
+    /**
+     * 包装标准支付结果。
+     *
+     * @param array<string, mixed> $payParams 承接页参数
+     * @param array<string, mixed> $data 上游响应
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function payResult(string $page, string $payType, string $product, string $action, array $payParams, array $data, array $order): array
+    {
+        return [
+            'pay_page' => $page,
+            'pay_type' => $payType,
+            'pay_product' => $product,
+            'pay_action' => $action,
+            'pay_params' => $payParams,
+            'chan_order_no' => (string) ($data['out_trade_no'] ?? $order['pay_no']),
+            'chan_trade_no' => (string) ($data['transaction_id'] ?? ''),
+        ];
+    }
+
+    /**
+     * 获取 SDK 客户端。
+     */
+    private function client(): UnionpayClient
+    {
+        if ($this->client === null) {
+            $this->client = new UnionpayClient([
+                'mch_id' => $this->configText('mch_id'),
+                'key' => $this->configText('key'),
+                'gateway_url' => $this->configText('gateway_url'),
+            ]);
+        }
+
+        return $this->client;
+    }
+
+    /**
+     * 获取字符串配置。
+     */
+    private function configText(string $key): string
+    {
+        return (string) $this->getConfig($key, '');
+    }
+}

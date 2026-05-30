@@ -3,6 +3,7 @@
 namespace app\service\payment\config;
 
 use app\common\base\BaseService;
+use app\common\constant\CommonConstant;
 use app\common\constant\EventConstant;
 use app\common\constant\RouteConstant;
 use app\exception\PaymentException;
@@ -12,6 +13,7 @@ use app\repository\payment\config\PaymentChannelRepository;
 use app\repository\payment\config\PaymentPluginConfRepository;
 use app\repository\payment\config\PaymentPluginRepository;
 use app\repository\payment\config\PaymentTypeRepository;
+use app\service\payment\receipt\ReceiptWatcherLicenseService;
 use Webman\Event\Event;
 
 /**
@@ -24,6 +26,7 @@ use Webman\Event\Event;
  * @property PaymentPluginConfRepository $paymentPluginConfRepository 支付插件配置仓库
  * @property PaymentPluginRepository $paymentPluginRepository 支付插件仓库
  * @property PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+ * @property ReceiptWatcherLicenseService $receiptWatcherLicenseService 网页监听授权服务
  */
 class PaymentChannelCommandService extends BaseService
 {
@@ -62,6 +65,7 @@ class PaymentChannelCommandService extends BaseService
      * @param PaymentPluginConfRepository $paymentPluginConfRepository 支付插件配置仓库
      * @param PaymentPluginRepository $paymentPluginRepository 支付插件仓库
      * @param PaymentTypeRepository $paymentTypeRepository 支付类型仓库
+     * @param ReceiptWatcherLicenseService $receiptWatcherLicenseService 网页监听授权服务
      * @return void
      */
     public function __construct(
@@ -69,7 +73,8 @@ class PaymentChannelCommandService extends BaseService
         protected PaymentChannelRepository $paymentChannelRepository,
         protected PaymentPluginConfRepository $paymentPluginConfRepository,
         protected PaymentPluginRepository $paymentPluginRepository,
-        protected PaymentTypeRepository $paymentTypeRepository
+        protected PaymentTypeRepository $paymentTypeRepository,
+        protected ReceiptWatcherLicenseService $receiptWatcherLicenseService
     ) {
     }
 
@@ -100,6 +105,7 @@ class PaymentChannelCommandService extends BaseService
         $this->assertMerchantExists($payload);
         $this->assertPluginSupportsPayType($payload);
         $this->assertApiConfigMatchesPlugin($payload, true);
+        $this->assertReceiptWatcherLicense($payload);
 
         $channel = $this->paymentChannelRepository->create($payload);
         $this->dispatchWatcherConfigChanged('create', $channel);
@@ -130,6 +136,10 @@ class PaymentChannelCommandService extends BaseService
         $this->assertMerchantExists($payload);
         $this->assertPluginSupportsPayType($payload);
         $this->assertApiConfigMatchesPlugin($payload, false);
+        $this->assertReceiptWatcherLicense(array_merge([
+            'plugin_code' => (string) $current->plugin_code,
+            'status' => (int) $current->status,
+        ], $payload));
 
         if ($payload === []) {
             return $current;
@@ -342,6 +352,30 @@ class PaymentChannelCommandService extends BaseService
             throw new PaymentException('接口配置与支付插件不匹配，请重新选择', 40223, [
                 'api_config_id' => $apiConfigId,
                 'config_plugin_code' => (string) $config->plugin_code,
+                'plugin_code' => $pluginCode,
+            ]);
+        }
+    }
+
+    /**
+     * 校验网页流水监听插件授权。
+     *
+     * @param array<string, mixed> $data 写入数据
+     * @return void
+     * @throws PaymentException
+     */
+    private function assertReceiptWatcherLicense(array $data): void
+    {
+        $pluginCode = trim((string) ($data['plugin_code'] ?? ''));
+        $status = (int) ($data['status'] ?? CommonConstant::STATUS_ENABLED);
+        if ($pluginCode === '' || $status !== CommonConstant::STATUS_ENABLED) {
+            return;
+        }
+        if (!$this->receiptWatcherLicenseService->isReceiptWatcherPlugin($pluginCode)) {
+            return;
+        }
+        if (!$this->receiptWatcherLicenseService->isPluginAuthorized($pluginCode)) {
+            throw new PaymentException('网页流水监听插件未授权，不能启用该通道', 40224, [
                 'plugin_code' => $pluginCode,
             ]);
         }

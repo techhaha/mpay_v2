@@ -91,6 +91,7 @@ return new class {
             'pay_order_timeout_scan_interval_seconds' => '60',
             'pay_runtime_enabled' => '1',
             'receipt_watcher_enabled' => '0',
+            'receipt_watcher_license_code' => '',
             'receipt_watcher_order_scan_batch_size' => '500',
             'receipt_watcher_order_scan_interval_seconds' => '3',
             'receipt_watcher_plugin_codes' => "shouqianba_receipt\npostar_receipt\nalipay_bill_receipt\nhaike_maqian_receipt\nlakala_receipt\ntianque_receipt\nfubei_receipt\nyisheng_receipt\nyeepay_boss_receipt",

@@ -13,6 +13,7 @@ use app\repository\payment\config\PaymentChannelRepository;
 use app\repository\payment\config\PaymentPluginConfRepository;
 use app\repository\payment\config\PaymentPluginRepository;
 use app\repository\payment\config\PaymentTypeRepository;
+use app\service\payment\receipt\ReceiptWatcherLicenseService;
 
 /**
  * 商户门户通道配置命令服务。
@@ -26,7 +27,8 @@ class MerchantPortalChannelCommandService extends BaseService
         protected PaymentPluginRepository $paymentPluginRepository,
         protected PaymentPluginConfRepository $paymentPluginConfRepository,
         protected PaymentChannelRepository $paymentChannelRepository,
-        protected PaymentTypeRepository $paymentTypeRepository
+        protected PaymentTypeRepository $paymentTypeRepository,
+        protected ReceiptWatcherLicenseService $receiptWatcherLicenseService
     ) {
     }
 
@@ -370,6 +372,14 @@ class MerchantPortalChannelCommandService extends BaseService
         $payTypeCodes = array_values(array_filter(array_map(static fn ($item) => trim((string) $item), $payTypes)));
         if (!in_array((string) $payType->code, $payTypeCodes, true)) {
             throw new PaymentException('支付插件不支持当前支付方式', 40245);
+        }
+
+        if ((int) $payload['status'] === CommonConstant::STATUS_ENABLED
+            && $this->receiptWatcherLicenseService->isReceiptWatcherPlugin((string) $payload['plugin_code'])
+            && !$this->receiptWatcherLicenseService->isPluginAuthorized((string) $payload['plugin_code'])) {
+            throw new PaymentException('网页流水监听插件未授权，不能启用该通道', 40250, [
+                'plugin_code' => (string) $payload['plugin_code'],
+            ]);
         }
 
         if ((int) $payload['max_amount'] > 0 && (int) $payload['min_amount'] > (int) $payload['max_amount']) {

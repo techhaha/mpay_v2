@@ -690,6 +690,7 @@ return [
                             'pay_active_query_batch_size',
                             '__runtime_receipt_watcher_divider__',
                             'receipt_watcher_enabled',
+                            'receipt_watcher_license_code',
                             'receipt_watcher_plugin_codes',
                             'receipt_watcher_order_scan_interval_seconds',
                             'receipt_watcher_order_scan_batch_size',
@@ -862,6 +863,7 @@ return [
                 'control' => [
                     [
                         'rule' => [
+                            'receipt_watcher_license_code',
                             'receipt_watcher_plugin_codes',
                             'receipt_watcher_order_scan_interval_seconds',
                             'receipt_watcher_order_scan_batch_size',
@@ -869,6 +871,15 @@ return [
                         'value' => '1',
                         'method' => 'display',
                     ],
+                ],
+            ],
+            [
+                'type' => 'password',
+                'field' => 'receipt_watcher_license_code',
+                'title' => '授权码',
+                'value' => '',
+                'props' => [
+                    'placeholder' => '请输入 RWLIC1 开头的 receipt_watcher 离线授权码',
                 ],
             ],
             [

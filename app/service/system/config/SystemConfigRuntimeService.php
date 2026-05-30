@@ -5,6 +5,7 @@ namespace app\service\system\config;
 use app\common\base\BaseService;
 use app\repository\system\config\SystemConfigRepository;
 use support\Cache;
+use support\Redis;
 use Throwable;
 
 /**
@@ -130,6 +131,12 @@ class SystemConfigRuntimeService extends BaseService
             Cache::set(self::CACHE_KEY, $values);
         } catch (Throwable) {
             // Redis 不可用时不阻塞主流程。
+        }
+
+        try {
+            Redis::set(self::CACHE_KEY, serialize($values));
+        } catch (Throwable) {
+            // watcher 直接读取 Redis 缓存；写入失败时仍不阻塞主流程。
         }
     }
 }

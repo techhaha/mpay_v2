@@ -55,10 +55,25 @@ class SystemConfigSync extends Command
 
             $tabs = $definitionService->tabs();
             $written = 0;
+            $defaultsByGroup = [];
+            $allDefaults = [];
 
             foreach ($tabs as $tab) {
                 $groupCode = (string) ($tab['key'] ?? '');
-                foreach ($definitionService->defaultStorageValues($tab) as $configKey => $configValue) {
+                $defaults = $definitionService->defaultStorageValues($tab);
+                $defaultsByGroup[$groupCode] = $defaults;
+                foreach ($defaults as $configKey => $configValue) {
+                    $allDefaults[$configKey] = $configValue;
+                }
+            }
+
+            $existingValues = $repository->valueMapByKeys(array_keys($allDefaults));
+            foreach ($defaultsByGroup as $groupCode => $defaults) {
+                foreach ($defaults as $configKey => $configValue) {
+                    if (array_key_exists($configKey, $existingValues)) {
+                        continue;
+                    }
+
                     $repository->updateOrCreate(
                         ['config_key' => $configKey],
                         [
