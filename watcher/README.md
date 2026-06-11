@@ -26,7 +26,7 @@ image.tar.gz
 镜像压缩包下载地址：
 
 ```bash
-https://gitee.com/technical-laohu/mpay_v2_webman/image.tar.gz
+https://github.com/techhaha/mpay_v2/releases/tag/2.0.0
 ```
 
 ## 一键安装
