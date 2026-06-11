@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\chinaums\ChinaumsClient;
 use app\common\sdk\chinaums\ChinaumsSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -22,6 +24,8 @@ use support\Response;
  */
 class ChinaumsApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
     private const PRODUCT_ALIPAY_SCAN = 'alipay_scan';
     private const PRODUCT_ALIPAY_H5 = 'alipay_h5';
     private const PRODUCT_WXPAY_SCAN = 'wxpay_scan';
@@ -39,6 +43,7 @@ class ChinaumsApiPayment extends BasePayment implements PaymentInterface, PayPlu
     protected array $paymentInfo = [
         'code' => 'chinaums_api',
         'name' => '银联商务开放平台支付',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'wxpay', 'bank'],
@@ -159,25 +164,73 @@ class ChinaumsApiPayment extends BasePayment implements PaymentInterface, PayPlu
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
 
-        if ($payType === 'alipay' && $method === 'h5') {
-            return $this->h5Pay($order, self::PRODUCT_ALIPAY_H5, '/v1/netpay/trade/h5-pay', 'alipay');
-        }
-        if ($payType === 'wxpay' && $method === 'h5') {
-            return $this->h5Pay($order, self::PRODUCT_WXPAY_H5, '/v1/netpay/wxpay/h5-pay', 'wxpay');
-        }
-        if ($payType === 'wxpay' && $method === 'mini') {
-            return $this->h5Pay($order, self::PRODUCT_WXPAY_MINI_H5, '/v1/netpay/wxpay/h5-to-minipay', 'wxpay');
-        }
-        if ($payType === 'bank') {
-            return $this->qrcodePay($order, self::PRODUCT_BANK_SCAN);
-        }
-        if ($payType === 'wxpay') {
-            return $this->qrcodePay($order, self::PRODUCT_WXPAY_SCAN);
-        }
+        return $this->executeDirectPaymentProduct($order, [
+            'h5' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_H5, 'wxpay' => self::PRODUCT_WXPAY_H5],
 
-        return $this->qrcodePay($order, self::PRODUCT_ALIPAY_SCAN);
+                'handler' => fn (): array => $this->h5PayByType($order, $payType, false),
+            ],
+            'jump' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_H5, 'wxpay' => self::PRODUCT_WXPAY_H5],
+
+                'handler' => fn (): array => $this->h5PayByType($order, $payType, false),
+            ],
+            'web' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_H5, 'wxpay' => self::PRODUCT_WXPAY_H5],
+
+                'handler' => fn (): array => $this->h5PayByType($order, $payType, false),
+            ],
+            'urlscheme' => [
+                'products' => ['wxpay' => self::PRODUCT_WXPAY_MINI_H5],
+
+                'handler' => fn (): array => $this->h5PayByType($order, $payType, true),
+            ],
+            'qrcode' => [
+                'products' => [
+                    'bank' => self::PRODUCT_BANK_SCAN,
+                    'wxpay' => self::PRODUCT_WXPAY_SCAN,
+                    'alipay' => self::PRODUCT_ALIPAY_SCAN,
+                ],
+
+                'handler' => fn (): array => $this->qrcodePayByType($order, $payType),
+            ],
+        ], '银联商务');
+    }
+
+    /**
+     * 按支付方式选择银联商务 H5 或小程序跳转产品。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @param bool $preferMini 是否优先微信 H5 转小程序
+     * @return array<string, mixed>
+     */
+    private function h5PayByType(array $order, string $payType, bool $preferMini): array
+    {
+        return match ($payType) {
+            'alipay' => $this->h5Pay($order, self::PRODUCT_ALIPAY_H5, '/v1/netpay/trade/h5-pay', 'alipay'),
+            'wxpay' => $preferMini
+                ? $this->h5Pay($order, self::PRODUCT_WXPAY_MINI_H5, '/v1/netpay/wxpay/h5-to-minipay', 'wxpay')
+                : $this->h5Pay($order, self::PRODUCT_WXPAY_H5, '/v1/netpay/wxpay/h5-pay', 'wxpay'),
+            default => throw new PaymentException('银联商务当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+        };
+    }
+
+    /**
+     * 按支付方式选择银联商务扫码产品。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function qrcodePayByType(array $order, string $payType): array
+    {
+        return match ($payType) {
+            'bank' => $this->qrcodePay($order, self::PRODUCT_BANK_SCAN),
+            'wxpay' => $this->qrcodePay($order, self::PRODUCT_WXPAY_SCAN),
+            default => $this->qrcodePay($order, self::PRODUCT_ALIPAY_SCAN),
+        };
     }
 
     /**

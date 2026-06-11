@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\tianquetech\TianqueTechClient;
 use app\common\sdk\tianquetech\TianqueTechSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -23,6 +25,8 @@ use support\Response;
  */
 class TianqueTechApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
     private const PRODUCT_ALIPAY_SCAN = 'alipay_scan';
     private const PRODUCT_ALIPAY_JSAPI = 'alipay_jsapi';
     private const PRODUCT_WXPAY_SCAN = 'wxpay_scan';
@@ -39,6 +43,7 @@ class TianqueTechApiPayment extends BasePayment implements PaymentInterface, Pay
     protected array $paymentInfo = [
         'code' => 'tianquetech_api',
         'name' => '天阙科技OpenAPI支付',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'wxpay', 'bank'],
@@ -101,7 +106,7 @@ class TianqueTechApiPayment extends BasePayment implements PaymentInterface, Pay
                     ['label' => '支付宝扫码', 'value' => self::PRODUCT_ALIPAY_SCAN],
                     ['label' => '支付宝JSAPI', 'value' => self::PRODUCT_ALIPAY_JSAPI],
                     ['label' => '微信扫码', 'value' => self::PRODUCT_WXPAY_SCAN],
-                    ['label' => '微信JSAPI', 'value' => self::PRODUCT_WXPAY_JSAPI],
+                    ['label' => '微信JSAPI/小程序', 'value' => self::PRODUCT_WXPAY_JSAPI],
                     ['label' => '云闪付扫码', 'value' => self::PRODUCT_BANK_SCAN],
                 ],
                 'validate' => [
@@ -139,22 +144,43 @@ class TianqueTechApiPayment extends BasePayment implements PaymentInterface, Pay
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
 
-        if ($payType === 'alipay' && $method === 'jsapi') {
-            return $this->jsapiPay($order, self::PRODUCT_ALIPAY_JSAPI, 'ALIPAY');
-        }
-        if ($payType === 'wxpay' && $method === 'jsapi') {
-            return $this->jsapiPay($order, self::PRODUCT_WXPAY_JSAPI, 'WECHAT');
-        }
-        if ($payType === 'bank') {
-            return $this->scanPay($order, self::PRODUCT_BANK_SCAN, 'UNIONPAY');
-        }
-        if ($payType === 'wxpay') {
-            return $this->scanPay($order, self::PRODUCT_WXPAY_SCAN, 'WECHAT');
-        }
+        return $this->executeDirectPaymentProduct($order, [
+            'jsapi' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_JSAPI, 'wxpay' => self::PRODUCT_WXPAY_JSAPI],
+                'handler' => function () use ($order, $payType): array {
+                    return match ($payType) {
+                        'alipay' => $this->jsapiPay($order, self::PRODUCT_ALIPAY_JSAPI, 'ALIPAY'),
+                        'wxpay' => $this->jsapiPay($order, self::PRODUCT_WXPAY_JSAPI, 'WECHAT'),
+                    };
+                },
+            ],
+            'qrcode' => [
+                'products' => [
+                    'bank' => self::PRODUCT_BANK_SCAN,
+                    'wxpay' => self::PRODUCT_WXPAY_SCAN,
+                    'alipay' => self::PRODUCT_ALIPAY_SCAN,
+                ],
 
-        return $this->scanPay($order, self::PRODUCT_ALIPAY_SCAN, 'ALIPAY');
+                'handler' => fn (): array => $this->scanPayByType($order, $payType),
+            ],
+        ], '天阙');
+    }
+
+    /**
+     * 按支付方式选择天阙扫码产品。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function scanPayByType(array $order, string $payType): array
+    {
+        return match ($payType) {
+            'bank' => $this->scanPay($order, self::PRODUCT_BANK_SCAN, 'UNIONPAY'),
+            'wxpay' => $this->scanPay($order, self::PRODUCT_WXPAY_SCAN, 'WECHAT'),
+            default => $this->scanPay($order, self::PRODUCT_ALIPAY_SCAN, 'ALIPAY'),
+        };
     }
 
     /**
@@ -364,10 +390,11 @@ class TianqueTechApiPayment extends BasePayment implements PaymentInterface, Pay
         $this->ensureProduct($product);
 
         $payment = (array) ($order['extra']['payment'] ?? []);
-        $userId = (string) ($payment['buyer_id'] ?? $payment['openid'] ?? $payment['sub_openid'] ?? '');
+        $userId = (string) ($payment['buyer_id'] ?? $payment['mini_openid'] ?? $payment['openid'] ?? $payment['sub_openid'] ?? '');
         if ($userId === '') {
             throw new PaymentException('JSAPI支付缺少用户标识', 40200);
         }
+        $payWay = $payType === 'WECHAT' && (string) ($payment['mini_openid'] ?? '') !== '' ? '03' : '02';
 
         try {
             $data = $this->client()->submit('/order/jsapiScan', [
@@ -375,7 +402,7 @@ class TianqueTechApiPayment extends BasePayment implements PaymentInterface, Pay
                 'ordNo' => (string) $order['pay_no'],
                 'amt' => FormatHelper::amount((int) $order['amount']),
                 'payType' => $payType,
-                'payWay' => '02',
+                'payWay' => $payWay,
                 'subject' => mb_strcut((string) $order['subject'], 0, 127, 'UTF-8'),
                 'trmIp' => (string) $order['client_ip'],
                 'subAppid' => (string) ($payment['sub_appid'] ?? ''),

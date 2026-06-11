@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\fuiou\FuiouPayClient;
 use app\common\sdk\fuiou\FuiouSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -22,12 +24,16 @@ use support\Response;
  */
 class FuiouApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
     private const PRODUCT_ALIPAY_SCAN = 'alipay_scan';
     private const PRODUCT_ALIPAY_JSAPI = 'alipay_jsapi';
     private const PRODUCT_WXPAY_SCAN = 'wxpay_scan';
     private const PRODUCT_WXPAY_JSAPI = 'wxpay_jsapi';
     private const PRODUCT_BANK_SCAN = 'bank_scan';
     private const PRODUCT_BARCODE = 'barcode';
+    private const UPSTREAM_WXPAY_JSAPI = 'JSAPI';
+    private const UPSTREAM_WXPAY_MINI = 'LETPAY';
 
     private ?FuiouPayClient $client = null;
 
@@ -39,6 +45,7 @@ class FuiouApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     protected array $paymentInfo = [
         'code' => 'fuiou_api',
         'name' => '富友合作方聚合支付',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'wxpay', 'bank'],
@@ -107,7 +114,7 @@ class FuiouApiPayment extends BasePayment implements PaymentInterface, PayPlugin
                     ['label' => '支付宝扫码', 'value' => self::PRODUCT_ALIPAY_SCAN],
                     ['label' => '支付宝JSAPI', 'value' => self::PRODUCT_ALIPAY_JSAPI],
                     ['label' => '微信扫码', 'value' => self::PRODUCT_WXPAY_SCAN],
-                    ['label' => '微信JSAPI', 'value' => self::PRODUCT_WXPAY_JSAPI],
+                    ['label' => '微信JSAPI/小程序', 'value' => self::PRODUCT_WXPAY_JSAPI],
                     ['label' => '云闪付扫码', 'value' => self::PRODUCT_BANK_SCAN],
                     ['label' => '付款码支付', 'value' => self::PRODUCT_BARCODE],
                 ],
@@ -146,26 +153,70 @@ class FuiouApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     public function pay(array $order): array
     {
         $payType = $this->payTypeCode($order);
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        $authCode = (string) ($order['extra']['payment']['auth_code'] ?? '');
 
-        if ($authCode !== '') {
-            return $this->barcodePay($order, $this->orderType($payType), $authCode);
-        }
-        if ($payType === 'alipay' && $method === 'jsapi') {
-            return $this->jsapiPay($order, self::PRODUCT_ALIPAY_JSAPI, 'FWC');
-        }
-        if ($payType === 'wxpay' && $method === 'jsapi') {
-            return $this->jsapiPay($order, self::PRODUCT_WXPAY_JSAPI, 'JSAPI');
-        }
-        if ($payType === 'bank') {
-            return $this->scanPay($order, self::PRODUCT_BANK_SCAN, 'UNIONPAY');
-        }
-        if ($payType === 'wxpay') {
-            return $this->scanPay($order, self::PRODUCT_WXPAY_SCAN, 'WECHAT');
-        }
+        return $this->executeDirectPaymentProduct($order, [
+            'auth_code' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_BARCODE,
+                    'wxpay' => self::PRODUCT_BARCODE,
+                    'bank' => self::PRODUCT_BARCODE,
+                ],
 
-        return $this->scanPay($order, self::PRODUCT_ALIPAY_SCAN, 'ALIPAY');
+                'handler' => fn (): array => $this->barcodePay(
+                    $order,
+                    $this->orderType($payType),
+                    (string) ($order['extra']['payment']['auth_code'] ?? '')
+                ),
+            ],
+            'jsapi' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_JSAPI, 'wxpay' => self::PRODUCT_WXPAY_JSAPI],
+                'handler' => function () use ($order, $payType): array {
+                    return match ($payType) {
+                        'alipay' => $this->jsapiPay($order, self::PRODUCT_ALIPAY_JSAPI, 'FWC'),
+                        'wxpay' => $this->jsapiPay($order, self::PRODUCT_WXPAY_JSAPI, $this->wxpayJsapiTradeType($order)),
+                    };
+                },
+            ],
+            'qrcode' => [
+                'products' => [
+                    'bank' => self::PRODUCT_BANK_SCAN,
+                    'wxpay' => self::PRODUCT_WXPAY_SCAN,
+                    'alipay' => self::PRODUCT_ALIPAY_SCAN,
+                ],
+
+                'handler' => fn (): array => $this->scanPayByType($order, $payType),
+            ],
+        ], '富友');
+    }
+
+    /**
+     * 按支付方式选择富友扫码产品。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function scanPayByType(array $order, string $payType): array
+    {
+        return match ($payType) {
+            'bank' => $this->scanPay($order, self::PRODUCT_BANK_SCAN, 'UNIONPAY'),
+            'wxpay' => $this->scanPay($order, self::PRODUCT_WXPAY_SCAN, 'WECHAT'),
+            default => $this->scanPay($order, self::PRODUCT_ALIPAY_SCAN, 'ALIPAY'),
+        };
+    }
+
+    /**
+     * 微信 JSAPI 和小程序共用旧插件的同一个开通项，实际接口产品由身份字段区分。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     */
+    private function wxpayJsapiTradeType(array $order): string
+    {
+        $payment = (array) ($order['extra']['payment'] ?? []);
+
+        return (string) ($payment['mini_openid'] ?? '') !== ''
+            ? self::UPSTREAM_WXPAY_MINI
+            : self::UPSTREAM_WXPAY_JSAPI;
     }
 
     /**
@@ -366,7 +417,7 @@ class FuiouApiPayment extends BasePayment implements PaymentInterface, PayPlugin
         $this->ensureProduct($product);
 
         $payment = (array) ($order['extra']['payment'] ?? []);
-        $userId = (string) ($payment['buyer_id'] ?? $payment['openid'] ?? $payment['sub_openid'] ?? '');
+        $userId = (string) ($payment['buyer_id'] ?? $payment['mini_openid'] ?? $payment['openid'] ?? $payment['sub_openid'] ?? '');
         if ($userId === '') {
             throw new PaymentException('富友JSAPI支付缺少用户标识', 40200);
         }

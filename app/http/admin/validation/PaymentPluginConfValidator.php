@@ -21,6 +21,7 @@ class PaymentPluginConfValidator extends Validator
         'keyword' => 'sometimes|string|max:128',
         'merchant_id' => 'sometimes|integer|min:0',
         'plugin_code' => 'sometimes|string|alpha_dash|min:2|max:32',
+        'plugin_type' => 'sometimes|integer|in:1,2,3',
         'config' => 'nullable|array',
         'settlement_cycle_type' => 'sometimes|integer|in:0,1,2,3,4',
         'settlement_cutoff_time' => 'nullable|date_format:H:i:s',
@@ -40,6 +41,7 @@ class PaymentPluginConfValidator extends Validator
         'keyword' => '关键字',
         'merchant_id' => '所属商户',
         'plugin_code' => '插件编码',
+        'plugin_type' => '插件类型',
         'config' => '插件配置',
         'settlement_cycle_type' => '结算周期',
         'settlement_cutoff_time' => '结算截止时间',
@@ -55,7 +57,7 @@ class PaymentPluginConfValidator extends Validator
      * @var array
      */
     protected array $scenes = [
-        'index' => ['keyword', 'merchant_id', 'plugin_code', 'page', 'page_size'],
+        'index' => ['keyword', 'merchant_id', 'plugin_code', 'plugin_type', 'page', 'page_size'],
         'store' => ['merchant_id', 'plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
         'update' => ['id', 'merchant_id', 'plugin_code', 'config', 'settlement_cycle_type', 'settlement_cutoff_time', 'remark'],
         'show' => ['id'],
@@ -88,4 +90,3 @@ class PaymentPluginConfValidator extends Validator
         };
     }
 }
-

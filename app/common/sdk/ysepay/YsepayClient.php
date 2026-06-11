@@ -52,22 +52,7 @@ class YsepayClient
      */
     public function execute(string $method, array $bizContent, array $urls = []): array
     {
-        $payload = [
-            'method' => $method,
-            'partner_id' => $this->config['partner_id'],
-            'timestamp' => date('Y-m-d H:i:s'),
-            'charset' => 'UTF-8',
-            'sign_type' => 'RSA',
-            'version' => '3.5',
-            'biz_content' => json_encode($bizContent, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-        ];
-        if (($urls['notify_url'] ?? '') !== '') {
-            $payload['notify_url'] = $urls['notify_url'];
-        }
-        if (($urls['return_url'] ?? '') !== '') {
-            $payload['return_url'] = $urls['return_url'];
-        }
-        $payload['sign'] = $this->sign($this->signContent($payload));
+        $payload = $this->signedPayload($method, $bizContent, $urls);
 
         try {
             $response = $this->httpClient->post(self::QRCODE_GATEWAY, [
@@ -79,6 +64,25 @@ class YsepayClient
         }
 
         return $this->parseResponse((string) $response->getBody(), $method);
+    }
+
+    /**
+     * 生成页面跳转接口自动提交表单。
+     *
+     * @param string $method 银盛方法名
+     * @param array<string, mixed> $bizContent 业务参数
+     * @param array<string, string> $urls 回调地址
+     */
+    public function pageExecute(string $method, array $bizContent, array $urls = []): string
+    {
+        $payload = $this->signedPayload($method, $bizContent, $urls);
+        $html = '<form action="' . self::QRCODE_GATEWAY . '" method="post" id="ysepayForm">';
+        foreach ($payload as $key => $value) {
+            $html .= '<input type="hidden" name="' . htmlspecialchars((string) $key, ENT_QUOTES, 'UTF-8') . '" value="' . htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8') . '">';
+        }
+        $html .= '</form><script>document.getElementById("ysepayForm").submit();</script>';
+
+        return $html;
     }
 
     /**
@@ -123,6 +127,35 @@ class YsepayClient
         }
 
         return $data;
+    }
+
+    /**
+     * 构造并签名银盛标准请求参数。
+     *
+     * @param array<string, mixed> $bizContent 业务参数
+     * @param array<string, string> $urls 回调地址
+     * @return array<string, string>
+     */
+    private function signedPayload(string $method, array $bizContent, array $urls): array
+    {
+        $payload = [
+            'method' => $method,
+            'partner_id' => $this->config['partner_id'],
+            'timestamp' => date('Y-m-d H:i:s'),
+            'charset' => 'UTF-8',
+            'sign_type' => 'RSA',
+            'version' => '3.5',
+            'biz_content' => json_encode($bizContent, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        ];
+        if (($urls['notify_url'] ?? '') !== '') {
+            $payload['notify_url'] = $urls['notify_url'];
+        }
+        if (($urls['return_url'] ?? '') !== '') {
+            $payload['return_url'] = $urls['return_url'];
+        }
+        $payload['sign'] = $this->sign($this->signContent($payload));
+
+        return array_map(static fn (mixed $value): string => (string) $value, $payload);
     }
 
     /**

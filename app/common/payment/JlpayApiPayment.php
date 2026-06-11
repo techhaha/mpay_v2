@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\jlpay\JlpayClient;
 use app\common\sdk\jlpay\JlpaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -19,6 +21,14 @@ use support\Response;
  */
 class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_MICROPAY = 'micropay';
+    private const PRODUCT_OPEN_TRANS_WAPH5PAY = 'open/trans/waph5pay';
+    private const PRODUCT_OPEN_TRANS_OFFICIALPAY = 'open/trans/officialpay';
+    private const PRODUCT_OPEN_TRANS_UNIONJSPAY = 'open/trans/unionjspay';
+    private const PRODUCT_QRCODEPAY = 'qrcodepay';
+
     private ?JlpayClient $client = null;
 
     /**
@@ -29,6 +39,7 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     protected array $paymentInfo = [
         'code' => 'jlpay_api',
         'name' => '嘉联支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.jlpay.com/',
         'version' => '1.0.0',
@@ -51,6 +62,13 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             ['type' => 'input', 'field' => 'mch_id', 'title' => '商户号', 'value' => '', 'validate' => [['required' => true, 'message' => '商户号不能为空']]],
             ['type' => 'input', 'field' => 'term_no', 'title' => '终端号', 'value' => '', 'validate' => [['required' => true, 'message' => '终端号不能为空']]],
             ['type' => 'switch', 'field' => 'is_test', 'title' => '测试环境', 'value' => false],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_MICROPAY => '付款码支付',
+                self::PRODUCT_OPEN_TRANS_WAPH5PAY => '支付宝 JSAPI/H5',
+                self::PRODUCT_OPEN_TRANS_OFFICIALPAY => '微信 JSAPI',
+                self::PRODUCT_OPEN_TRANS_UNIONJSPAY => '银联 JSAPI',
+                self::PRODUCT_QRCODEPAY => '扫码支付',
+            ]),
         ];
     }
 
@@ -62,14 +80,45 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
      */
     public function pay(array $order): array
     {
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'scan') {
-            return $this->scanPay($order);
-        }
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
 
+            'auth_code' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_MICROPAY,
+                    'wxpay' => self::PRODUCT_MICROPAY,
+                    'bank' => self::PRODUCT_MICROPAY,
+                ],
+                'handler' => fn (): array => $this->scanPay($order),
+            ],
+
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_OPEN_TRANS_WAPH5PAY,
+                    'wxpay' => self::PRODUCT_OPEN_TRANS_OFFICIALPAY,
+                    'bank' => self::PRODUCT_OPEN_TRANS_UNIONJSPAY,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_QRCODEPAY,
+                    'wxpay' => self::PRODUCT_QRCODEPAY,
+                    'bank' => self::PRODUCT_QRCODEPAY,
+                ],
+                'handler' => fn (): array => $this->qrcodePay($order),
+            ],
+        ], '嘉联支付');
+    }
+
+    /**
+     * 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function qrcodePay(array $order): array
+    {
         $payType = $this->channelPayType((string) $order['pay_type_code']);
         try {
             $data = $this->client()->execute('/open/trans/qrcodepay', $this->basePayload($order) + [
@@ -79,7 +128,7 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             throw new PaymentException('嘉联支付下单失败：' . $e->getMessage(), 40200);
         }
 
-        return $this->payResult('qrcode', (string) $order['pay_type_code'], 'qrcode', 'qrcodepay', ['qrcode' => (string) ($data['code_url'] ?? ''), 'raw' => $data], $data, $order);
+        return $this->payResult('qrcode', (string) $order['pay_type_code'], 'qrcodepay', 'qrcodepay', ['qrcode' => (string) ($data['code_url'] ?? ''), 'raw' => $data], $data, $order);
     }
 
     /**
@@ -219,7 +268,7 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
         };
         $payload = $this->basePayload($order) + ['pay_type' => $this->channelPayType($payType)];
         if ($payType === 'wxpay') {
-            $payload['open_id'] = (string) ($payment['sub_openid'] ?? '');
+            $payload['open_id'] = (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? '');
             $payload['sub_appid'] = (string) ($payment['sub_appid'] ?? '');
         } elseif ($payType === 'bank') {
             $payload['user_id'] = (string) ($payment['sub_openid'] ?? '');
@@ -242,7 +291,7 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             $payInfo = is_array($decoded) ? $decoded : ['tradeNO' => $payInfo];
         }
 
-        return $this->payResult($payType === 'bank' ? 'jump' : 'jsapi', $payType, 'jsapi', ltrim($path, '/'), $payType === 'bank' ? ['url' => (string) $payInfo, 'raw' => $data] : ((array) $payInfo) + ['raw' => $data], $data, $order);
+        return $this->payResult($payType === 'bank' ? 'jump' : 'jsapi', $payType, ltrim($path, '/'), ltrim($path, '/'), $payType === 'bank' ? ['url' => (string) $payInfo, 'raw' => $data] : ((array) $payInfo) + ['raw' => $data], $data, $order);
     }
 
     /**
@@ -261,7 +310,7 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             throw new PaymentException('嘉联付款码下单失败：' . $e->getMessage(), 40200);
         }
 
-        return $this->payResult('ok', (string) $order['pay_type_code'], 'scan', 'micropay', ['raw' => $data], $data, $order);
+        return $this->payResult('ok', (string) $order['pay_type_code'], 'micropay', 'micropay', ['raw' => $data], $data, $order);
     }
 
     /**

@@ -290,6 +290,11 @@ class PaymentChannelTestService extends BaseService
      */
     private function resolveTestDevice(array $data): string
     {
+        $device = strtolower(trim((string) ($data['device'] ?? 'auto')));
+        if ($device !== '' && $device !== 'auto' && in_array($device, EpayProtocolConstant::v1Devices(), true)) {
+            return $device;
+        }
+
         $userAgent = strtolower(trim((string) ($data['user_agent'] ?? '')));
 
         if (str_contains($userAgent, 'alipayclient')) {

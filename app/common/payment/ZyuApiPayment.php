@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
@@ -34,6 +35,7 @@ class ZyuApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
     protected array $paymentInfo = [
         'code' => 'zyu_api',
         'name' => '知宇支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'qqpay', 'wxpay', 'bank'],

@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\zhangyishou\ZhangyishouClient;
 use app\common\sdk\zhangyishou\ZhangyishouSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,11 @@ use support\Response;
  */
 class ZhangyishouApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_PAY_CHANNEL_ID = 'pay_channel_id';
+    private const PRODUCT_WXPAY_MOBILE_CHANNEL_ID = 'wxpay_mobile_channel_id';
+
     private ?ZhangyishouClient $client = null;
 
     /**
@@ -30,6 +37,7 @@ class ZhangyishouApiPayment extends BasePayment implements PaymentInterface, Pay
     protected array $paymentInfo = [
         'code' => 'zhangyishou_api',
         'name' => '掌易收聚合支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'qqpay', 'wxpay', 'bank'],
@@ -90,6 +98,10 @@ class ZhangyishouApiPayment extends BasePayment implements PaymentInterface, Pay
                     'placeholder' => '微信移动端需单独走小程序/Scheme时填写',
                 ],
             ],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_PAY_CHANNEL_ID => '默认通道ID',
+                self::PRODUCT_WXPAY_MOBILE_CHANNEL_ID => '微信移动端通道ID',
+            ]),
         ];
     }
 
@@ -101,17 +113,79 @@ class ZhangyishouApiPayment extends BasePayment implements PaymentInterface, Pay
      */
     public function pay(array $order): array
     {
+        return $this->executeDirectPaymentProduct($order, [
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'qqpay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'wxpay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'bank' => self::PRODUCT_PAY_CHANNEL_ID,
+                ],
+                'handler' => fn (): array => $this->createPay($order, false, 'jump'),
+            ],
+
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'qqpay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'wxpay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'bank' => self::PRODUCT_PAY_CHANNEL_ID,
+                ],
+                'handler' => fn (): array => $this->createPay($order, false, 'jump'),
+            ],
+
+            'web' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'qqpay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'wxpay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'bank' => self::PRODUCT_PAY_CHANNEL_ID,
+                ],
+                'handler' => fn (): array => $this->createPay($order, false, 'jump'),
+            ],
+
+            'urlscheme' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_WXPAY_MOBILE_CHANNEL_ID,
+                ],
+                'handler' => fn (): array => $this->createPay($order, true, 'urlscheme'),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'qqpay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'wxpay' => self::PRODUCT_PAY_CHANNEL_ID,
+                    'bank' => self::PRODUCT_PAY_CHANNEL_ID,
+                ],
+                'handler' => fn (): array => $this->createPay($order, false, 'qrcode'),
+            ],
+        ], '掌易收');
+    }
+
+    /**
+     * 创建掌易收支付单。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param bool $useMobileChannel 是否使用微信移动端专用通道
+     * @param string $payPage 承接页类型
+     * @return array<string, mixed>
+     */
+    private function createPay(array $order, bool $useMobileChannel, string $payPage): array
+    {
         $payType = (string) $order['pay_type_code'];
-        $isWxMobile = $payType === 'wxpay'
-            && $this->configText('wxpay_mobile_channel_id') !== ''
-            && in_array((string) ($order['_env'] ?? ''), ['mobile', 'wechat'], true);
+        if ($useMobileChannel && ($payType !== 'wxpay' || $this->configText('wxpay_mobile_channel_id') === '')) {
+            throw new PaymentException('掌易收当前支付方式不支持URL Scheme产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']);
+        }
+
+        $payChannelId = $useMobileChannel ? $this->configText('wxpay_mobile_channel_id') : $this->configText('pay_channel_id');
 
         try {
             $data = $this->client()->addOrder([
                 'MerchantId' => $this->configText('merchant_id'),
                 'DownstreamOrderNo' => (string) $order['pay_no'],
                 'OrderTime' => date('Y-m-d H:i:s'),
-                'PayChannelId' => $isWxMobile ? $this->configText('wxpay_mobile_channel_id') : $this->configText('pay_channel_id'),
+                'PayChannelId' => $payChannelId,
                 'AsynPath' => (string) $order['callback_url'],
                 'OrderMoney' => FormatHelper::amount((int) $order['amount']),
                 'IPPath' => (string) $order['client_ip'],
@@ -126,16 +200,14 @@ class ZhangyishouApiPayment extends BasePayment implements PaymentInterface, Pay
             throw new PaymentException('掌易收未返回支付地址', 40200, ['response' => $data]);
         }
 
-        $page = $this->payPage($payType, $isWxMobile, (string) ($order['_env'] ?? ''));
-
         return [
-            'pay_page' => $page,
+            'pay_page' => $payPage,
             'pay_type' => $payType,
-            'pay_product' => $isWxMobile ? $this->configText('wxpay_mobile_channel_id') : $this->configText('pay_channel_id'),
+            'pay_product' => $payChannelId,
             'pay_action' => 'Order.AddOrder',
-            'pay_params' => $page === 'qrcode'
+            'pay_params' => $payPage === 'qrcode'
                 ? ['qrcode' => $url, 'raw' => $data]
-                : ($page === 'urlscheme'
+                : ($payPage === 'urlscheme'
                     ? ['urlscheme' => $url, 'raw' => $data]
                     : ['url' => $url, 'raw' => $data]),
             'chan_order_no' => (string) $order['pay_no'],
@@ -240,21 +312,6 @@ class ZhangyishouApiPayment extends BasePayment implements PaymentInterface, Pay
     public function notifyFail(): string|Response
     {
         return 'ERROR';
-    }
-
-    /**
-     * 根据支付方式和环境选择承接页类型。
-     */
-    private function payPage(string $payType, bool $isWxMobile, string $env): string
-    {
-        if ($isWxMobile) {
-            return 'urlscheme';
-        }
-        if (($payType === 'alipay' && $env === 'alipay') || ($payType === 'wxpay' && $env === 'wechat') || ($payType === 'qqpay' && $env === 'qq')) {
-            return 'jump';
-        }
-
-        return 'qrcode';
     }
 
     /**

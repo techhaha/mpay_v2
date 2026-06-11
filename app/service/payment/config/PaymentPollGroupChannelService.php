@@ -121,7 +121,7 @@ class PaymentPollGroupChannelService extends BaseService
     {
         $this->assertPairUnique((int) $data['poll_group_id'], (int) $data['channel_id']);
         $this->assertChannelMatchesPollGroup($data);
-        $payload = $this->normalizePayload(array_merge($current->toArray(), $data));
+        $payload = $this->normalizePayload($data);
 
         return $this->transaction(function () use ($payload) {
             // 一个轮询组只能有一个默认通道，新增默认项前先清理掉其他默认标记。
@@ -265,4 +265,3 @@ class PaymentPollGroupChannelService extends BaseService
         }
     }
 }
-

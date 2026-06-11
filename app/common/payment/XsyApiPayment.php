@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\xsy\XsyClient;
 use app\common\sdk\xsy\XsySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -19,6 +21,13 @@ use support\Response;
  */
 class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_REVERSE_SCAN = 'reverseScan';
+    private const PRODUCT_ALIPAY = 'ALIPAY';
+    private const PRODUCT_WECHAT = 'WECHAT';
+    private const PRODUCT_UNIONPAY = 'UNIONPAY';
+
     private ?XsyClient $client = null;
 
     /**
@@ -29,6 +38,7 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
     protected array $paymentInfo = [
         'code' => 'xsy_api',
         'name' => '新生易支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.hnapay.com/',
         'version' => '1.0.0',
@@ -50,6 +60,12 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
             ['type' => 'textarea', 'field' => 'merchant_private_key', 'title' => '商户私钥', 'value' => '', 'validate' => [['required' => true, 'message' => '商户私钥不能为空']]],
             ['type' => 'input', 'field' => 'merchant_no', 'title' => '商户编号', 'value' => '', 'validate' => [['required' => true, 'message' => '商户编号不能为空']]],
             ['type' => 'switch', 'field' => 'is_test', 'title' => '测试环境', 'value' => false],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_REVERSE_SCAN => '付款码支付',
+                self::PRODUCT_ALIPAY => '支付宝支付',
+                self::PRODUCT_WECHAT => '微信支付',
+                self::PRODUCT_UNIONPAY => '银联支付',
+            ]),
         ];
     }
 
@@ -61,14 +77,45 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
      */
     public function pay(array $order): array
     {
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'scan') {
-            return $this->scanPay($order);
-        }
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
 
+            'auth_code' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_REVERSE_SCAN,
+                    'wxpay' => self::PRODUCT_REVERSE_SCAN,
+                    'bank' => self::PRODUCT_REVERSE_SCAN,
+                ],
+                'handler' => fn (): array => $this->scanPay($order),
+            ],
+
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY,
+                    'wxpay' => self::PRODUCT_WECHAT,
+                    'bank' => self::PRODUCT_UNIONPAY,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY,
+                    'wxpay' => self::PRODUCT_WECHAT,
+                    'bank' => self::PRODUCT_UNIONPAY,
+                ],
+                'handler' => fn (): array => $this->qrcodePay($order),
+            ],
+        ], '新生易');
+    }
+
+    /**
+     * 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function qrcodePay(array $order): array
+    {
         $payType = $this->channelPayType((string) $order['pay_type_code']);
         try {
             $data = $this->client()->request('/trade/activeScan', $this->basePayload($order) + [
@@ -231,7 +278,7 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
                 'payType' => $payType,
                 'payWay' => $payWay,
                 'subAppId' => (string) ($payment['sub_appid'] ?? ''),
-                'userId' => (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
+                'userId' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
             ]);
         } catch (XsySdkException $e) {
             throw new PaymentException('新生易JSAPI下单失败：' . $e->getMessage(), 40200);
@@ -268,7 +315,7 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
             throw new PaymentException('新生易付款码下单失败：' . $e->getMessage(), 40200);
         }
 
-        return $this->payResult('ok', (string) $order['pay_type_code'], 'scan', 'reverseScan', ['raw' => $data], $data, $order);
+        return $this->payResult('ok', (string) $order['pay_type_code'], 'reverseScan', 'reverseScan', ['raw' => $data], $data, $order);
     }
 
     /**

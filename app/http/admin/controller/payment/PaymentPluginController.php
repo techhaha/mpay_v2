@@ -140,6 +140,19 @@ class PaymentPluginController extends BaseController
     }
 
     /**
+     * 查询进件配置场景下的插件选项。
+     *
+     * @param Request $request 请求对象
+     * @return Response 响应对象
+     */
+    public function onboardingOptions(Request $request): Response
+    {
+        return $this->success([
+            'plugins' => $this->paymentPluginService->onboardingOptions(),
+        ]);
+    }
+
+    /**
      * 查询插件配置结构。
      *
      * @param Request $request 请求对象
@@ -151,6 +164,20 @@ class PaymentPluginController extends BaseController
         $data = $this->validated(['code' => $code], PaymentPluginValidator::class, 'show');
 
         return $this->success($this->paymentPluginService->getSchema((string) $data['code']));
+    }
+
+    /**
+     * 查询插件进件配置和表单结构。
+     *
+     * @param Request $request 请求对象
+     * @param string $code 编码
+     * @return Response 响应对象
+     */
+    public function onboardingSchema(Request $request, string $code): Response
+    {
+        $data = $this->validated(['code' => $code], PaymentPluginValidator::class, 'show');
+
+        return $this->success($this->paymentPluginService->getOnboardingSchema((string) $data['code']));
     }
 }
 

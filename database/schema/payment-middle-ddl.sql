@@ -77,9 +77,12 @@ CREATE TABLE IF NOT EXISTS `ma_payment_plugin` (
   `code` varchar(32) NOT NULL DEFAULT '' COMMENT '插件编码',
   `name` varchar(50) NOT NULL DEFAULT '' COMMENT '插件名称',
   `class_name` varchar(255) NOT NULL DEFAULT '' COMMENT '插件类名',
+  `plugin_type` tinyint unsigned NOT NULL DEFAULT 1 COMMENT '插件类型：1-直连支付插件,2-挂机监听插件,3-后台监听插件',
   `config_schema` json DEFAULT NULL COMMENT '插件配置Schema(JSON)',
   `pay_types` json DEFAULT NULL COMMENT '支持的支付方式编码(JSON)',
   `transfer_types` json DEFAULT NULL COMMENT '支持的转账方式编码(JSON)',
+  `onboarding_types` json DEFAULT NULL COMMENT '进件主体类型声明',
+  `onboarding_info` json DEFAULT NULL COMMENT '进件能力元信息',
   `version` varchar(20) NOT NULL DEFAULT '' COMMENT '版本',
   `author` varchar(50) NOT NULL DEFAULT '' COMMENT '作者',
   `link` varchar(255) NOT NULL DEFAULT '' COMMENT '链接',
@@ -89,6 +92,7 @@ CREATE TABLE IF NOT EXISTS `ma_payment_plugin` (
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`code`),
+  KEY `idx_plugin_type_status` (`plugin_type`, `status`),
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付插件注册表';
 
@@ -106,6 +110,87 @@ CREATE TABLE IF NOT EXISTS `ma_payment_plugin_conf` (
   KEY `idx_plugin_code` (`plugin_code`),
   KEY `idx_merchant_plugin` (`merchant_id`, `plugin_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付插件API配置表';
+
+CREATE TABLE IF NOT EXISTS `ma_payment_plugin_onboarding_conf` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `plugin_code` varchar(32) NOT NULL DEFAULT '' COMMENT '插件编码',
+  `name` varchar(100) NOT NULL DEFAULT '' COMMENT '进件配置/渠道名称',
+  `config` json DEFAULT NULL COMMENT '进件接口配置',
+  `subject_types` json DEFAULT NULL COMMENT '允许主体类型',
+  `apply_products` json DEFAULT NULL COMMENT '允许申请产品',
+  `rate_config` json DEFAULT NULL COMMENT '后台预设费率与结算参数',
+  `merchant_visible` tinyint NOT NULL DEFAULT 1 COMMENT '商户端是否可见：0-否,1-是',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '状态：0-禁用,1-启用',
+  `sort_no` int NOT NULL DEFAULT 0 COMMENT '排序，越小越靠前',
+  `description` text DEFAULT NULL COMMENT '商户端展示说明',
+  `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_plugin_status` (`plugin_code`, `status`),
+  KEY `idx_visible_status_sort` (`merchant_visible`, `status`, `sort_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付插件进件配置表';
+
+CREATE TABLE IF NOT EXISTS `ma_merchant_channel_onboarding` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `onboarding_no` varchar(32) NOT NULL DEFAULT '' COMMENT '进件申请单号',
+  `merchant_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '所属商户ID',
+  `merchant_no` varchar(64) NOT NULL DEFAULT '' COMMENT '商户编号',
+  `onboarding_config_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '插件进件配置ID',
+  `plugin_code` varchar(32) NOT NULL DEFAULT '' COMMENT '插件编码',
+  `subject_type` varchar(32) NOT NULL DEFAULT '' COMMENT '主体类型',
+  `apply_products` json DEFAULT NULL COMMENT '申请产品',
+  `form_data` json DEFAULT NULL COMMENT '进件表单数据',
+  `file_assets` json DEFAULT NULL COMMENT '文件资产引用',
+  `rate_config` json DEFAULT NULL COMMENT '费率与结算参数快照',
+  `status` tinyint NOT NULL DEFAULT 0 COMMENT '进件状态',
+  `platform_audit_msg` varchar(1000) NOT NULL DEFAULT '' COMMENT '平台审核意见',
+  `upstream_apply_id` varchar(128) NOT NULL DEFAULT '' COMMENT '上游申请单号',
+  `upstream_contract_id` varchar(128) NOT NULL DEFAULT '' COMMENT '上游合同号',
+  `upstream_merchant_no` varchar(128) NOT NULL DEFAULT '' COMMENT '上游商户号',
+  `upstream_terminal_no` varchar(128) NOT NULL DEFAULT '' COMMENT '上游终端号',
+  `upstream_status` varchar(64) NOT NULL DEFAULT '' COMMENT '上游状态',
+  `upstream_message` varchar(1000) NOT NULL DEFAULT '' COMMENT '上游消息',
+  `submitted_at` datetime DEFAULT NULL COMMENT '商户提交时间',
+  `reviewed_at` datetime DEFAULT NULL COMMENT '平台审核时间',
+  `upstream_submitted_at` datetime DEFAULT NULL COMMENT '提交上游时间',
+  `signed_at` datetime DEFAULT NULL COMMENT '签约成功时间',
+  `cancelled_at` datetime DEFAULT NULL COMMENT '取消时间',
+  `remark` varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_onboarding_no` (`onboarding_no`),
+  KEY `idx_merchant_config_status` (`merchant_id`, `onboarding_config_id`, `status`),
+  KEY `idx_plugin_status` (`plugin_code`, `status`),
+  KEY `idx_upstream_apply_id` (`upstream_apply_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商户支付渠道进件申请表';
+
+CREATE TABLE IF NOT EXISTS `ma_merchant_channel_onboarding_log` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `onboarding_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '进件申请ID',
+  `onboarding_no` varchar(32) NOT NULL DEFAULT '' COMMENT '进件申请单号',
+  `merchant_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '所属商户ID',
+  `onboarding_config_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '插件进件配置ID',
+  `plugin_code` varchar(32) NOT NULL DEFAULT '' COMMENT '插件编码',
+  `action` varchar(64) NOT NULL DEFAULT '' COMMENT '动作',
+  `operator_type` varchar(32) NOT NULL DEFAULT '' COMMENT '操作人类型',
+  `operator_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '操作人ID',
+  `operator_name` varchar(100) NOT NULL DEFAULT '' COMMENT '操作人名称',
+  `request_no` varchar(64) NOT NULL DEFAULT '' COMMENT '请求流水号',
+  `upstream_apply_id` varchar(128) NOT NULL DEFAULT '' COMMENT '上游申请单号',
+  `upstream_status` varchar(64) NOT NULL DEFAULT '' COMMENT '上游状态',
+  `result_status` varchar(32) NOT NULL DEFAULT '' COMMENT '处理结果',
+  `result_code` varchar(64) NOT NULL DEFAULT '' COMMENT '结果编码',
+  `message` varchar(1000) NOT NULL DEFAULT '' COMMENT '摘要消息',
+  `summary` json DEFAULT NULL COMMENT '摘要扩展信息',
+  `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_onboarding_id` (`onboarding_id`),
+  KEY `idx_onboarding_no` (`onboarding_no`),
+  KEY `idx_merchant_id` (`merchant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商户支付渠道进件日志表';
 
 CREATE TABLE IF NOT EXISTS `ma_payment_channel` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',

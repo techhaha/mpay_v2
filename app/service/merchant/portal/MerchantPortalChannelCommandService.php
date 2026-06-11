@@ -4,6 +4,7 @@ namespace app\service\merchant\portal;
 
 use app\common\base\BaseService;
 use app\common\constant\CommonConstant;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\RouteConstant;
 use app\exception\PaymentException;
 use app\model\payment\PaymentChannel;
@@ -13,7 +14,6 @@ use app\repository\payment\config\PaymentChannelRepository;
 use app\repository\payment\config\PaymentPluginConfRepository;
 use app\repository\payment\config\PaymentPluginRepository;
 use app\repository\payment\config\PaymentTypeRepository;
-use app\service\payment\receipt\ReceiptWatcherLicenseService;
 
 /**
  * 商户门户通道配置命令服务。
@@ -27,8 +27,7 @@ class MerchantPortalChannelCommandService extends BaseService
         protected PaymentPluginRepository $paymentPluginRepository,
         protected PaymentPluginConfRepository $paymentPluginConfRepository,
         protected PaymentChannelRepository $paymentChannelRepository,
-        protected PaymentTypeRepository $paymentTypeRepository,
-        protected ReceiptWatcherLicenseService $receiptWatcherLicenseService
+        protected PaymentTypeRepository $paymentTypeRepository
     ) {
     }
 
@@ -42,6 +41,7 @@ class MerchantPortalChannelCommandService extends BaseService
         $plugins = $this->paymentPluginRepository->merchantEnabledList([
             'code',
             'name',
+            'plugin_type',
             'config_schema',
             'pay_types',
         ])->map(function (PaymentPlugin $plugin): array {
@@ -82,6 +82,7 @@ class MerchantPortalChannelCommandService extends BaseService
                 'c.updated_at',
             ])
             ->selectRaw("COALESCE(NULLIF(p.name, ''), c.plugin_code) AS plugin_name")
+            ->selectRaw('COALESCE(p.plugin_type, 1) AS plugin_type')
             ->where('c.merchant_id', $merchantId);
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
@@ -96,6 +97,11 @@ class MerchantPortalChannelCommandService extends BaseService
         $pluginCode = trim((string) ($filters['plugin_code'] ?? ''));
         if ($pluginCode !== '') {
             $query->where('c.plugin_code', $pluginCode);
+        }
+
+        $pluginType = (int) ($filters['plugin_type'] ?? 0);
+        if (PaymentPluginTypeConstant::isValid($pluginType)) {
+            $query->where('p.plugin_type', $pluginType);
         }
 
         $paginator = $query
@@ -117,6 +123,8 @@ class MerchantPortalChannelCommandService extends BaseService
             $row->is_writable = true;
             $row->source_type = 'merchant';
             $row->source_text = '自建配置';
+            $row->plugin_type = (int) ($row->plugin_type ?? PaymentPluginTypeConstant::TYPE_DIRECT);
+            $row->plugin_type_text = PaymentPluginTypeConstant::label((int) $row->plugin_type);
 
             return $row;
         });
@@ -374,14 +382,6 @@ class MerchantPortalChannelCommandService extends BaseService
             throw new PaymentException('支付插件不支持当前支付方式', 40245);
         }
 
-        if ((int) $payload['status'] === CommonConstant::STATUS_ENABLED
-            && $this->receiptWatcherLicenseService->isReceiptWatcherPlugin((string) $payload['plugin_code'])
-            && !$this->receiptWatcherLicenseService->isPluginAuthorized((string) $payload['plugin_code'])) {
-            throw new PaymentException('网页流水监听插件未授权，不能启用该通道', 40250, [
-                'plugin_code' => (string) $payload['plugin_code'],
-            ]);
-        }
-
         if ((int) $payload['max_amount'] > 0 && (int) $payload['min_amount'] > (int) $payload['max_amount']) {
             throw new PaymentException('单笔最小金额不能大于最大金额', 40246);
         }
@@ -424,6 +424,8 @@ class MerchantPortalChannelCommandService extends BaseService
             'value' => (string) $plugin->code,
             'code' => (string) $plugin->code,
             'name' => (string) $plugin->name,
+            'plugin_type' => (int) $plugin->plugin_type,
+            'plugin_type_text' => PaymentPluginTypeConstant::label((int) $plugin->plugin_type),
             'pay_types' => is_array($plugin->pay_types) ? array_values($plugin->pay_types) : [],
             'config_schema' => is_array($plugin->config_schema) ? array_values($plugin->config_schema) : [],
         ];

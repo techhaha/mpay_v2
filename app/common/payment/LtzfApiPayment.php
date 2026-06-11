@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\ltzf\LtzfClient;
 use app\common\sdk\ltzf\LtzfSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,14 @@ use support\Response;
  */
 class LtzfApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_WXPAY_JSAPI_CONVENIENT = 'wxpay_jsapi_convenient';
+    private const PRODUCT_WXPAY_H5 = 'wxpay_h5';
+    private const PRODUCT_ALIPAY_H5 = 'alipay_h5';
+    private const PRODUCT_WXPAY_NATIVE = 'wxpay_native';
+    private const PRODUCT_ALIPAY_NATIVE = 'alipay_native';
+
     private ?LtzfClient $client = null;
 
     /**
@@ -30,6 +40,7 @@ class LtzfApiPayment extends BasePayment implements PaymentInterface, PayPluginI
     protected array $paymentInfo = [
         'code' => 'ltzf_api',
         'name' => '蓝兔支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.ltzf.cn/',
         'version' => '1.0.0',
@@ -48,6 +59,13 @@ class LtzfApiPayment extends BasePayment implements PaymentInterface, PayPluginI
         return [
             ['type' => 'input', 'field' => 'mch_id', 'title' => '商户号', 'value' => '', 'validate' => [['required' => true, 'message' => '商户号不能为空']]],
             ['type' => 'password', 'field' => 'key', 'title' => '商户密钥', 'value' => '', 'validate' => [['required' => true, 'message' => '商户密钥不能为空']]],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_WXPAY_JSAPI_CONVENIENT => '微信 JSAPI 便捷支付',
+                self::PRODUCT_WXPAY_H5 => '微信 H5',
+                self::PRODUCT_ALIPAY_H5 => '支付宝 H5',
+                self::PRODUCT_WXPAY_NATIVE => '微信扫码',
+                self::PRODUCT_ALIPAY_NATIVE => '支付宝扫码',
+            ]),
         ];
     }
 
@@ -60,11 +78,53 @@ class LtzfApiPayment extends BasePayment implements PaymentInterface, PayPluginI
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        $path = $payType === 'wxpay'
-            ? ($method === 'jsapi' ? '/api/wxpay/jsapi_convenient' : ($method === 'h5' ? '/api/wxpay/jump_h5' : '/api/wxpay/native'))
-            : ($method === 'h5' ? '/api/alipay/h5' : '/api/alipay/native');
 
+        return $this->executeDirectPaymentProduct($order, [
+
+            'jsapi' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_WXPAY_JSAPI_CONVENIENT,
+                ],
+                'handler' => fn (): array => $payType === 'wxpay'
+                ? $this->productPay($order, '/api/wxpay/jsapi_convenient')
+                : throw new PaymentException('蓝兔支付当前支付方式不支持JSAPI产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_H5,
+                    'wxpay' => self::PRODUCT_WXPAY_H5,
+                ],
+                'handler' => fn (): array => $this->productPay($order, $payType === 'wxpay' ? '/api/wxpay/jump_h5' : '/api/alipay/h5'),
+            ],
+
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_H5,
+                    'wxpay' => self::PRODUCT_WXPAY_H5,
+                ],
+                'handler' => fn (): array => $this->productPay($order, $payType === 'wxpay' ? '/api/wxpay/jump_h5' : '/api/alipay/h5'),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_NATIVE,
+                    'wxpay' => self::PRODUCT_WXPAY_NATIVE,
+                ],
+                'handler' => fn (): array => $this->productPay($order, $payType === 'wxpay' ? '/api/wxpay/native' : '/api/alipay/native'),
+            ],
+        ], '蓝兔支付');
+    }
+
+    /**
+     * 按蓝兔接口路径下单。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $path 接口路径
+     * @return array<string, mixed>
+     */
+    private function productPay(array $order, string $path): array
+    {
+        $payType = (string) $order['pay_type_code'];
         try {
             $data = $this->client()->post($path, $this->basePayload($order), ['mch_id', 'out_trade_no', 'total_fee', 'body', 'timestamp', 'notify_url']);
         } catch (LtzfSdkException $e) {
@@ -72,13 +132,13 @@ class LtzfApiPayment extends BasePayment implements PaymentInterface, PayPluginI
         }
 
         if ($path === '/api/alipay/h5') {
-            return $this->payResult('jump', $payType, 'h5', $path, ['url' => (string) ($data['h5_url'] ?? ''), 'raw' => $data], $data, $order);
+            return $this->payResult('jump', $payType, 'alipay_h5', $path, ['url' => (string) ($data['h5_url'] ?? ''), 'raw' => $data], $data, $order);
         }
         if ($path === '/api/wxpay/jump_h5') {
-            return $this->payResult('jump', $payType, 'h5', $path, ['url' => is_string($data) ? $data : (string) ($data['h5_url'] ?? '')], (array) $data, $order);
+            return $this->payResult('jump', $payType, 'wxpay_h5', $path, ['url' => is_string($data) ? $data : (string) ($data['h5_url'] ?? '')], (array) $data, $order);
         }
         if ($path === '/api/wxpay/jsapi_convenient') {
-            return $this->payResult('jump', $payType, 'jsapi_convenient', $path, ['url' => (string) ($data['order_url'] ?? ''), 'raw' => $data], $data, $order);
+            return $this->payResult('jump', $payType, 'wxpay_jsapi_convenient', $path, ['url' => (string) ($data['order_url'] ?? ''), 'raw' => $data], $data, $order);
         }
 
         $qrcode = $payType === 'wxpay' ? (string) ($data['code_url'] ?? '') : (string) $data;
@@ -86,7 +146,7 @@ class LtzfApiPayment extends BasePayment implements PaymentInterface, PayPluginI
             throw new PaymentException('蓝兔支付未返回支付链接', 40200, ['response' => $data]);
         }
 
-        return $this->payResult('qrcode', $payType, 'native', $path, ['qrcode' => $qrcode, 'raw' => $data], (array) $data, $order);
+        return $this->payResult('qrcode', $payType, $payType === 'wxpay' ? 'wxpay_native' : 'alipay_native', $path, ['qrcode' => $qrcode, 'raw' => $data], (array) $data, $order);
     }
 
     /**

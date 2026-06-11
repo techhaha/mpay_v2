@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\allinpay\AllinpayClient;
 use app\common\sdk\allinpay\AllinpaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -21,6 +23,8 @@ use support\Response;
  */
 class AllinpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
     private const PAY_URL = 'https://vsp.allinpay.com/apiweb/unitorder/pay';
     private const REFUND_URL = 'https://vsp.allinpay.com/apiweb/tranx/refund';
     private const CASHIER_URL = 'https://syb.allinpay.com/apiweb/h5unionpay/unionorder';
@@ -44,6 +48,7 @@ class AllinpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
     protected array $paymentInfo = [
         'code' => 'allinpay_api',
         'name' => '通联支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'wxpay', 'qqpay', 'bank'],
@@ -128,31 +133,80 @@ class AllinpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
 
-        if ($method === 'h5') {
-            return $this->cashierPay($order);
-        }
-        if ($payType === 'alipay' && $method === 'jsapi') {
-            return $this->jsapiPay($order, self::PRODUCT_ALIPAY_JSAPI, 'A02');
-        }
-        if ($payType === 'wxpay' && $method === 'jsapi') {
-            return $this->jsapiPay($order, self::PRODUCT_WXPAY_JSAPI, 'W02');
-        }
-        if ($payType === 'bank' && $method === 'jsapi') {
-            return $this->jumpPay($order, self::PRODUCT_BANK_JSAPI, 'U02');
-        }
-        if ($payType === 'qqpay') {
-            return $this->qrcodePay($order, self::PRODUCT_QQPAY_SCAN, 'Q01');
-        }
-        if ($payType === 'bank') {
-            return $this->qrcodePay($order, self::PRODUCT_BANK_SCAN, 'U01');
-        }
-        if ($payType === 'wxpay') {
-            return $this->qrcodePay($order, self::PRODUCT_WXPAY_SCAN, 'W01');
-        }
+        return $this->executeDirectPaymentProduct($order, [
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_JSAPI,
+                    'wxpay' => self::PRODUCT_WXPAY_JSAPI,
+                    'bank' => self::PRODUCT_BANK_JSAPI,
+                ],
+                'handler' => function () use ($order, $payType): array {
+                    return match ($payType) {
+                        'alipay' => $this->jsapiPay($order, self::PRODUCT_ALIPAY_JSAPI, 'A02'),
+                        'wxpay' => $this->jsapiPay($order, self::PRODUCT_WXPAY_JSAPI, 'W02'),
+                        'bank' => $this->jumpPay($order, self::PRODUCT_BANK_JSAPI, 'U02'),
+                    };
+                },
+            ],
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CASHIER,
+                    'wxpay' => self::PRODUCT_CASHIER,
+                    'qqpay' => self::PRODUCT_CASHIER,
+                    'bank' => self::PRODUCT_CASHIER,
+                ],
 
-        return $this->qrcodePay($order, self::PRODUCT_ALIPAY_SCAN, 'A01');
+                'handler' => fn (): array => $this->cashierPay($order),
+            ],
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CASHIER,
+                    'wxpay' => self::PRODUCT_CASHIER,
+                    'qqpay' => self::PRODUCT_CASHIER,
+                    'bank' => self::PRODUCT_CASHIER,
+                ],
+
+                'handler' => fn (): array => $this->cashierPay($order),
+            ],
+            'web' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CASHIER,
+                    'wxpay' => self::PRODUCT_CASHIER,
+                    'qqpay' => self::PRODUCT_CASHIER,
+                    'bank' => self::PRODUCT_CASHIER,
+                ],
+
+                'handler' => fn (): array => $this->cashierPay($order),
+            ],
+            'qrcode' => [
+                'products' => [
+                    'qqpay' => self::PRODUCT_QQPAY_SCAN,
+                    'bank' => self::PRODUCT_BANK_SCAN,
+                    'wxpay' => self::PRODUCT_WXPAY_SCAN,
+                    'alipay' => self::PRODUCT_ALIPAY_SCAN,
+                ],
+
+                'handler' => fn (): array => $this->qrcodePayByType($order, $payType),
+            ],
+        ], '通联');
+    }
+
+    /**
+     * 按支付方式选择通联扫码产品。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function qrcodePayByType(array $order, string $payType): array
+    {
+        return match ($payType) {
+            'qqpay' => $this->qrcodePay($order, self::PRODUCT_QQPAY_SCAN, 'Q01'),
+            'bank' => $this->qrcodePay($order, self::PRODUCT_BANK_SCAN, 'U01'),
+            'wxpay' => $this->qrcodePay($order, self::PRODUCT_WXPAY_SCAN, 'W01'),
+            default => $this->qrcodePay($order, self::PRODUCT_ALIPAY_SCAN, 'A01'),
+        };
     }
 
     /**
@@ -295,7 +349,7 @@ class AllinpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
     private function jsapiPay(array $order, string $product, string $payType): array
     {
         $payment = (array) ($order['extra']['payment'] ?? []);
-        $userId = (string) ($payment['buyer_id'] ?? $payment['openid'] ?? $payment['sub_openid'] ?? '');
+        $userId = (string) ($payment['buyer_id'] ?? $payment['mini_openid'] ?? $payment['openid'] ?? $payment['sub_openid'] ?? '');
         if ($userId === '') {
             throw new PaymentException('通联JSAPI支付缺少用户标识', 40200);
         }

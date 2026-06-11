@@ -3,6 +3,7 @@
 namespace app\service\payment\config;
 
 use app\common\base\BaseService;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\exception\PaymentException;
 use app\model\payment\PaymentPlugin;
 use app\repository\payment\config\PaymentPluginRepository;
@@ -65,25 +66,40 @@ class PaymentPluginService extends BaseService
             $query->where('status', (int) $filters['status']);
         }
 
-        return $query
+        $pluginType = (int) ($filters['plugin_type'] ?? 0);
+        if (PaymentPluginTypeConstant::isValid($pluginType)) {
+            $query->where('plugin_type', $pluginType);
+        }
+
+        $paginator = $query
             ->orderBy('code')
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
+
+        $paginator->getCollection()->transform(function (PaymentPlugin $plugin): PaymentPlugin {
+            $this->appendTypeText($plugin);
+
+            return $plugin;
+        });
+
+        return $paginator;
     }
 
     /**
      * 查询启用中的支付插件选项。
      *
-     * @return array<int, array{label: string, value: string, code: string, name: string}> 启用插件选项
+     * @return array<int, array{label: string, value: string, code: string, name: string, plugin_type: int, plugin_type_text: string}> 启用插件选项
      */
     public function enabledOptions(): array
     {
-        return $this->paymentPluginRepository->enabledList(['code', 'name'])
+        return $this->paymentPluginRepository->enabledList(['code', 'name', 'plugin_type'])
             ->map(function (PaymentPlugin $plugin): array {
                 return [
                     'label' => sprintf('%s（%s）', (string) $plugin->name, (string) $plugin->code),
                     'value' => (string) $plugin->code,
                     'code' => (string) $plugin->code,
                     'name' => (string) $plugin->name,
+                    'plugin_type' => (int) $plugin->plugin_type,
+                    'plugin_type_text' => PaymentPluginTypeConstant::label((int) $plugin->plugin_type),
                 ];
             })
             ->values()
@@ -96,13 +112,13 @@ class PaymentPluginService extends BaseService
      * @param array $filters 筛选条件
      * @param int $page 页码
      * @param int $pageSize 每页条数
-     * @return array{list: array<int, array{label: string, value: string, code: string, name: string, pay_types: array<int, string>}>, total: int, page: int, size: int} 插件搜索结果
+     * @return array{list: array<int, array{label: string, value: string, code: string, name: string, plugin_type: int, plugin_type_text: string, pay_types: array<int, string>}>, total: int, page: int, size: int} 插件搜索结果
      */
     public function searchOptions(array $filters = [], int $page = 1, int $pageSize = 20): array
     {
         $query = $this->paymentPluginRepository->query()
             ->where('status', 1)
-            ->select(['code', 'name', 'pay_types'])
+            ->select(['code', 'name', 'plugin_type', 'pay_types'])
             ->orderBy('code');
 
         $ids = $filters['ids'] ?? [];
@@ -123,6 +139,11 @@ class PaymentPluginService extends BaseService
                 // 如果前端按支付方式筛选，就只保留 pay_types 中包含该编码的插件。
                 $query->whereJsonContains('pay_types', $payTypeCode);
             }
+
+            $pluginType = (int) ($filters['plugin_type'] ?? 0);
+            if (PaymentPluginTypeConstant::isValid($pluginType)) {
+                $query->where('plugin_type', $pluginType);
+            }
         }
 
         $paginator = $query->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
@@ -134,6 +155,8 @@ class PaymentPluginService extends BaseService
                     'value' => (string) $plugin->code,
                     'code' => (string) $plugin->code,
                     'name' => (string) $plugin->name,
+                    'plugin_type' => (int) $plugin->plugin_type,
+                    'plugin_type_text' => PaymentPluginTypeConstant::label((int) $plugin->plugin_type),
                     'pay_types' => is_array($plugin->pay_types) ? array_values($plugin->pay_types) : [],
                 ];
             })->values()->all(),
@@ -146,7 +169,7 @@ class PaymentPluginService extends BaseService
     /**
      * 查询通道配置场景使用的支付插件选项。
      *
-     * @return array<int, array{label: string, value: string, code: string, name: string, pay_types: array<int, string>}> 通道配置选项
+     * @return array<int, array{label: string, value: string, code: string, name: string, plugin_type: int, plugin_type_text: string, pay_types: array<int, string>}> 通道配置选项
      */
     public function channelOptions(): array
     {
@@ -154,6 +177,7 @@ class PaymentPluginService extends BaseService
         return $this->paymentPluginRepository->enabledList([
             'code',
             'name',
+            'plugin_type',
             'pay_types',
         ])
             ->map(function (PaymentPlugin $plugin): array {
@@ -162,7 +186,43 @@ class PaymentPluginService extends BaseService
                     'value' => (string) $plugin->code,
                     'code' => (string) $plugin->code,
                     'name' => (string) $plugin->name,
+                    'plugin_type' => (int) $plugin->plugin_type,
+                    'plugin_type_text' => PaymentPluginTypeConstant::label((int) $plugin->plugin_type),
                     'pay_types' => is_array($plugin->pay_types) ? array_values($plugin->pay_types) : [],
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * 查询声明进件能力的启用插件选项。
+     *
+     * @return array<int, array<string, mixed>> 进件插件选项
+     */
+    public function onboardingOptions(): array
+    {
+        return $this->paymentPluginRepository->enabledList([
+            'code',
+            'name',
+            'plugin_type',
+            'onboarding_types',
+            'onboarding_info',
+        ])
+            ->filter(function (PaymentPlugin $plugin): bool {
+                // 只展示已启用且声明进件能力的插件，是否启用以插件表状态为准。
+                return is_array($plugin->onboarding_types) && $plugin->onboarding_types !== [];
+            })
+            ->map(function (PaymentPlugin $plugin): array {
+                return [
+                    'label' => sprintf('%s（%s）', (string) $plugin->name, (string) $plugin->code),
+                    'value' => (string) $plugin->code,
+                    'code' => (string) $plugin->code,
+                    'name' => (string) $plugin->name,
+                    'plugin_type' => (int) $plugin->plugin_type,
+                    'plugin_type_text' => PaymentPluginTypeConstant::label((int) $plugin->plugin_type),
+                    'onboarding_types' => is_array($plugin->onboarding_types) ? array_values($plugin->onboarding_types) : [],
+                    'onboarding_info' => is_array($plugin->onboarding_info) ? $plugin->onboarding_info : [],
                 ];
             })
             ->values()
@@ -198,6 +258,34 @@ class PaymentPluginService extends BaseService
 
         return [
             'config_schema' => is_array($plugin->config_schema) ? array_values($plugin->config_schema) : [],
+        ];
+    }
+
+    /**
+     * 查询插件进件 Schema。
+     *
+     * @param string $code 插件编码
+     * @return array<string, mixed> 进件 Schema
+     * @throws PaymentException
+     */
+    public function getOnboardingSchema(string $code): array
+    {
+        $plugin = $this->paymentPluginRepository->findByCode($code);
+        if (!$plugin) {
+            throw new PaymentException('支付插件不存在', 404, [
+                'plugin_code' => $code,
+            ]);
+        }
+
+        $info = is_array($plugin->onboarding_info) ? $plugin->onboarding_info : [];
+
+        return [
+            // 前端进件配置页分别消费主体范围、接口配置 schema 和申请表单 schema。
+            'onboarding_types' => is_array($plugin->onboarding_types) ? array_values($plugin->onboarding_types) : [],
+            'onboarding_info' => $info,
+            'config_schema' => is_array($info['config_schema'] ?? null) ? array_values($info['config_schema']) : [],
+            'form_schema' => is_array($info['form_schema'] ?? null) ? array_values($info['form_schema']) : [],
+            'products' => is_array($info['products'] ?? null) ? array_values($info['products']) : [],
         ];
     }
 
@@ -243,5 +331,16 @@ class PaymentPluginService extends BaseService
     public function refreshFromClasses(): array
     {
         return $this->paymentPluginSyncService->refreshFromClasses();
+    }
+
+    /**
+     * 为插件模型追加类型展示文案。
+     *
+     * @param PaymentPlugin $plugin 插件模型
+     * @return void
+     */
+    private function appendTypeText(PaymentPlugin $plugin): void
+    {
+        $plugin->plugin_type_text = PaymentPluginTypeConstant::label((int) $plugin->plugin_type);
     }
 }

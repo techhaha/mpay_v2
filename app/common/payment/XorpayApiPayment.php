@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\xorpay\XorpayClient;
 use app\common\sdk\xorpay\XorpaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,12 @@ use support\Response;
  */
 class XorpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_WECHAT_CASHIER = 'wechat_cashier';
+    private const PRODUCT_ALIPAY = 'alipay';
+    private const PRODUCT_WX_NATIVE = 'wx_native';
+
     private ?XorpayClient $client = null;
 
     /**
@@ -30,6 +38,7 @@ class XorpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'xorpay_api',
         'name' => 'XorPay支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'wxpay'],
@@ -63,6 +72,11 @@ class XorpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                     ['required' => true, 'message' => 'AppSecret不能为空'],
                 ],
             ],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_WECHAT_CASHIER => '微信收银台',
+                self::PRODUCT_ALIPAY => '支付宝扫码',
+                self::PRODUCT_WX_NATIVE => '微信扫码',
+            ]),
         ];
     }
 
@@ -76,11 +90,38 @@ class XorpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     {
         $payType = (string) $order['pay_type_code'];
 
-        if ($payType === 'wxpay' && (string) ($order['_env'] ?? '') === 'wechat') {
-            return $this->wechatCashier($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
 
+            'jsapi' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_WECHAT_CASHIER,
+                ],
+                'handler' => fn (): array => $payType === 'wxpay'
+                ? $this->wechatCashier($order)
+                : throw new PaymentException('XorPay 当前支付方式不支持JSAPI产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY,
+                    'wxpay' => self::PRODUCT_WX_NATIVE,
+                ],
+                'handler' => fn (): array => $this->qrcodePay($order, $payType),
+            ],
+        ], 'XorPay');
+    }
+
+    /**
+     * 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function qrcodePay(array $order, string $payType): array
+    {
         $channelPayType = $payType === 'wxpay' ? 'native' : 'alipay';
+        $product = $payType === 'wxpay' ? 'wx_native' : 'alipay';
         try {
             $data = $this->client()->pay([
                 'name' => mb_strcut((string) $order['subject'], 0, 127, 'UTF-8'),
@@ -101,7 +142,7 @@ class XorpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         return [
             'pay_page' => 'qrcode',
             'pay_type' => $payType,
-            'pay_product' => $channelPayType,
+            'pay_product' => $product,
             'pay_action' => 'api.pay',
             'pay_params' => [
                 'qrcode' => $qrcode,
@@ -233,7 +274,7 @@ class XorpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         return [
             'pay_page' => 'html',
             'pay_type' => 'wxpay',
-            'pay_product' => 'jsapi',
+            'pay_product' => 'wechat_cashier',
             'pay_action' => 'api.cashier',
             'pay_params' => [
                 'html' => $html,

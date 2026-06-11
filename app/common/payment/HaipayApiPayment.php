@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\haipay\HaipayClient;
 use app\common\sdk\haipay\HaipaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,15 @@ use support\Response;
  */
 class HaipayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_ALI_JSAPI = 'ALI_JSAPI';
+    private const PRODUCT_WX_JSAPI = 'WX_JSAPI';
+    private const PRODUCT_ALI = 'ALI';
+    private const PRODUCT_WX = 'WX';
+    private const PRODUCT_UNIONQR = 'UNIONQR';
+    private const PRODUCT_PASSIVE_PAY = 'passive_pay';
+
     private ?HaipayClient $client = null;
 
     /**
@@ -30,6 +41,7 @@ class HaipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'haipay_api',
         'name' => '海科融通支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.hkrt.cn/',
         'version' => '1.0.0',
@@ -52,6 +64,14 @@ class HaipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             ['type' => 'input', 'field' => 'merchant_no', 'title' => '商户号', 'value' => '', 'validate' => [['required' => true, 'message' => '商户号不能为空']]],
             ['type' => 'input', 'field' => 'pn', 'title' => '产品编号', 'value' => '', 'validate' => [['required' => true, 'message' => '产品编号不能为空']]],
             ['type' => 'switch', 'field' => 'sandbox', 'title' => '测试环境', 'value' => false],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_ALI_JSAPI => '支付宝 JSAPI',
+                self::PRODUCT_WX_JSAPI => '微信 JSAPI/小程序',
+                self::PRODUCT_ALI => '支付宝扫码',
+                self::PRODUCT_WX => '微信扫码',
+                self::PRODUCT_UNIONQR => '银联扫码',
+                self::PRODUCT_PASSIVE_PAY => '付款码支付',
+            ]),
         ];
     }
 
@@ -63,12 +83,44 @@ class HaipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     public function pay(array $order): array
     {
-        $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
+            'auth_code' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_PASSIVE_PAY,
+                    'wxpay' => self::PRODUCT_PASSIVE_PAY,
+                    'bank' => self::PRODUCT_PASSIVE_PAY,
+                ],
+                'handler' => fn (): array => $this->passivePay($order),
+            ],
 
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALI_JSAPI,
+                    'wxpay' => self::PRODUCT_WX_JSAPI,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALI,
+                    'wxpay' => self::PRODUCT_WX,
+                    'bank' => self::PRODUCT_UNIONQR,
+                ],
+                'handler' => fn (): array => $this->scanPay($order),
+            ],
+        ], '海科融通');
+    }
+
+    /**
+     * 扫码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function scanPay(array $order): array
+    {
+        $payType = (string) $order['pay_type_code'];
         $channelType = match ($payType) {
             'wxpay' => 'WX',
             'bank' => 'UNIONQR',
@@ -228,7 +280,7 @@ class HaipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         $channelType = $payType === 'wxpay' ? 'WX' : 'ALI';
         $payload = $this->basePayload($order) + ['pay_type' => $channelType, 'pay_mode' => 'JSAPI'];
         if ($payType === 'wxpay') {
-            $payload['openid'] = (string) ($payment['sub_openid'] ?? '');
+            $payload['openid'] = (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? '');
             $payload['appid'] = (string) ($payment['sub_appid'] ?? '');
         } else {
             $payload['buyer_id'] = (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? '');
@@ -245,7 +297,81 @@ class HaipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             : ['tradeNO' => (string) ($data['ali_trade_no'] ?? '')];
         $payInfo['raw'] = $data;
 
-        return $this->payResult('jsapi', $payType, 'jsapi', 'pre-pay', $payInfo, $data, $order);
+        return $this->payResult('jsapi', $payType, $channelType . '_JSAPI', 'pre-pay', $payInfo, $data, $order);
+    }
+
+    /**
+     * 付款码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function passivePay(array $order): array
+    {
+        $payment = (array) ($order['extra']['payment'] ?? []);
+        $authCode = (string) ($payment['auth_code'] ?? '');
+        if ($authCode === '') {
+            throw new PaymentException('海科融通付款码支付缺少付款码', 40200);
+        }
+
+        try {
+            $data = $this->client()->post('/api/v2/pay/passive-pay', $this->basePayload($order) + [
+                'auth_code' => $authCode,
+                'terminal_info' => ['device_ip' => (string) $order['client_ip']],
+            ]);
+        } catch (HaipaySdkException $e) {
+            throw new PaymentException('海科融通付款码下单失败：' . $e->getMessage(), 40200);
+        }
+
+        if ((string) ($data['trade_status'] ?? '') === '1') {
+            return $this->payResult('ok', (string) $order['pay_type_code'], self::PRODUCT_PASSIVE_PAY, 'passive-pay', [
+                'message' => '支付成功',
+                'raw' => $data,
+            ], $data, $order);
+        }
+
+        return $this->waitPassivePay($order, $data);
+    }
+
+    /**
+     * 等待付款码用户确认。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param array<string, mixed> $rawData 原始下单结果
+     * @return array<string, mixed>
+     */
+    private function waitPassivePay(array $order, array $rawData): array
+    {
+        $tradeNo = (string) ($rawData['trade_no'] ?? '');
+        if ($tradeNo === '') {
+            throw new PaymentException('海科融通付款码下单未返回渠道订单号', 40200, ['response' => $rawData]);
+        }
+
+        for ($index = 0; $index < 6; $index++) {
+            sleep(3);
+            try {
+                $query = $this->client()->post('/api/v2/pay/order-query', [
+                    'merch_no' => $this->configText('merchant_no'),
+                    'trade_no' => $tradeNo,
+                ]);
+            } catch (HaipaySdkException $e) {
+                throw new PaymentException('海科融通付款码查单失败：' . $e->getMessage(), 40200);
+            }
+
+            if ((string) ($query['trade_status'] ?? '') === '1') {
+                return $this->payResult('ok', (string) $order['pay_type_code'], self::PRODUCT_PASSIVE_PAY, 'passive-pay', [
+                    'message' => '支付成功',
+                    'raw' => $query,
+                ], $query, $order);
+            }
+            if (!in_array((string) ($query['tranSts'] ?? $query['trade_status'] ?? ''), ['3', 'USERPAYING', 'NOTPAY'], true)) {
+                throw new PaymentException('海科融通付款码支付失败：订单超时或用户取消支付', 40200, ['response' => $query]);
+            }
+        }
+
+        $this->close($order);
+
+        throw new PaymentException('海科融通付款码支付失败：等待用户确认超时', 40200, ['response' => $rawData]);
     }
 
     /**

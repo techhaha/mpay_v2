@@ -20,6 +20,7 @@ return new class {
             ['wxpay', '微信支付', 'icon-wechatpay', 20, 1, '微信支付'],
             ['qqpay', 'QQ钱包', 'icon-qq', 30, 1, 'QQ 钱包支付'],
             ['bank', '银行卡', 'icon-idcard', 40, 1, '银行卡支付'],
+            ['usdt', 'USDT', 'icon-wallet', 50, 1, 'USDT 数字货币支付'],
         ];
 
         $statement = $pdo->prepare(

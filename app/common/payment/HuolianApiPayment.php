@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\huolian\HuolianClient;
 use app\common\sdk\huolian\HuolianSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,15 @@ use support\Response;
  */
 class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_APPLET = 'applet';
+    private const PRODUCT_ALIPAY_H5 = 'alipay_h5';
+    private const PRODUCT_WECHAT_H5 = 'wechat_h5';
+    private const PRODUCT_ALIPAY = 'alipay';
+    private const PRODUCT_WECHAT = 'wechat';
+    private const PRODUCT_CLOUD = 'cloud';
+
     private ?HuolianClient $client = null;
 
     /**
@@ -30,6 +41,7 @@ class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPlug
     protected array $paymentInfo = [
         'code' => 'huolian_api',
         'name' => '火脸支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.lianok.com/',
         'version' => '1.0.0',
@@ -51,6 +63,14 @@ class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPlug
             ['type' => 'input', 'field' => 'merchant_no', 'title' => '商户ID', 'value' => '', 'validate' => [['required' => true, 'message' => '商户ID不能为空']]],
             ['type' => 'input', 'field' => 'operator_account', 'title' => '收银员手机号', 'value' => '', 'validate' => [['required' => true, 'message' => '收银员手机号不能为空']]],
             ['type' => 'password', 'field' => 'refund_password', 'title' => '退款密码', 'value' => ''],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_APPLET => '微信小程序/JSAPI',
+                self::PRODUCT_ALIPAY_H5 => '支付宝 H5',
+                self::PRODUCT_WECHAT_H5 => '微信 H5',
+                self::PRODUCT_ALIPAY => '支付宝扫码',
+                self::PRODUCT_WECHAT => '微信扫码',
+                self::PRODUCT_CLOUD => '银联扫码',
+            ]),
         ];
     }
 
@@ -62,14 +82,57 @@ class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPlug
      */
     public function pay(array $order): array
     {
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'h5') {
-            return $this->h5Pay($order);
-        }
-        if ($method === 'jsapi') {
-            return $this->appletPay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
 
+            'jsapi' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_APPLET,
+                ],
+                'handler' => fn (): array => $this->appletPay($order),
+            ],
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_H5,
+                    'wxpay' => self::PRODUCT_WECHAT_H5,
+                ],
+                'handler' => fn (): array => $this->h5Pay($order),
+            ],
+
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_H5,
+                    'wxpay' => self::PRODUCT_WECHAT_H5,
+                ],
+                'handler' => fn (): array => $this->h5Pay($order),
+            ],
+
+            'web' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_H5,
+                    'wxpay' => self::PRODUCT_WECHAT_H5,
+                ],
+                'handler' => fn (): array => $this->h5Pay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY,
+                    'wxpay' => self::PRODUCT_WECHAT,
+                    'bank' => self::PRODUCT_CLOUD,
+                ],
+                'handler' => fn (): array => $this->qrcodePay($order),
+            ],
+        ], '火脸支付');
+    }
+
+    /**
+     * 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function qrcodePay(array $order): array
+    {
         $payType = (string) $order['pay_type_code'];
         $payWay = match ($payType) {
             'wxpay' => 'wechat',
@@ -204,7 +267,7 @@ class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPlug
             throw new PaymentException('火脸H5下单失败：' . $e->getMessage(), 40200);
         }
 
-        return $this->payResult('jump', $payType, 'h5', 'pay.h5', ['url' => (string) ($data['payUrl'] ?? ''), 'raw' => $data], $data, $order);
+        return $this->payResult('jump', $payType, $payWay . '_h5', 'pay.h5', ['url' => (string) ($data['payUrl'] ?? ''), 'raw' => $data], $data, $order);
     }
 
     /**
@@ -220,7 +283,7 @@ class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPlug
             $data = $this->client()->execute('api.hl.order.pay.applet', $this->basePayload($order) + [
                 'payWay' => 'wechat',
                 'appId' => (string) ($payment['sub_appid'] ?? ''),
-                'openId' => (string) ($payment['sub_openid'] ?? ''),
+                'openId' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? ''),
             ]);
         } catch (HuolianSdkException $e) {
             throw new PaymentException('火脸小程序下单失败：' . $e->getMessage(), 40200);

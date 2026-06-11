@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\yinyingtong\YinyingtongClient;
 use app\common\sdk\yinyingtong\YinyingtongSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,13 @@ use support\Response;
  */
 class YinyingtongApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_ALIPAY_ORDER = 'alipay_order';
+    private const PRODUCT_WX_PUBLIC_ORDER = 'wx_public_order';
+    private const PRODUCT_WX_MINI = 'wx_mini';
+    private const PRODUCT_QUICK_PAY = 'quick_pay';
+
     private ?YinyingtongClient $client = null;
 
     /**
@@ -30,6 +39,7 @@ class YinyingtongApiPayment extends BasePayment implements PaymentInterface, Pay
     protected array $paymentInfo = [
         'code' => 'yinyingtong_api',
         'name' => '银盈通支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'http://www.yinyingtong.com/',
         'version' => '1.0.0',
@@ -52,6 +62,12 @@ class YinyingtongApiPayment extends BasePayment implements PaymentInterface, Pay
             ['type' => 'input', 'field' => 'merchant_number', 'title' => '交易商户企业号', 'value' => '', 'validate' => [['required' => true, 'message' => '交易商户企业号不能为空']]],
             ['type' => 'input', 'field' => 'trade_platform_no', 'title' => '平台商企业号', 'value' => '', 'validate' => [['required' => true, 'message' => '平台商企业号不能为空']]],
             ['type' => 'input', 'field' => 'channel_merch_no', 'title' => '渠道商户号', 'value' => ''],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_ALIPAY_ORDER => '支付宝预下单',
+                self::PRODUCT_WX_PUBLIC_ORDER => '微信预下单',
+                self::PRODUCT_WX_MINI => '微信小程序/Scheme',
+                self::PRODUCT_QUICK_PAY => '银行卡快捷支付',
+            ]),
         ];
     }
 
@@ -64,15 +80,65 @@ class YinyingtongApiPayment extends BasePayment implements PaymentInterface, Pay
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
 
-        if ($payType === 'bank') {
-            return $this->quickPay($order);
-        }
-        if ($payType === 'wxpay' && in_array($method, ['app', 'applet', 'mini'], true)) {
-            return $this->wxUrlSchemePay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_ORDER,
+                    'wxpay' => self::PRODUCT_WX_PUBLIC_ORDER,
+                    'bank' => self::PRODUCT_QUICK_PAY,
+                ],
+                'handler' => fn (): array => $payType === 'bank' ? $this->quickPay($order) : $this->prepayPay($order, $payType, 'jump'),
+            ],
 
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_ORDER,
+                    'wxpay' => self::PRODUCT_WX_PUBLIC_ORDER,
+                    'bank' => self::PRODUCT_QUICK_PAY,
+                ],
+                'handler' => fn (): array => $payType === 'bank' ? $this->quickPay($order) : $this->prepayPay($order, $payType, 'jump'),
+            ],
+
+            'web' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_ORDER,
+                    'wxpay' => self::PRODUCT_WX_PUBLIC_ORDER,
+                    'bank' => self::PRODUCT_QUICK_PAY,
+                ],
+                'handler' => fn (): array => $payType === 'bank' ? $this->quickPay($order) : $this->prepayPay($order, $payType, 'jump'),
+            ],
+
+            'urlscheme' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_WX_MINI,
+                ],
+                'handler' => fn (): array => $payType === 'wxpay'
+                ? $this->wxUrlSchemePay($order)
+                : throw new PaymentException('银盈通当前支付方式不支持URL Scheme产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_ORDER,
+                    'wxpay' => self::PRODUCT_WX_PUBLIC_ORDER,
+                    'bank' => self::PRODUCT_QUICK_PAY,
+                ],
+                'handler' => fn (): array => $payType === 'bank' ? $this->quickPay($order) : $this->prepayPay($order, $payType, 'qrcode'),
+            ],
+        ], '银盈通');
+    }
+
+    /**
+     * 预下单并按承接页类型返回。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @param string $payPage 承接页类型
+     * @return array<string, mixed>
+     */
+    private function prepayPay(array $order, string $payType, string $payPage): array
+    {
         $prepay = $this->prepay($order, $payType === 'wxpay' ? '02' : '01', $payType === 'wxpay' ? '16' : '');
         $orderId = (string) ($prepay['order_id'] ?? '');
         if ($orderId === '') {
@@ -83,7 +149,6 @@ class YinyingtongApiPayment extends BasePayment implements PaymentInterface, Pay
             ? 'https://h5.gomepay.com/cashier-h5/index.html#/pages/preOrder/wxPublicOrder?orderId=' . rawurlencode($orderId) . '&showPayButton=0'
             : 'https://h5.gomepay.com/cashier-h5/index.html#/pages/preOrder/orderPay?orderId=' . rawurlencode($orderId) . '&showPayButton=0';
 
-        $payPage = $method === 'h5' || $method === 'web' ? 'jump' : 'qrcode';
         $payParams = $payPage === 'jump'
             ? ['url' => $url, 'raw' => $prepay]
             : ['qrcode' => $url, 'raw' => $prepay];

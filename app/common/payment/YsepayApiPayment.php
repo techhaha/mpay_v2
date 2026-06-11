@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\ysepay\YsepayClient;
 use app\common\sdk\ysepay\YsepaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,16 @@ use support\Response;
  */
 class YsepayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_ALIPAY_JSAPI = 'alipay_jsapi';
+    private const PRODUCT_ALIPAY_H5 = 'alipay_h5';
+    private const PRODUCT_WEIXIN_JSAPI = 'weixin_jsapi';
+    private const PRODUCT_CUPMULAPP = 'cupmulapp';
+    private const PRODUCT_CODE_1903000 = '1903000';
+    private const PRODUCT_CODE_1902000 = '1902000';
+    private const PRODUCT_CODE_9001002 = '9001002';
+
     private ?YsepayClient $client = null;
 
     /**
@@ -30,6 +42,7 @@ class YsepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'ysepay_api',
         'name' => '银盛支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.ysepay.com/',
         'version' => '1.0.0',
@@ -52,6 +65,15 @@ class YsepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             ['type' => 'password', 'field' => 'private_cert_password', 'title' => '私钥证书密码', 'value' => '', 'validate' => [['required' => true, 'message' => '私钥证书密码不能为空']]],
             ['type' => 'input', 'field' => 'platform_cert_path', 'title' => '银盛公钥证书路径', 'value' => ''],
             ['type' => 'input', 'field' => 'private_cert_path', 'title' => '商户PFX证书路径', 'value' => ''],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_ALIPAY_JSAPI => '支付宝 JSAPI',
+                self::PRODUCT_ALIPAY_H5 => '支付宝 H5',
+                self::PRODUCT_WEIXIN_JSAPI => '微信 JSAPI/小程序',
+                self::PRODUCT_CUPMULAPP => '银联 JSAPI',
+                self::PRODUCT_CODE_1903000 => '支付宝扫码',
+                self::PRODUCT_CODE_1902000 => '微信扫码',
+                self::PRODUCT_CODE_9001002 => '银联扫码',
+            ]),
         ];
     }
 
@@ -63,12 +85,47 @@ class YsepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     public function pay(array $order): array
     {
-        $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
 
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_JSAPI,
+                    'wxpay' => self::PRODUCT_WEIXIN_JSAPI,
+                    'bank' => self::PRODUCT_CUPMULAPP,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+
+            'h5' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_H5],
+                'handler' => fn (): array => $this->alipayH5Pay($order),
+            ],
+
+            'jump' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_H5],
+                'handler' => fn (): array => $this->alipayH5Pay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_1903000,
+                    'wxpay' => self::PRODUCT_CODE_1902000,
+                    'bank' => self::PRODUCT_CODE_9001002,
+                ],
+                'handler' => fn (): array => $this->qrcodePay($order),
+            ],
+        ], '银盛');
+    }
+
+    /**
+     * 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function qrcodePay(array $order): array
+    {
+        $payType = (string) $order['pay_type_code'];
         $bankType = match ($payType) {
             'wxpay' => '1902000',
             'bank' => '9001002',
@@ -90,6 +147,31 @@ class YsepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         }
 
         return $this->payResult('qrcode', $payType, $bankType, 'ysepay.online.qrcodepay', ['qrcode' => $qrcode, 'raw' => $data], $data, $order);
+    }
+
+    /**
+     * 支付宝 H5 支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function alipayH5Pay(array $order): array
+    {
+        try {
+            $html = $this->client()->pageExecute('ysepay.online.wap.directpay.createbyuser', $this->basePayload($order) + [
+                'pay_mode' => 'native',
+                'bank_type' => '1903000',
+            ], [
+                'notify_url' => (string) $order['callback_url'],
+                'return_url' => (string) $order['return_url'],
+            ]);
+        } catch (YsepaySdkException $e) {
+            throw new PaymentException('银盛支付宝H5下单失败：' . $e->getMessage(), 40200);
+        }
+
+        return $this->payResult('html', 'alipay', self::PRODUCT_ALIPAY_H5, 'ysepay.online.wap.directpay.createbyuser', [
+            'html' => $html,
+        ], [], $order);
     }
 
     /**
@@ -208,12 +290,13 @@ class YsepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             return $this->payResult('jump', $payType, 'cupmulapp', 'ysepay.online.cupmulapp.qrcodepay', ['url' => (string) ($data['web_url'] ?? ''), 'raw' => $data], $data, $order);
         }
 
+        $product = $payType === 'wxpay' ? 'weixin_jsapi' : 'alipay_jsapi';
         $method = $payType === 'wxpay' ? 'ysepay.online.weixin.pay' : 'ysepay.online.alijsapi.pay';
         $params = $this->basePayload($order) + ['payer_ip' => (string) $order['client_ip']];
         if ($payType === 'wxpay') {
             $params['appid'] = (string) ($payment['sub_appid'] ?? '');
-            $params['sub_openid'] = (string) ($payment['sub_openid'] ?? '');
-            $params['is_minipg'] = '2';
+            $params['sub_openid'] = (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? '');
+            $params['is_minipg'] = (string) ($payment['mini_openid'] ?? '') !== '' ? '1' : '2';
         } else {
             $params['buyer_id'] = (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? '');
         }
@@ -228,7 +311,7 @@ class YsepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         $payInfo = is_array($payInfo) ? $payInfo : ['tradeNO' => (string) ($data['jsapi_pay_info'] ?? '')];
         $payInfo['raw'] = $data;
 
-        return $this->payResult('jsapi', $payType, 'jsapi', $method, $payInfo, $data, $order);
+        return $this->payResult('jsapi', $payType, $product, $method, $payInfo, $data, $order);
     }
 
     /**

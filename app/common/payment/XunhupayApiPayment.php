@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\xunhupay\XunhupayClient;
 use app\common\sdk\xunhupay\XunhupaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,13 @@ use support\Response;
  */
 class XunhupayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_ALIPAY_H5 = 'alipay_h5';
+    private const PRODUCT_WECHAT_H5 = 'wechat_h5';
+    private const PRODUCT_ALIPAY = 'alipay';
+    private const PRODUCT_WECHAT = 'wechat';
+
     private ?XunhupayClient $client = null;
 
     /**
@@ -30,6 +39,7 @@ class XunhupayApiPayment extends BasePayment implements PaymentInterface, PayPlu
     protected array $paymentInfo = [
         'code' => 'xunhupay_api',
         'name' => '虎皮椒支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'wxpay'],
@@ -72,6 +82,12 @@ class XunhupayApiPayment extends BasePayment implements PaymentInterface, PayPlu
                     'placeholder' => '留空使用虎皮椒默认网关',
                 ],
             ],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_ALIPAY_H5 => '支付宝 H5',
+                self::PRODUCT_WECHAT_H5 => '微信 H5',
+                self::PRODUCT_ALIPAY => '支付宝扫码',
+                self::PRODUCT_WECHAT => '微信扫码',
+            ]),
         ];
     }
 
@@ -84,8 +100,93 @@ class XunhupayApiPayment extends BasePayment implements PaymentInterface, PayPlu
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $channelPayment = $payType === 'wxpay' ? 'wechat' : 'alipay';
 
+        return $this->executeDirectPaymentProduct($order, [
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_H5,
+                    'wxpay' => self::PRODUCT_WECHAT_H5,
+                ],
+                'handler' => fn (): array => $this->h5Pay($order, $payType),
+            ],
+
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_H5,
+                    'wxpay' => self::PRODUCT_WECHAT_H5,
+                ],
+                'handler' => fn (): array => $this->h5Pay($order, $payType),
+            ],
+
+            'web' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_H5,
+                    'wxpay' => self::PRODUCT_WECHAT_H5,
+                ],
+                'handler' => fn (): array => $this->h5Pay($order, $payType),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY,
+                    'wxpay' => self::PRODUCT_WECHAT,
+                ],
+                'handler' => fn (): array => $this->qrcodePay($order, $payType),
+            ],
+        ], '虎皮椒');
+    }
+
+    /**
+     * H5/跳转支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function h5Pay(array $order, string $payType): array
+    {
+        $data = $this->createOrder($order, $payType, true);
+        $url = (string) ($data['url'] ?? '');
+        if ($url === '') {
+            throw new PaymentException('虎皮椒未返回跳转支付地址', 40200, [
+                'channel_error_code' => 'PRODUCT_NOT_OPEN',
+                'response' => $data,
+            ]);
+        }
+
+        return $this->payResult('jump', $payType, $this->channelPayment($payType) . '_h5', ['url' => $url, 'raw' => $data], $data, $order);
+    }
+
+    /**
+     * 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function qrcodePay(array $order, string $payType): array
+    {
+        $data = $this->createOrder($order, $payType, false);
+        $qrcodeImage = (string) ($data['url_qrcode'] ?? '');
+        if ($qrcodeImage === '') {
+            throw new PaymentException('虎皮椒未返回二维码地址', 40200, ['response' => $data]);
+        }
+
+        return $this->payResult('qrcode', $payType, $this->channelPayment($payType), [
+            'qrcode' => $this->client()->parseQrcode($qrcodeImage),
+            'raw' => $data,
+        ], $data, $order);
+    }
+
+    /**
+     * 创建虎皮椒支付单。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function createOrder(array $order, string $payType, bool $useWap): array
+    {
+        $channelPayment = $this->channelPayment($payType);
         $params = [
             'version' => '1.1',
             'trade_order_id' => (string) $order['pay_no'],
@@ -96,8 +197,7 @@ class XunhupayApiPayment extends BasePayment implements PaymentInterface, PayPlu
             'return_url' => (string) $order['return_url'],
         ];
 
-        $isMobile = in_array((string) ($order['_env'] ?? ''), ['mobile', 'wechat', 'alipay', 'qq'], true);
-        if ($channelPayment === 'wechat' && $isMobile) {
+        if ($channelPayment === 'wechat' && $useWap) {
             $params['type'] = 'WAP';
             $params['wap_url'] = parse_url((string) $order['return_url'], PHP_URL_HOST) ?: '';
             $params['wap_name'] = (string) $order['subject'];
@@ -109,19 +209,15 @@ class XunhupayApiPayment extends BasePayment implements PaymentInterface, PayPlu
             throw new PaymentException('虎皮椒下单失败：' . $e->getMessage(), 40200);
         }
 
-        if ($isMobile && (string) ($data['url'] ?? '') !== '') {
-            return $this->payResult('jump', $payType, $channelPayment, ['url' => (string) $data['url'], 'raw' => $data], $data, $order);
-        }
+        return $data;
+    }
 
-        $qrcodeImage = (string) ($data['url_qrcode'] ?? '');
-        if ($qrcodeImage === '') {
-            throw new PaymentException('虎皮椒未返回二维码地址', 40200, ['response' => $data]);
-        }
-
-        return $this->payResult('qrcode', $payType, $channelPayment, [
-            'qrcode' => $this->client()->parseQrcode($qrcodeImage),
-            'raw' => $data,
-        ], $data, $order);
+    /**
+     * 虎皮椒上游支付方式编码。
+     */
+    private function channelPayment(string $payType): string
+    {
+        return $payType === 'wxpay' ? 'wechat' : 'alipay';
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace app\common\base;
 
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\interface\PayPluginInterface;
 use app\exception\PaymentException;
 use GuzzleHttp\Client;
@@ -38,6 +39,15 @@ abstract class BasePayment implements PayPluginInterface
      * @var array<string, mixed>
      */
     protected array $paymentInfo = [];
+
+    /**
+     * 进件能力元信息（子类按需覆盖）。
+     *
+     * 与支付、转账能力分离，供后台进件配置和商户端在线签约页读取。
+     *
+     * @var array<string, mixed>
+     */
+    protected array $onboardingInfo = [];
 
     /**
      * 通道配置（由 init 注入）
@@ -138,6 +148,20 @@ abstract class BasePayment implements PayPluginInterface
         return $this->paymentInfo['version'] ?? '';
     }
 
+    /**
+     * 获取插件类型。
+     *
+     * 插件类型只作为后台筛选和运营识别字段，不参与支付路由和资金归属判断。
+     *
+     * @return int 插件类型
+     */
+    public function getPluginType(): int
+    {
+        $type = (int) ($this->paymentInfo['plugin_type'] ?? PaymentPluginTypeConstant::TYPE_DIRECT);
+
+        return PaymentPluginTypeConstant::isValid($type) ? $type : PaymentPluginTypeConstant::TYPE_DIRECT;
+    }
+
     // ==================== 能力声明 ====================
 
     /**
@@ -168,6 +192,52 @@ abstract class BasePayment implements PayPluginInterface
     public function getConfigSchema(): array
     {
         return $this->paymentInfo['config_schema'] ?? [];
+    }
+
+    /**
+     * 获取进件主体类型声明。
+     *
+     * @return array<int, string> 主体类型编码
+     */
+    public function getOnboardingTypes(): array
+    {
+        $types = $this->onboardingInfo['types'] ?? [];
+
+        return is_array($types) ? array_values(array_filter(array_map('strval', $types))) : [];
+    }
+
+    /**
+     * 获取进件能力完整元信息。
+     *
+     * @return array<string, mixed> 进件元信息
+     */
+    public function getOnboardingInfo(): array
+    {
+        return $this->onboardingInfo;
+    }
+
+    /**
+     * 获取商户/后台进件资料表单结构。
+     *
+     * @return array<int, mixed> 表单结构
+     */
+    public function getOnboardingFormSchema(): array
+    {
+        $schema = $this->onboardingInfo['form_schema'] ?? [];
+
+        return is_array($schema) ? array_values($schema) : [];
+    }
+
+    /**
+     * 获取进件接口配置表单结构。
+     *
+     * @return array<int, mixed> 配置表单结构
+     */
+    public function getOnboardingConfigSchema(): array
+    {
+        $schema = $this->onboardingInfo['config_schema'] ?? [];
+
+        return is_array($schema) ? array_values($schema) : [];
     }
 
     // ==================== HTTP 请求 ====================

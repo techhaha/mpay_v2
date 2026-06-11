@@ -47,9 +47,12 @@ class PaymentPlugin extends BaseModel
         'code',
         'name',
         'class_name',
+        'plugin_type',
         'config_schema',
         'pay_types',
         'transfer_types',
+        'onboarding_types',
+        'onboarding_info',
         'version',
         'author',
         'link',
@@ -67,12 +70,13 @@ class PaymentPlugin extends BaseModel
         'config_schema' => 'array',
         'pay_types' => 'array',
         'transfer_types' => 'array',
+        'onboarding_types' => 'array',
+        'onboarding_info' => 'array',
+        'plugin_type' => 'integer',
         'allow_merchant' => 'integer',
         'status' => 'integer',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
 }
-
-
 

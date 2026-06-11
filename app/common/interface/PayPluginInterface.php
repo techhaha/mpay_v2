@@ -63,6 +63,13 @@ interface PayPluginInterface
     public function getVersion(): string;
 
     /**
+     * 获取插件类型。
+     *
+     * @return int 插件类型，见 PaymentPluginTypeConstant
+     */
+    public function getPluginType(): int;
+
+    /**
      * 获取插件声明支持的支付方式编码。
      *
      * @return array 支持的支付方式编码

@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\dinpay\DinpayClient;
 use app\common\sdk\dinpay\DinpaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,12 @@ use support\Response;
  */
 class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_PUBLIC = 'PUBLIC';
+    private const PRODUCT_WAP = 'WAP';
+    private const PRODUCT_SCAN = 'SCAN';
+
     private ?DinpayClient $client = null;
 
     /**
@@ -30,6 +38,7 @@ class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'dinpay_api',
         'name' => '智付支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.dinpay.com/',
         'version' => '1.0.0',
@@ -52,6 +61,11 @@ class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             ['type' => 'input', 'field' => 'sub_mch_id', 'title' => '子商户号', 'value' => ''],
             ['type' => 'input', 'field' => 'report_id', 'title' => '渠道商户报备ID', 'value' => ''],
             ['type' => 'switch', 'field' => 'is_test', 'title' => '测试环境', 'value' => false],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_PUBLIC => '公众号/生活号支付',
+                self::PRODUCT_WAP => 'H5/跳转支付',
+                self::PRODUCT_SCAN => '扫码支付',
+            ]),
         ];
     }
 
@@ -63,14 +77,53 @@ class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     public function pay(array $order): array
     {
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'h5') {
-            return $this->h5Pay($order);
-        }
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
 
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_PUBLIC,
+                    'wxpay' => self::PRODUCT_PUBLIC,
+                    'bank' => self::PRODUCT_PUBLIC,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_WAP,
+                    'wxpay' => self::PRODUCT_WAP,
+                    'bank' => self::PRODUCT_WAP,
+                ],
+                'handler' => fn (): array => $this->h5Pay($order),
+            ],
+
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_WAP,
+                    'wxpay' => self::PRODUCT_WAP,
+                    'bank' => self::PRODUCT_WAP,
+                ],
+                'handler' => fn (): array => $this->h5Pay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_SCAN,
+                    'wxpay' => self::PRODUCT_SCAN,
+                    'bank' => self::PRODUCT_SCAN,
+                ],
+                'handler' => fn (): array => $this->scanPay($order),
+            ],
+        ], '智付');
+    }
+
+    /**
+     * 扫码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function scanPay(array $order): array
+    {
         $payType = $this->channelPayType((string) $order['pay_type_code']);
         try {
             $data = $this->client()->execute('/api/appPay/pay', $this->basePayload($order) + [
@@ -218,7 +271,7 @@ class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                 'paymentType' => $this->channelPayType((string) $order['pay_type_code']),
                 'paymentMethods' => 'PUBLIC',
                 'appid' => (string) ($payment['sub_appid'] ?? '1'),
-                'openid' => (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
+                'openid' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
                 'isNative' => '1',
                 'successToUrl' => (string) $order['return_url'],
             ]);

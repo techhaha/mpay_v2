@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\umfpay\UmfpayClient;
 use app\common\sdk\umfpay\UmfpaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -19,6 +21,13 @@ use support\Response;
  */
 class UmfpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_PUBLICNUMBER_AND_VERTICALCODE = 'publicnumber_and_verticalcode';
+    private const PRODUCT_ALIPAY = 'ALIPAY';
+    private const PRODUCT_WECHAT = 'WECHAT';
+    private const PRODUCT_UNION = 'UNION';
+
     private ?UmfpayClient $client = null;
 
     /**
@@ -36,6 +45,7 @@ class UmfpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'umfpay_api',
         'name' => '联动优势支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://xy.umfintech.com/',
         'version' => '1.0.0',
@@ -55,6 +65,12 @@ class UmfpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             ['type' => 'input', 'field' => 'mer_id', 'title' => '商户编号', 'value' => '', 'validate' => [['required' => true, 'message' => '商户编号不能为空']]],
             ['type' => 'textarea', 'field' => 'platform_public_key', 'title' => '平台公钥 PEM', 'value' => '', 'validate' => [['required' => true, 'message' => '平台公钥不能为空']]],
             ['type' => 'textarea', 'field' => 'merchant_private_key', 'title' => '商户私钥 PEM', 'value' => '', 'validate' => [['required' => true, 'message' => '商户私钥不能为空']]],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_PUBLICNUMBER_AND_VERTICALCODE => '微信公众号支付',
+                self::PRODUCT_ALIPAY => '支付宝扫码',
+                self::PRODUCT_WECHAT => '微信扫码',
+                self::PRODUCT_UNION => '银联扫码',
+            ]),
         ];
     }
 
@@ -67,16 +83,55 @@ class UmfpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($payType === 'wxpay' && $method === 'jsapi') {
-            $url = $this->client()->payUrl($this->basePayload($order) + [
-                'service' => 'publicnumber_and_verticalcode',
-                'ret_url' => (string) $order['return_url'],
-                'is_public_number' => 'Y',
-            ]);
-            return $this->payResult('jump', $payType, 'jsapi', 'publicnumber_and_verticalcode', ['url' => $url], [], $order);
-        }
 
+        return $this->executeDirectPaymentProduct($order, [
+
+            'jsapi' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_PUBLICNUMBER_AND_VERTICALCODE,
+                ],
+                'handler' => fn (): array => $payType === 'wxpay'
+                ? $this->jsapiPay($order)
+                : throw new PaymentException('联动优势当前支付方式不支持JSAPI产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY,
+                    'wxpay' => self::PRODUCT_WECHAT,
+                    'bank' => self::PRODUCT_UNION,
+                ],
+                'handler' => fn (): array => $this->qrcodePay($order, $payType),
+            ],
+        ], '联动优势');
+    }
+
+    /**
+     * 微信公众号跳转支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function jsapiPay(array $order): array
+    {
+        $url = $this->client()->payUrl($this->basePayload($order) + [
+            'service' => 'publicnumber_and_verticalcode',
+            'ret_url' => (string) $order['return_url'],
+            'is_public_number' => 'Y',
+        ]);
+
+        return $this->payResult('jump', 'wxpay', 'publicnumber_and_verticalcode', 'publicnumber_and_verticalcode', ['url' => $url], [], $order);
+    }
+
+    /**
+     * 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function qrcodePay(array $order, string $payType): array
+    {
         $scanType = match ($payType) {
             'wxpay' => 'WECHAT',
             'bank' => 'UNION',

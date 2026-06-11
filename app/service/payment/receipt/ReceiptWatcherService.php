@@ -45,7 +45,7 @@ class ReceiptWatcherService extends BaseService
      * @param PaymentPluginConfRepository $paymentPluginConfRepository 支付插件配置仓库
      * @param PaymentTypeRepository $paymentTypeRepository 支付方式仓库
      * @param PayOrderRepository $payOrderRepository 支付单仓库
-     * @param ReceiptWatcherLicenseService $receiptWatcherLicenseService 网页监听授权服务
+     * @param ReceiptWatcherLicenseService $receiptWatcherLicenseService 网页监听配置服务
      */
     public function __construct(
         protected PaymentChannelRepository $paymentChannelRepository,
@@ -63,7 +63,6 @@ class ReceiptWatcherService extends BaseService
      */
     public function refreshChannelCache(): array
     {
-        $this->receiptWatcherLicenseService->publishRuntimeSnapshot();
         $pluginCodes = $this->supportedPluginCodes();
         if ($pluginCodes === []) {
             $this->clearQueryTasks();
@@ -179,6 +178,7 @@ class ReceiptWatcherService extends BaseService
                 'request_at' => (string) $order->request_at,
                 'expire_at' => (string) ($order->expire_at ?? ''),
                 'created_at' => (string) $order->created_at,
+                'ext_json' => $this->receiptOrderExtJson($order),
             ];
         }
 
@@ -214,7 +214,6 @@ class ReceiptWatcherService extends BaseService
                 'stale' => 0,
                 'locked' => 0,
                 'deduped' => 0,
-                'unauthorized' => 0,
             ];
         }
 
@@ -235,7 +234,6 @@ class ReceiptWatcherService extends BaseService
                 'stale' => 0,
                 'locked' => 0,
                 'deduped' => 0,
-                'unauthorized' => 0,
             ];
         }
 
@@ -245,7 +243,6 @@ class ReceiptWatcherService extends BaseService
             'stale' => 0,
             'locked' => 0,
             'deduped' => 0,
-            'unauthorized' => 0,
         ];
         foreach ($accountKeys as $rawAccountKey) {
             $accountKey = (string) $rawAccountKey;
@@ -253,12 +250,6 @@ class ReceiptWatcherService extends BaseService
             $orderCount = (int) Redis::hLen($this->ordersKey($accountKey));
             if ($task === null || $orderCount <= 0) {
                 $summary['stale']++;
-                $this->removeAccountQueryTask($accountKey);
-                continue;
-            }
-
-            if (!$this->receiptWatcherLicenseService->isPluginAuthorized((string) ($task['plugin_code'] ?? ''))) {
-                $summary['unauthorized']++;
                 $this->removeAccountQueryTask($accountKey);
                 continue;
             }
@@ -436,7 +427,7 @@ class ReceiptWatcherService extends BaseService
             }
         }
 
-        return $this->receiptWatcherLicenseService->authorizedPluginCodes(array_values(array_unique($codes)));
+        return $this->receiptWatcherLicenseService->filterWatcherCapablePluginCodes(array_values(array_unique($codes)));
     }
 
     /**
@@ -610,6 +601,24 @@ class ReceiptWatcherService extends BaseService
     private function queryIntervalSeconds(array $config): int
     {
         return max(2, (int) ($config['receipt_watcher_query_interval_seconds'] ?? 3));
+    }
+
+    /**
+     * 提取 watcher 需要的订单扩展信息。
+     *
+     * 支付单 ext_json 可能包含前端承接参数、上游原始响应等内容。这里仅透传
+     * `receipt_watcher` 这个固定命名空间，新增监听插件需要给 Python watcher
+     * 提供订单级识别信息时，统一写入 `ext_json.receipt_watcher`。
+     *
+     * @param PayOrder $order 支付单
+     * @return array<string, mixed> 扩展快照
+     */
+    private function receiptOrderExtJson(PayOrder $order): array
+    {
+        $extJson = (array) ($order->ext_json ?? []);
+        $metadata = $extJson['receipt_watcher'] ?? [];
+
+        return is_array($metadata) && $metadata !== [] ? ['receipt_watcher' => $metadata] : [];
     }
 
     /**

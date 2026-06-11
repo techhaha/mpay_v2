@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\jeepay\JeepayClient;
 use app\common\sdk\jeepay\JeepaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -19,6 +21,14 @@ use support\Response;
  */
 class JeepayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_ALI_JSAPI = 'ALI_JSAPI';
+    private const PRODUCT_WX_JSAPI = 'WX_JSAPI';
+    private const PRODUCT_ALIPAY_WAY_CODE = 'alipay_way_code';
+    private const PRODUCT_WXPAY_WAY_CODE = 'wxpay_way_code';
+    private const PRODUCT_BANK_WAY_CODE = 'bank_way_code';
+
     private ?JeepayClient $client = null;
 
     /**
@@ -29,6 +39,7 @@ class JeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'jeepay_api',
         'name' => 'Jeepay聚合支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.jeequan.com/',
         'version' => '1.0.0',
@@ -52,6 +63,13 @@ class JeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             ['type' => 'input', 'field' => 'alipay_way_code', 'title' => '支付宝产品编码', 'value' => 'ALI_QR'],
             ['type' => 'input', 'field' => 'wxpay_way_code', 'title' => '微信产品编码', 'value' => 'WX_NATIVE'],
             ['type' => 'input', 'field' => 'bank_way_code', 'title' => '云闪付产品编码', 'value' => 'YSF_NATIVE'],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_ALI_JSAPI => '支付宝 JSAPI',
+                self::PRODUCT_WX_JSAPI => '微信 JSAPI',
+                self::PRODUCT_ALIPAY_WAY_CODE => '支付宝产品编码',
+                self::PRODUCT_WXPAY_WAY_CODE => '微信产品编码',
+                self::PRODUCT_BANK_WAY_CODE => '云闪付产品编码',
+            ]),
         ];
     }
 
@@ -64,7 +82,63 @@ class JeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $wayCode = $this->wayCode($payType, (string) ($order['extra']['payment']['method'] ?? ''));
+        return $this->executeDirectPaymentProduct($order, [
+
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALI_JSAPI,
+                    'wxpay' => self::PRODUCT_WX_JSAPI,
+                ],
+                'handler' => fn (): array => $this->productPay($order, $payType, $this->wayCode($payType, 'jsapi')),
+            ],
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_WAY_CODE,
+                    'wxpay' => self::PRODUCT_WXPAY_WAY_CODE,
+                    'bank' => self::PRODUCT_BANK_WAY_CODE,
+                ],
+                'handler' => fn (): array => $this->productPay($order, $payType, $this->wayCode($payType, 'h5')),
+            ],
+
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_WAY_CODE,
+                    'wxpay' => self::PRODUCT_WXPAY_WAY_CODE,
+                    'bank' => self::PRODUCT_BANK_WAY_CODE,
+                ],
+                'handler' => fn (): array => $this->productPay($order, $payType, $this->wayCode($payType, 'h5')),
+            ],
+
+            'web' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_WAY_CODE,
+                    'wxpay' => self::PRODUCT_WXPAY_WAY_CODE,
+                    'bank' => self::PRODUCT_BANK_WAY_CODE,
+                ],
+                'handler' => fn (): array => $this->productPay($order, $payType, $this->wayCode($payType, 'web')),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_WAY_CODE,
+                    'wxpay' => self::PRODUCT_WXPAY_WAY_CODE,
+                    'bank' => self::PRODUCT_BANK_WAY_CODE,
+                ],
+                'handler' => fn (): array => $this->productPay($order, $payType, $this->wayCode($payType, '')),
+            ],
+        ], 'Jeepay');
+    }
+
+    /**
+     * Jeepay 统一下单。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @param string $wayCode Jeepay 产品编码
+     * @return array<string, mixed>
+     */
+    private function productPay(array $order, string $payType, string $wayCode): array
+    {
         $payload = [
             'mchNo' => $this->configText('mch_no'),
             'appId' => $this->configText('app_id'),

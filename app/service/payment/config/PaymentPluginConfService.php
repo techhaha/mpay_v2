@@ -4,6 +4,7 @@ namespace app\service\payment\config;
 
 use app\common\base\BaseService;
 use app\common\constant\EventConstant;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\exception\PaymentException;
 use app\model\payment\PaymentPluginConf;
 use app\repository\payment\config\PaymentPluginConfRepository;
@@ -57,7 +58,8 @@ class PaymentPluginConfService extends BaseService
                 'c.created_at',
                 'c.updated_at',
             ])
-            ->selectRaw("COALESCE(NULLIF(p.name, ''), c.plugin_code) AS plugin_name");
+            ->selectRaw("COALESCE(NULLIF(p.name, ''), c.plugin_code) AS plugin_name")
+            ->selectRaw('COALESCE(p.plugin_type, 1) AS plugin_type');
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
         if ($keyword !== '') {
@@ -79,6 +81,11 @@ class PaymentPluginConfService extends BaseService
             $query->where('c.merchant_id', (int) $merchantId);
         }
 
+        $pluginType = (int) ($filters['plugin_type'] ?? 0);
+        if (PaymentPluginTypeConstant::isValid($pluginType)) {
+            $query->where('p.plugin_type', $pluginType);
+        }
+
         $paginator = $query
             ->orderByDesc('c.id')
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
@@ -87,6 +94,8 @@ class PaymentPluginConfService extends BaseService
             $row->is_writable = (int) $row->merchant_id === 0;
             $row->source_type = (int) $row->merchant_id === 0 ? 'platform' : 'merchant';
             $row->source_text = (int) $row->merchant_id === 0 ? '平台配置' : '商户自建';
+            $row->plugin_type = (int) ($row->plugin_type ?? PaymentPluginTypeConstant::TYPE_DIRECT);
+            $row->plugin_type_text = PaymentPluginTypeConstant::label((int) $row->plugin_type);
             $row->config_masked = $this->maskSensitiveData((array) ($row->config ?? []));
             $row->config = $row->config_masked;
 

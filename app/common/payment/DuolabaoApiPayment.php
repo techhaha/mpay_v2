@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\duolabao\DuolabaoClient;
 use app\common\sdk\duolabao\DuolabaoSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,12 @@ use support\Response;
  */
 class DuolabaoApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_ALIPAY_JSAPI = 'ALIPAY_JSAPI';
+    private const PRODUCT_WX_JSAPI = 'WX_JSAPI';
+    private const PRODUCT_QRCODE_TRAD = 'QRCODE_TRAD';
+
     private ?DuolabaoClient $client = null;
 
     /**
@@ -30,6 +38,7 @@ class DuolabaoApiPayment extends BasePayment implements PaymentInterface, PayPlu
     protected array $paymentInfo = [
         'code' => 'duolabao_api',
         'name' => '哆啦宝支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'http://www.duolabao.com/',
         'version' => '1.0.0',
@@ -51,6 +60,11 @@ class DuolabaoApiPayment extends BasePayment implements PaymentInterface, PayPlu
             ['type' => 'input', 'field' => 'shop_num', 'title' => '门店编号', 'value' => '', 'validate' => [['required' => true, 'message' => '门店编号不能为空']]],
             ['type' => 'input', 'field' => 'access_key', 'title' => 'AccessKey', 'value' => '', 'validate' => [['required' => true, 'message' => 'AccessKey不能为空']]],
             ['type' => 'password', 'field' => 'secret_key', 'title' => 'SecretKey', 'value' => '', 'validate' => [['required' => true, 'message' => 'SecretKey不能为空']]],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_ALIPAY_JSAPI => '支付宝 JSAPI',
+                self::PRODUCT_WX_JSAPI => '微信 JSAPI',
+                self::PRODUCT_QRCODE_TRAD => '聚合扫码',
+            ]),
         ];
     }
 
@@ -62,11 +76,34 @@ class DuolabaoApiPayment extends BasePayment implements PaymentInterface, PayPlu
      */
     public function pay(array $order): array
     {
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
 
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_JSAPI,
+                    'wxpay' => self::PRODUCT_WX_JSAPI,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_QRCODE_TRAD,
+                    'wxpay' => self::PRODUCT_QRCODE_TRAD,
+                ],
+                'handler' => fn (): array => $this->qrcodePay($order),
+            ],
+        ], '哆啦宝');
+    }
+
+    /**
+     * 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function qrcodePay(array $order): array
+    {
         try {
             $data = $this->client()->post('/api/generateQRCodeUrl', [
                 'version' => 'V4.0',
@@ -94,7 +131,7 @@ class DuolabaoApiPayment extends BasePayment implements PaymentInterface, PayPlu
             throw new PaymentException('哆啦宝未返回二维码链接', 40200, ['response' => $data]);
         }
 
-        return $this->payResult('qrcode', (string) $order['pay_type_code'], 'qrcode', 'generateQRCodeUrl', ['qrcode' => $qrcode, 'raw' => $data], $data, $order);
+        return $this->payResult('qrcode', (string) $order['pay_type_code'], 'QRCODE_TRAD', 'generateQRCodeUrl', ['qrcode' => $qrcode, 'raw' => $data], $data, $order);
     }
 
     /**
@@ -213,7 +250,7 @@ class DuolabaoApiPayment extends BasePayment implements PaymentInterface, PayPlu
             'orderType' => 'SALES',
             'bankType' => $bankType,
             'paySource' => $bankType,
-            'authCode' => (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
+            'authCode' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
             'callbackUrl' => (string) $order['callback_url'],
             'completeUrl' => (string) $order['return_url'],
             'clientIp' => (string) $order['client_ip'],
@@ -238,7 +275,7 @@ class DuolabaoApiPayment extends BasePayment implements PaymentInterface, PayPlu
             throw new PaymentException('哆啦宝未返回JSAPI支付参数', 40200, ['response' => $data]);
         }
 
-        return $this->payResult('jsapi', $payType, 'jsapi', 'createPayWithCheck', $payInfo + ['raw' => $data], $data, $order);
+        return $this->payResult('jsapi', $payType, $bankType . '_JSAPI', 'createPayWithCheck', $payInfo + ['raw' => $data], $data, $order);
     }
 
     /**

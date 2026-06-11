@@ -4,6 +4,7 @@ use Webman\Route;
 use app\common\middleware\Cors;
 use app\http\mer\controller\file\FileRecordController;
 use app\http\mer\controller\merchant\MerchantPortalController;
+use app\http\mer\controller\onboarding\OnboardingController;
 use app\http\mer\controller\system\AuthController;
 use app\http\mer\controller\system\SystemController;
 use app\http\mer\controller\trade\PayOrderController;
@@ -63,6 +64,18 @@ Route::group('/merapi', function () {
         });
 
         Route::get('/payment-plugins/{code}/schema', [MerchantPortalController::class, 'pluginSchema'])->name('merchantApiPortalPluginSchema')->setParams(['real_name' => '商户插件配置结构']);
+
+        Route::get('/onboarding-channels', [OnboardingController::class, 'channels'])->name('merchantApiOnboardingChannels')->setParams(['real_name' => '在线签约渠道']);
+        Route::post('/onboarding-channels/{id}/card-bin', [OnboardingController::class, 'cardBin'])->name('merchantApiOnboardingChannelsCardBin')->setParams(['real_name' => '在线签约渠道卡 BIN 查询']);
+        Route::group('/onboarding-applications', function () {
+            Route::get('', [OnboardingController::class, 'index'])->name('merchantApiOnboardingApplicationsIndex')->setParams(['real_name' => '进件申请列表']);
+            Route::post('', [OnboardingController::class, 'store'])->name('merchantApiOnboardingApplicationsStore')->setParams(['real_name' => '创建进件申请']);
+            Route::get('/{id}', [OnboardingController::class, 'show'])->name('merchantApiOnboardingApplicationsShow')->setParams(['real_name' => '进件申请详情']);
+            Route::post('/{id}/submit', [OnboardingController::class, 'submit'])->name('merchantApiOnboardingApplicationsSubmit')->setParams(['real_name' => '提交进件申请']);
+            Route::post('/{id}/query', [OnboardingController::class, 'query'])->name('merchantApiOnboardingApplicationsQuery')->setParams(['real_name' => '查询进件状态']);
+            Route::post('/{id}/cancel', [OnboardingController::class, 'cancel'])->name('merchantApiOnboardingApplicationsCancel')->setParams(['real_name' => '取消进件申请']);
+        });
+
         Route::get('/route-preview', [MerchantPortalController::class, 'routePreview'])->name('merchantApiPortalRoutePreview')->setParams(['real_name' => '路由解析']);
         Route::get('/route-configs', [MerchantPortalController::class, 'routeConfig'])->name('merchantApiPortalRouteConfig')->setParams(['real_name' => '商户路由配置']);
         Route::put('/route-configs', [MerchantPortalController::class, 'updateRouteConfig'])->name('merchantApiPortalRouteConfigUpdate')->setParams(['real_name' => '保存商户路由配置']);

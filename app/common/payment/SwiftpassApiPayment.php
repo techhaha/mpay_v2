@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\swiftpass\SwiftpassClient;
 use app\common\sdk\swiftpass\SwiftpassSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -19,6 +21,18 @@ use support\Response;
  */
 class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_PAY_WEIXIN_JSPAY = 'pay.weixin.jspay';
+    private const PRODUCT_PAY_ALIPAY_JSPAY = 'pay.alipay.jspay';
+    private const PRODUCT_PAY_UNIONPAY_JSPAY = 'pay.unionpay.jspay';
+    private const PRODUCT_PAY_WEIXIN_WAPPAY = 'pay.weixin.wappay';
+    private const PRODUCT_PAY_WEIXIN_NATIVE = 'pay.weixin.native';
+    private const PRODUCT_PAY_ALIPAY_NATIVE = 'pay.alipay.native';
+    private const PRODUCT_PAY_TENPAY_NATIVE = 'pay.tenpay.native';
+    private const PRODUCT_PAY_UNIONPAY_NATIVE = 'pay.unionpay.native';
+    private const PRODUCT_PAY_JDPAY_NATIVE = 'pay.jdpay.native';
+
     private ?SwiftpassClient $client = null;
 
     /**
@@ -29,6 +43,7 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
     protected array $paymentInfo = [
         'code' => 'swiftpass_api',
         'name' => '威富通RSA支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.swiftpass.cn/',
         'version' => '1.0.0',
@@ -51,6 +66,17 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
             ['type' => 'textarea', 'field' => 'rsa_private_key', 'title' => '商户RSA私钥', 'value' => '', 'validate' => [['required' => true, 'message' => '商户RSA私钥不能为空']]],
             ['type' => 'textarea', 'field' => 'rsa_public_key', 'title' => '平台RSA公钥', 'value' => '', 'validate' => [['required' => true, 'message' => '平台RSA公钥不能为空']]],
             ['type' => 'input', 'field' => 'gateway_url', 'title' => '自定义网关', 'value' => '', 'props' => ['placeholder' => '留空使用威富通默认网关']],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_PAY_WEIXIN_JSPAY => '微信 JSAPI',
+                self::PRODUCT_PAY_ALIPAY_JSPAY => '支付宝 JSAPI',
+                self::PRODUCT_PAY_UNIONPAY_JSPAY => '银联 JSAPI',
+                self::PRODUCT_PAY_WEIXIN_WAPPAY => '微信 H5',
+                self::PRODUCT_PAY_WEIXIN_NATIVE => '微信扫码',
+                self::PRODUCT_PAY_ALIPAY_NATIVE => '支付宝扫码',
+                self::PRODUCT_PAY_TENPAY_NATIVE => 'QQ 扫码',
+                self::PRODUCT_PAY_UNIONPAY_NATIVE => '银联扫码',
+                self::PRODUCT_PAY_JDPAY_NATIVE => '京东扫码',
+            ]),
         ];
     }
 
@@ -63,14 +89,57 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
-        if ($payType === 'wxpay' && $method === 'h5') {
-            return $this->wxH5Pay($order);
-        }
 
+        return $this->executeDirectPaymentProduct($order, [
+
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_PAY_ALIPAY_JSPAY,
+                    'wxpay' => self::PRODUCT_PAY_WEIXIN_JSPAY,
+                    'bank' => self::PRODUCT_PAY_UNIONPAY_JSPAY,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+            'h5' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_PAY_WEIXIN_WAPPAY,
+                ],
+                'handler' => fn (): array => $payType === 'wxpay'
+                    ? $this->wxH5Pay($order)
+                    : throw new PaymentException('威富通当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'jump' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_PAY_WEIXIN_WAPPAY,
+                ],
+                'handler' => fn (): array => $payType === 'wxpay'
+                ? $this->wxH5Pay($order)
+                : throw new PaymentException('威富通当前支付方式不支持跳转产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_PAY_ALIPAY_NATIVE,
+                    'wxpay' => self::PRODUCT_PAY_WEIXIN_NATIVE,
+                    'qqpay' => self::PRODUCT_PAY_TENPAY_NATIVE,
+                    'bank' => self::PRODUCT_PAY_UNIONPAY_NATIVE,
+                    'jdpay' => self::PRODUCT_PAY_JDPAY_NATIVE,
+                ],
+                'handler' => fn (): array => $this->nativePay($order, $payType),
+            ],
+        ], '威富通');
+    }
+
+    /**
+     * Native 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function nativePay(array $order, string $payType): array
+    {
         $service = match ($payType) {
             'wxpay' => 'pay.weixin.native',
             'qqpay' => 'pay.tenpay.native',
@@ -94,7 +163,7 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
             throw new PaymentException('威富通未返回二维码链接', 40200, ['response' => $data]);
         }
 
-        return $this->payResult('qrcode', $payType, 'native', $service, ['qrcode' => $qrcode, 'raw' => $data], $data, $order);
+        return $this->payResult('qrcode', $payType, $service, $service, ['qrcode' => $qrcode, 'raw' => $data], $data, $order);
     }
 
     /**
@@ -209,9 +278,9 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
         $payload = $this->basePayload($order) + ['service' => $service];
         if ($payType === 'wxpay') {
             $payload['is_raw'] = '1';
-            $payload['is_minipg'] = '0';
+            $payload['is_minipg'] = (string) ($payment['mini_openid'] ?? '') !== '' ? '1' : '0';
             $payload['sub_appid'] = (string) ($payment['sub_appid'] ?? '');
-            $payload['sub_openid'] = (string) ($payment['sub_openid'] ?? '');
+            $payload['sub_openid'] = (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? '');
         } elseif ($payType === 'bank') {
             $payload['user_id'] = (string) ($payment['sub_openid'] ?? '');
         } else {
@@ -225,7 +294,7 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
         }
 
         if ($payType === 'bank') {
-            return $this->payResult('jump', $payType, 'jsapi', $service, ['url' => (string) ($data['pay_url'] ?? ''), 'raw' => $data], $data, $order);
+            return $this->payResult('jump', $payType, $service, $service, ['url' => (string) ($data['pay_url'] ?? ''), 'raw' => $data], $data, $order);
         }
 
         $payInfo = $data['pay_info'] ?? [];
@@ -234,7 +303,7 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
             $payInfo = is_array($decoded) ? $decoded : ['tradeNO' => $payInfo];
         }
 
-        return $this->payResult('jsapi', $payType, 'jsapi', $service, ((array) $payInfo) + ['raw' => $data], $data, $order);
+        return $this->payResult('jsapi', $payType, $service, $service, ((array) $payInfo) + ['raw' => $data], $data, $order);
     }
 
     /**
@@ -257,7 +326,7 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
             throw new PaymentException('威富通微信H5下单失败：' . $e->getMessage(), 40200);
         }
 
-        return $this->payResult('jump', 'wxpay', 'h5', 'pay.weixin.wappay', ['url' => (string) ($data['pay_info'] ?? ''), 'raw' => $data], $data, $order);
+        return $this->payResult('jump', 'wxpay', 'pay.weixin.wappay', 'pay.weixin.wappay', ['url' => (string) ($data['pay_info'] ?? ''), 'raw' => $data], $data, $order);
     }
 
     /**

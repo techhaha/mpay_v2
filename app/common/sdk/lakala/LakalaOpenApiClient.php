@@ -16,6 +16,14 @@ use GuzzleHttp\Exception\GuzzleException;
 class LakalaOpenApiClient
 {
     private const SCHEMA = 'LKLAPI-SHA256withRSA';
+    public const MMS_UPLOAD_PATH = '/api/v2/mms/openApi/uploadFile';
+    public const MMS_SUBMIT_PATH = '/api/v2/mms/openApi/addMer';
+    public const MMS_QUERY_PATH = '/api/v2/mms/openApi/queryContract';
+    public const MMS_VERIFY_PATH = '/api/v2/mms/openApi/verifyContractInfo';
+    public const MMS_RECONSIDER_PATH = '/api/v2/mms/openApi/reconsiderSubmit';
+    public const MMS_CARD_BIN_PATH = '/api/v2/mms/openApi/cardBin';
+    public const MMS_REPLENISH_PATH = '/api/v2/mms/openApi/replenishFile';
+    public const MMS_UPLOAD_MAX_BYTES = 5242880;
 
     /**
      * SDK 配置。
@@ -90,6 +98,29 @@ class LakalaOpenApiClient
             'version' => '1.0',
             'req_data' => $params,
         ], ['000000']);
+    }
+
+    /**
+     * 商户入网接口请求。
+     *
+     * 拉卡拉商户入网类接口使用 MMS 报文结构；reqId 属于公共报文层，不进入 reqData。
+     *
+     * @param string $path 接口路径
+     * @param array<string, mixed> $params reqData 内容
+     * @return array<string, mixed> respData 内容
+     */
+    public function mms(string $path, array $params): array
+    {
+        $reqId = (string) ($params['reqId'] ?? date('YmdHis') . random_int(100000, 999999));
+        unset($params['reqId']);
+
+        // MMS 入网接口使用 reqData 驼峰字段，和聚合支付 req_data 下划线结构不同。
+        return $this->postJson($path, [
+            'ver' => '1.0.0',
+            'timestamp' => (string) (int) floor(microtime(true) * 1000),
+            'reqId' => $reqId,
+            'reqData' => $params,
+        ], ['000000', 'BBS00000', 'BBS10000']);
     }
 
     /**
@@ -177,7 +208,8 @@ class LakalaOpenApiClient
         $code = (string) ($decoded['code'] ?? $decoded['retCode'] ?? '');
         $this->lastCode = $code;
         if (in_array($code, $successCodes, true)) {
-            $data = $decoded['resp_data'] ?? $decoded['respData'] ?? [];
+            // 兼容聚合支付、MMS 入网和个别网关返回的不同数据包裹字段。
+            $data = $decoded['resp_data'] ?? $decoded['respData'] ?? $decoded['data'] ?? $decoded;
             return is_array($data) ? $data : [];
         }
 

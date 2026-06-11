@@ -886,7 +886,7 @@ return [
                 'type' => 'textarea',
                 'field' => 'receipt_watcher_plugin_codes',
                 'title' => '监听插件标识',
-                'value' => "shouqianba_receipt\npostar_receipt\nalipay_bill_receipt\nhaike_maqian_receipt\nlakala_receipt\ntianque_receipt\nfubei_receipt\nyisheng_receipt\nyeepay_boss_receipt",
+                'value' => "shouqianba_receipt\nfubei_receipt\nusdt_trc20_receipt",
                 'props' => [
                     'placeholder' => '请输入支持网页流水监听的插件标识，多个用逗号或换行分隔',
                     'autoSize' => [

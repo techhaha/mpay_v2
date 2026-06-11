@@ -35,6 +35,7 @@ class PaymentChannelValidator extends Validator
         'status' => 'sometimes|integer|in:0,1',
         'sort_no' => 'nullable|integer|min:0',
         'money' => 'sometimes|numeric|min:0.01',
+        'device' => 'sometimes|string|in:auto,pc,mobile,qq,wechat,alipay,jump',
         'page' => 'sometimes|integer|min:1',
         'page_size' => 'sometimes|integer|min:1|max:100',
     ];
@@ -63,6 +64,7 @@ class PaymentChannelValidator extends Validator
         'status' => '通道状态',
         'sort_no' => '排序',
         'money' => '测试金额',
+        'device' => '测试支付环境',
         'page' => '页码',
         'page_size' => '每页条数',
     ];
@@ -79,7 +81,7 @@ class PaymentChannelValidator extends Validator
         'updateStatus' => ['id', 'status'],
         'show' => ['id'],
         'destroy' => ['id'],
-        'test' => ['id', 'name', 'money'],
+        'test' => ['id', 'name', 'money', 'device'],
     ];
 
     /**

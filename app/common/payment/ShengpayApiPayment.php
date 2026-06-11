@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\shengpay\ShengpayClient;
 use app\common\sdk\shengpay\ShengpaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -19,6 +21,17 @@ use support\Response;
  */
 class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_WX_JSAPI = 'wx_jsapi';
+    private const PRODUCT_ALIPAY_JSAPI = 'alipay_jsapi';
+    private const PRODUCT_WX_WAP = 'wx_wap';
+    private const PRODUCT_ALIPAY_WAP = 'alipay_wap';
+    private const PRODUCT_ALIPAY_PC = 'alipay_pc';
+    private const PRODUCT_WX_NATIVE = 'wx_native';
+    private const PRODUCT_ALIPAY_QR = 'alipay_qr';
+    private const PRODUCT_UPACP_QR = 'upacp_qr';
+
     private ?ShengpayClient $client = null;
 
     /**
@@ -29,6 +42,7 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
     protected array $paymentInfo = [
         'code' => 'shengpay_api',
         'name' => '盛付通支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.shengpay.com/',
         'version' => '1.0.0',
@@ -50,6 +64,16 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
             ['type' => 'textarea', 'field' => 'platform_public_key', 'title' => '盛付通公钥', 'value' => '', 'validate' => [['required' => true, 'message' => '盛付通公钥不能为空']]],
             ['type' => 'select', 'field' => 'interface_type', 'title' => '收单接口类型', 'value' => 'online', 'options' => [['label' => '线上', 'value' => 'online'], ['label' => '线下', 'value' => 'offline']]],
             ['type' => 'input', 'field' => 'sub_mch_id', 'title' => '子商户号', 'value' => ''],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_WX_JSAPI => '微信 JSAPI',
+                self::PRODUCT_ALIPAY_JSAPI => '支付宝 JSAPI',
+                self::PRODUCT_WX_WAP => '微信 H5',
+                self::PRODUCT_ALIPAY_WAP => '支付宝 H5',
+                self::PRODUCT_ALIPAY_PC => '支付宝电脑网站',
+                self::PRODUCT_WX_NATIVE => '微信扫码',
+                self::PRODUCT_ALIPAY_QR => '支付宝扫码',
+                self::PRODUCT_UPACP_QR => '银联扫码',
+            ]),
         ];
     }
 
@@ -61,18 +85,74 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
      */
     public function pay(array $order): array
     {
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
-
         $payType = (string) $order['pay_type_code'];
-        $tradeType = match ($payType) {
-            'wxpay' => $method === 'h5' ? 'wx_wap' : 'wx_native',
-            'bank' => 'upacp_qr',
-            default => $method === 'h5' ? 'alipay_wap' : ($method === 'web' ? 'alipay_pc' : 'alipay_qr'),
-        };
 
+        return $this->executeDirectPaymentProduct($order, [
+
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_JSAPI,
+                    'wxpay' => self::PRODUCT_WX_JSAPI,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_WAP,
+                    'wxpay' => self::PRODUCT_WX_WAP,
+                ],
+                'handler' => fn (): array => match ($payType) {
+                    'wxpay' => $this->tradePay($order, 'wx_wap'),
+                    'alipay' => $this->tradePay($order, 'alipay_wap'),
+                    default => throw new PaymentException('盛付通当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                },
+            ],
+
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_WAP,
+                    'wxpay' => self::PRODUCT_WX_WAP,
+                ],
+                'handler' => fn (): array => match ($payType) {
+                    'wxpay' => $this->tradePay($order, 'wx_wap'),
+                    'alipay' => $this->tradePay($order, 'alipay_wap'),
+                    default => throw new PaymentException('盛付通当前支付方式不支持跳转产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                },
+            ],
+
+            'web' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_PC,
+                ],
+                'handler' => fn (): array => $payType === 'alipay'
+                ? $this->tradePay($order, 'alipay_pc')
+                : throw new PaymentException('盛付通当前支付方式不支持网页产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_QR,
+                    'wxpay' => self::PRODUCT_WX_NATIVE,
+                    'bank' => self::PRODUCT_UPACP_QR,
+                ],
+                'handler' => fn (): array => $this->tradePay($order, match ($payType) {
+                    'wxpay' => 'wx_native',
+                    'bank' => 'upacp_qr',
+                    default => 'alipay_qr',
+                }),
+            ],
+        ], '盛付通');
+    }
+
+    /**
+     * 按盛付通 tradeType 下单。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $tradeType 盛付通支付产品
+     * @return array<string, mixed>
+     */
+    private function tradePay(array $order, string $tradeType): array
+    {
         try {
             $data = $this->client()->execute($this->orderPath(), $this->basePayload($order) + [
                 'tradeType' => $tradeType,

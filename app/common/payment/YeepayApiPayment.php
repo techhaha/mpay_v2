@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\yeepay\YeepaySdkException;
 use app\common\sdk\yeepay\YeepayYopClient;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -22,6 +24,8 @@ use support\Response;
  */
 class YeepayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
     private const PRODUCT_ALIPAY_SCAN = 'alipay_scan';
     private const PRODUCT_ALIPAY_JSAPI = 'alipay_jsapi';
     private const PRODUCT_WXPAY_SCAN = 'wxpay_scan';
@@ -39,6 +43,7 @@ class YeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'yeepay_api',
         'name' => '易宝聚合支付',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'wxpay', 'bank'],
@@ -110,7 +115,7 @@ class YeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                     ['label' => '支付宝扫码', 'value' => self::PRODUCT_ALIPAY_SCAN],
                     ['label' => '支付宝JSAPI', 'value' => self::PRODUCT_ALIPAY_JSAPI],
                     ['label' => '微信扫码', 'value' => self::PRODUCT_WXPAY_SCAN],
-                    ['label' => '微信JSAPI', 'value' => self::PRODUCT_WXPAY_JSAPI],
+                    ['label' => '微信JSAPI/小程序', 'value' => self::PRODUCT_WXPAY_JSAPI],
                     ['label' => '微信托管H5', 'value' => self::PRODUCT_WXPAY_H5],
                     ['label' => '云闪付扫码', 'value' => self::PRODUCT_BANK_SCAN],
                 ],
@@ -139,25 +144,53 @@ class YeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
 
-        if ($payType === 'alipay' && $method === 'jsapi') {
-            return $this->jsapiPay($order, self::PRODUCT_ALIPAY_JSAPI, 'ALIPAY_LIFE', 'ALIPAY');
-        }
-        if ($payType === 'wxpay' && $method === 'jsapi') {
-            return $this->jsapiPay($order, self::PRODUCT_WXPAY_JSAPI, 'WECHAT_OFFIACCOUNT', 'WECHAT');
-        }
-        if ($payType === 'wxpay' && $method === 'h5') {
-            return $this->tutelagePay($order);
-        }
-        if ($payType === 'bank') {
-            return $this->scanPay($order, self::PRODUCT_BANK_SCAN, 'USER_SCAN', 'UNIONPAY');
-        }
-        if ($payType === 'wxpay') {
-            return $this->scanPay($order, self::PRODUCT_WXPAY_SCAN, 'USER_SCAN', 'WECHAT');
-        }
+        return $this->executeDirectPaymentProduct($order, [
+            'jsapi' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_JSAPI, 'wxpay' => self::PRODUCT_WXPAY_JSAPI],
+                'handler' => function () use ($order, $payType): array {
+                    return match ($payType) {
+                        'alipay' => $this->jsapiPay($order, self::PRODUCT_ALIPAY_JSAPI, 'ALIPAY_LIFE', 'ALIPAY'),
+                        'wxpay' => $this->jsapiPay($order, self::PRODUCT_WXPAY_JSAPI, $this->wxpayJsapiPayWay($order), 'WECHAT'),
+                    };
+                },
+            ],
+            'h5' => [
+                'products' => ['wxpay' => self::PRODUCT_WXPAY_H5],
 
-        return $this->scanPay($order, self::PRODUCT_ALIPAY_SCAN, 'USER_SCAN', 'ALIPAY');
+                'handler' => fn (): array => $this->tutelagePay($order),
+            ],
+            'jump' => [
+                'products' => ['wxpay' => self::PRODUCT_WXPAY_H5],
+
+                'handler' => fn (): array => $this->tutelagePay($order),
+            ],
+            'qrcode' => [
+                'products' => [
+                    'bank' => self::PRODUCT_BANK_SCAN,
+                    'wxpay' => self::PRODUCT_WXPAY_SCAN,
+                    'alipay' => self::PRODUCT_ALIPAY_SCAN,
+                ],
+
+                'handler' => fn (): array => $this->scanPayByType($order, $payType),
+            ],
+        ], '易宝');
+    }
+
+    /**
+     * 按支付方式选择易宝扫码产品。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function scanPayByType(array $order, string $payType): array
+    {
+        return match ($payType) {
+            'bank' => $this->scanPay($order, self::PRODUCT_BANK_SCAN, 'USER_SCAN', 'UNIONPAY'),
+            'wxpay' => $this->scanPay($order, self::PRODUCT_WXPAY_SCAN, 'USER_SCAN', 'WECHAT'),
+            default => $this->scanPay($order, self::PRODUCT_ALIPAY_SCAN, 'USER_SCAN', 'ALIPAY'),
+        };
     }
 
     /**
@@ -312,7 +345,7 @@ class YeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     private function jsapiPay(array $order, string $product, string $payWay, string $channel): array
     {
         $payment = (array) ($order['extra']['payment'] ?? []);
-        $userId = (string) ($payment['buyer_id'] ?? $payment['openid'] ?? $payment['sub_openid'] ?? '');
+        $userId = (string) ($payment['buyer_id'] ?? $payment['mini_openid'] ?? $payment['openid'] ?? $payment['sub_openid'] ?? '');
         if ($userId === '') {
             throw new PaymentException('易宝JSAPI支付缺少用户标识', 40200);
         }
@@ -412,6 +445,18 @@ class YeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         }
 
         return $data;
+    }
+
+    /**
+     * 微信 JSAPI 与小程序共用一个已开通产品，按本次订单身份选择易宝 payWay。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     */
+    private function wxpayJsapiPayWay(array $order): string
+    {
+        $payment = (array) ($order['extra']['payment'] ?? []);
+
+        return (string) ($payment['mini_openid'] ?? '') !== '' ? 'MINI_PROGRAM' : 'WECHAT_OFFIACCOUNT';
     }
 
     /**

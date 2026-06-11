@@ -267,6 +267,7 @@ class PayOrderRepository extends BaseRepository
                 'po.request_at',
                 'po.expire_at',
                 'po.created_at',
+                'po.ext_json',
                 'c.plugin_code',
                 'c.api_config_id',
                 't.code as pay_type',
@@ -377,5 +378,4 @@ class PayOrderRepository extends BaseRepository
             ->get($columns);
     }
 }
-
 

@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\kuaiqian\KuaiqianClient;
 use app\common\sdk\kuaiqian\KuaiqianSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -21,6 +23,15 @@ use support\Response;
  */
 class KuaiqianApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_CODE_27_3 = '27-3';
+    private const PRODUCT_CODE_21 = '21';
+    private const PRODUCT_CODE_26_1 = '26-1';
+    private const PRODUCT_CODE_26_2 = '26-2';
+    private const PRODUCT_CODE_00 = '00';
+    private const PRODUCT_CODE_10 = '10';
+
     private const BANK_GATEWAY = 'https://www.99bill.com/gateway/recvMerchantInfoAction.htm';
     private const MOBILE_GATEWAY = 'https://www.99bill.com/mobilegateway/recvMerchantInfoAction.htm';
 
@@ -34,6 +45,7 @@ class KuaiqianApiPayment extends BasePayment implements PaymentInterface, PayPlu
     protected array $paymentInfo = [
         'code' => 'kuaiqian_api',
         'name' => '快钱支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.99bill.com/',
         'version' => '1.0.0',
@@ -56,6 +68,14 @@ class KuaiqianApiPayment extends BasePayment implements PaymentInterface, PayPlu
             ['type' => 'input', 'field' => 'merchant_key_path', 'title' => '商户PFX证书路径', 'value' => ''],
             ['type' => 'input', 'field' => 'sub_account_id', 'title' => '服务商子账户号', 'value' => ''],
             ['type' => 'switch', 'field' => 'own_channel', 'title' => '自有渠道', 'value' => false],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_CODE_27_3 => '支付宝移动支付',
+                self::PRODUCT_CODE_21 => '支付宝电脑网站支付',
+                self::PRODUCT_CODE_26_1 => '微信 JSAPI',
+                self::PRODUCT_CODE_26_2 => '微信扫码/H5',
+                self::PRODUCT_CODE_00 => '移动网关支付',
+                self::PRODUCT_CODE_10 => '银行卡网关支付',
+            ]),
         ];
     }
 
@@ -67,10 +87,65 @@ class KuaiqianApiPayment extends BasePayment implements PaymentInterface, PayPlu
      */
     public function pay(array $order): array
     {
-        $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        $mobile = in_array((string) ($order['_env'] ?? ''), ['mobile', 'wechat', 'alipay'], true) || $method !== '';
+        return $this->executeDirectPaymentProduct($order, [
 
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_27_3,
+                    'wxpay' => self::PRODUCT_CODE_26_1,
+                    'bank' => self::PRODUCT_CODE_00,
+                ],
+                'handler' => fn (): array => $this->formPay($order, 'jsapi', true),
+            ],
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_27_3,
+                    'wxpay' => self::PRODUCT_CODE_26_2,
+                    'bank' => self::PRODUCT_CODE_00,
+                ],
+                'handler' => fn (): array => $this->formPay($order, 'h5', true),
+            ],
+
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_27_3,
+                    'wxpay' => self::PRODUCT_CODE_26_2,
+                    'bank' => self::PRODUCT_CODE_00,
+                ],
+                'handler' => fn (): array => $this->formPay($order, 'h5', true),
+            ],
+
+            'web' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_21,
+                    'wxpay' => self::PRODUCT_CODE_26_2,
+                    'bank' => self::PRODUCT_CODE_10,
+                ],
+                'handler' => fn (): array => $this->formPay($order, 'web', false),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_21,
+                    'wxpay' => self::PRODUCT_CODE_26_2,
+                    'bank' => self::PRODUCT_CODE_10,
+                ],
+                'handler' => fn (): array => $this->formPay($order, '', false),
+            ],
+        ], '快钱');
+    }
+
+    /**
+     * 构建快钱表单支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $method 支付产品提示
+     * @param bool $mobile 是否使用手机网关
+     * @return array<string, mixed>
+     */
+    private function formPay(array $order, string $method, bool $mobile): array
+    {
+        $payType = (string) $order['pay_type_code'];
         $url = $mobile ? self::MOBILE_GATEWAY : self::BANK_GATEWAY;
         $payTypeCode = $this->payTypeCode($payType, $method, $mobile);
         $params = [

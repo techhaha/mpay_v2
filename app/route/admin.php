@@ -7,6 +7,7 @@ use app\http\admin\controller\account\MerchantAccountLedgerController;
 use app\http\admin\controller\account\MerchantFundFreezeController;
 use app\http\admin\controller\file\FileRecordController;
 use app\http\admin\controller\merchant\MerchantApiCredentialController;
+use app\http\admin\controller\merchant\MerchantChannelOnboardingController;
 use app\http\admin\controller\merchant\MerchantController;
 use app\http\admin\controller\merchant\MerchantGroupController;
 use app\http\admin\controller\merchant\MerchantPolicyController;
@@ -16,6 +17,7 @@ use app\http\admin\controller\ops\ChannelNotifyLogController;
 use app\http\admin\controller\ops\MerchantNotifyTaskController;
 use app\http\admin\controller\ops\PayCallbackLogController;
 use app\http\admin\controller\payment\PaymentChannelController;
+use app\http\admin\controller\payment\PaymentOnboardingConfigController;
 use app\http\admin\controller\payment\PaymentPluginConfController;
 use app\http\admin\controller\payment\PaymentPluginController;
 use app\http\admin\controller\payment\PaymentPollGroupBindController;
@@ -160,6 +162,18 @@ Route::group('/adminapi', function () {
             Route::delete('/{merchantId}', [MerchantPolicyController::class, 'destroy'])->name('adminApiMerchantPoliciesDestroy')->setParams(['real_name' => '删除商户策略']);
         });
 
+        Route::group('/merchant-channel-onboardings', function () {
+            Route::get('', [MerchantChannelOnboardingController::class, 'index'])->name('adminApiMerchantChannelOnboardingsIndex')->setParams(['real_name' => '商户进件列表']);
+            Route::post('', [MerchantChannelOnboardingController::class, 'store'])->name('adminApiMerchantChannelOnboardingsStore')->setParams(['real_name' => '后台手动进件']);
+            Route::get('/{id}', [MerchantChannelOnboardingController::class, 'show'])->name('adminApiMerchantChannelOnboardingsShow')->setParams(['real_name' => '商户进件详情']);
+            Route::post('/{id}/review', [MerchantChannelOnboardingController::class, 'review'])->name('adminApiMerchantChannelOnboardingsReview')->setParams(['real_name' => '审核商户进件']);
+            Route::post('/{id}/submit', [MerchantChannelOnboardingController::class, 'submit'])->name('adminApiMerchantChannelOnboardingsSubmit')->setParams(['real_name' => '提交上游进件']);
+            Route::post('/{id}/query', [MerchantChannelOnboardingController::class, 'query'])->name('adminApiMerchantChannelOnboardingsQuery')->setParams(['real_name' => '查询上游进件']);
+            Route::post('/{id}/reconsider', [MerchantChannelOnboardingController::class, 'reconsider'])->name('adminApiMerchantChannelOnboardingsReconsider')->setParams(['real_name' => '提交进件复议']);
+            Route::post('/{id}/manual-bind', [MerchantChannelOnboardingController::class, 'manualBind'])->name('adminApiMerchantChannelOnboardingsManualBind')->setParams(['real_name' => '手动绑定进件结果']);
+            Route::post('/{id}/cancel', [MerchantChannelOnboardingController::class, 'cancel'])->name('adminApiMerchantChannelOnboardingsCancel')->setParams(['real_name' => '取消商户进件']);
+        });
+
         // 支付配置
         Route::group('/payment-types', function () {
             Route::get('', [PaymentTypeController::class, 'index'])->name('adminApiPaymentTypesIndex')->setParams(['real_name' => '支付方式列表']);
@@ -175,7 +189,9 @@ Route::group('/adminapi', function () {
             Route::get('/options', [PaymentPluginController::class, 'options'])->name('adminApiPaymentPluginsOptions')->setParams(['real_name' => '支付插件选项']);
             Route::get('/select-options', [PaymentPluginController::class, 'selectOptions'])->name('adminApiPaymentPluginsSelectOptions')->setParams(['real_name' => '支付插件选择项']);
             Route::get('/channel-options', [PaymentPluginController::class, 'channelOptions'])->name('adminApiPaymentPluginsChannelOptions')->setParams(['real_name' => '支付插件通道选项']);
+            Route::get('/onboarding-options', [PaymentPluginController::class, 'onboardingOptions'])->name('adminApiPaymentPluginsOnboardingOptions')->setParams(['real_name' => '支付插件进件选项']);
             Route::post('/refresh', [PaymentPluginController::class, 'refresh'])->name('adminApiPaymentPluginsRefresh')->setParams(['real_name' => '刷新支付插件']);
+            Route::get('/{code}/onboarding-schema', [PaymentPluginController::class, 'onboardingSchema'])->name('adminApiPaymentPluginsOnboardingSchema')->setParams(['real_name' => '支付插件进件结构']);
             Route::get('/{code}/schema', [PaymentPluginController::class, 'schema'])->name('adminApiPaymentPluginsSchema')->setParams(['real_name' => '支付插件配置结构']);
             Route::get('/{code}', [PaymentPluginController::class, 'show'])->name('adminApiPaymentPluginsShow')->setParams(['real_name' => '支付插件详情']);
             Route::put('/{code}', [PaymentPluginController::class, 'update'])->name('adminApiPaymentPluginsUpdate')->setParams(['real_name' => '更新支付插件']);
@@ -189,6 +205,15 @@ Route::group('/adminapi', function () {
             Route::get('/{id}', [PaymentPluginConfController::class, 'show'])->name('adminApiPaymentPluginConfsShow')->setParams(['real_name' => '支付插件配置详情']);
             Route::put('/{id}', [PaymentPluginConfController::class, 'update'])->name('adminApiPaymentPluginConfsUpdate')->setParams(['real_name' => '更新支付插件配置']);
             Route::delete('/{id}', [PaymentPluginConfController::class, 'destroy'])->name('adminApiPaymentPluginConfsDestroy')->setParams(['real_name' => '删除支付插件配置']);
+        });
+
+        Route::group('/payment-onboarding-configs', function () {
+            Route::get('', [PaymentOnboardingConfigController::class, 'index'])->name('adminApiPaymentOnboardingConfigsIndex')->setParams(['real_name' => '进件配置列表']);
+            Route::post('', [PaymentOnboardingConfigController::class, 'store'])->name('adminApiPaymentOnboardingConfigsStore')->setParams(['real_name' => '新增进件配置']);
+            Route::post('/{id}/card-bin', [PaymentOnboardingConfigController::class, 'cardBin'])->name('adminApiPaymentOnboardingConfigsCardBin')->setParams(['real_name' => '进件配置卡 BIN 查询']);
+            Route::get('/{id}', [PaymentOnboardingConfigController::class, 'show'])->name('adminApiPaymentOnboardingConfigsShow')->setParams(['real_name' => '进件配置详情']);
+            Route::put('/{id}', [PaymentOnboardingConfigController::class, 'update'])->name('adminApiPaymentOnboardingConfigsUpdate')->setParams(['real_name' => '更新进件配置']);
+            Route::delete('/{id}', [PaymentOnboardingConfigController::class, 'destroy'])->name('adminApiPaymentOnboardingConfigsDestroy')->setParams(['real_name' => '删除进件配置']);
         });
 
         Route::group('/payment-channels', function () {

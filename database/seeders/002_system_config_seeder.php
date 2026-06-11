@@ -94,7 +94,7 @@ return new class {
             'receipt_watcher_license_code' => '',
             'receipt_watcher_order_scan_batch_size' => '500',
             'receipt_watcher_order_scan_interval_seconds' => '3',
-            'receipt_watcher_plugin_codes' => "shouqianba_receipt\npostar_receipt\nalipay_bill_receipt\nhaike_maqian_receipt\nlakala_receipt\ntianque_receipt\nfubei_receipt\nyisheng_receipt\nyeepay_boss_receipt",
+            'receipt_watcher_plugin_codes' => "shouqianba_receipt\nfubei_receipt\nusdt_trc20_receipt",
         ],
         'storage' => [
             'file_storage_aliyun_oss_access_key_id' => '',

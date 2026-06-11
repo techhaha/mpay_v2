@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\yseqt\YseqtClient;
 use app\common\sdk\yseqt\YseqtSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,16 @@ use support\Response;
  */
 class YseqtApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_CODE_26 = '26';
+    private const PRODUCT_CODE_28 = '28';
+    private const PRODUCT_CODE_30 = '30';
+    private const PRODUCT_CODE_29H5 = '29h5';
+    private const PRODUCT_CODE_29_URL_SCHEME = '29UrlScheme';
+    private const PRODUCT_CODE_1903000 = '1903000';
+    private const PRODUCT_CODE_9001002 = '9001002';
+
     private ?YseqtClient $client = null;
 
     /**
@@ -30,6 +42,7 @@ class YseqtApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     protected array $paymentInfo = [
         'code' => 'yseqt_api',
         'name' => '银盛e企通支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.ysepay.com/',
         'version' => '1.0.0',
@@ -52,6 +65,15 @@ class YseqtApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             ['type' => 'input', 'field' => 'platform_cert_path', 'title' => '银盛公钥证书路径', 'value' => ''],
             ['type' => 'input', 'field' => 'private_cert_path', 'title' => '商户PFX证书路径', 'value' => ''],
             ['type' => 'input', 'field' => 'gateway_url', 'title' => '自定义网关', 'value' => ''],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_CODE_26 => '支付宝 JSAPI',
+                self::PRODUCT_CODE_28 => '微信 JSAPI',
+                self::PRODUCT_CODE_30 => '银联 JSAPI',
+                self::PRODUCT_CODE_29H5 => '微信 H5',
+                self::PRODUCT_CODE_29_URL_SCHEME => '微信 URL Scheme',
+                self::PRODUCT_CODE_1903000 => '支付宝扫码',
+                self::PRODUCT_CODE_9001002 => '银联扫码',
+            ]),
         ];
     }
 
@@ -64,12 +86,65 @@ class YseqtApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+
+        return $this->executeDirectPaymentProduct($order, [
+
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_26,
+                    'wxpay' => self::PRODUCT_CODE_28,
+                    'bank' => self::PRODUCT_CODE_30,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+            'h5' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_CODE_29H5,
+                ],
+                'handler' => fn (): array => $payType === 'wxpay'
+                    ? $this->wxCashierPay($order, '29h5')
+                    : throw new PaymentException('银盛e企通当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'jump' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_CODE_29H5,
+                ],
+                'handler' => fn (): array => $payType === 'wxpay'
+                ? $this->wxCashierPay($order, '29h5')
+                : throw new PaymentException('银盛e企通当前支付方式不支持跳转产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'urlscheme' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_CODE_29_URL_SCHEME,
+                ],
+                'handler' => fn (): array => $payType === 'wxpay'
+                ? $this->wxCashierPay($order, '29UrlScheme')
+                : throw new PaymentException('银盛e企通当前支付方式不支持URL Scheme产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_1903000,
+                    'bank' => self::PRODUCT_CODE_9001002,
+                ],
+                'handler' => fn (): array => $this->scanPay($order, $payType),
+            ],
+        ], '银盛e企通');
+    }
+
+    /**
+     * 扫码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function scanPay(array $order, string $payType): array
+    {
         if ($payType === 'wxpay') {
-            return $this->wxCashierPay($order, $method === 'urlscheme' ? '29UrlScheme' : '29h5');
+            throw new PaymentException('银盛e企通当前支付方式不支持微信扫码产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']);
         }
 
         $bankType = $payType === 'bank' ? '9001002' : '1903000';

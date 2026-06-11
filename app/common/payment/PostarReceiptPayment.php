@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\interface\ChannelNotifyPayloadInterface;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
@@ -31,6 +32,7 @@ class PostarReceiptPayment extends BasePayment implements PaymentInterface, PayP
     protected array $paymentInfo = [
         'code' => 'postar_receipt',
         'name' => '星驿付收款单收款',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_BACKEND,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'wxpay', 'unionpay'],

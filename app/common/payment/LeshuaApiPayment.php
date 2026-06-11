@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\leshua\LeshuaClient;
 use app\common\sdk\leshua\LeshuaSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -19,6 +21,15 @@ use support\Response;
  */
 class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_UPLOAD_AUTHCODE = 'upload_authcode';
+    private const PRODUCT_ZFBZF_JSAPI = 'ZFBZF_JSAPI';
+    private const PRODUCT_WXZF_JSAPI = 'WXZF_JSAPI';
+    private const PRODUCT_ZFBZF = 'ZFBZF';
+    private const PRODUCT_WXZF = 'WXZF';
+    private const PRODUCT_UPSMZF = 'UPSMZF';
+
     private ?LeshuaClient $client = null;
 
     /**
@@ -29,6 +40,7 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'leshua_api',
         'name' => '乐刷聚合支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'http://www.leshuazf.com/',
         'version' => '1.0.0',
@@ -48,6 +60,14 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             ['type' => 'input', 'field' => 'merchant_id', 'title' => '商户号', 'value' => '', 'validate' => [['required' => true, 'message' => '商户号不能为空']]],
             ['type' => 'password', 'field' => 'trade_key', 'title' => '交易密钥', 'value' => '', 'validate' => [['required' => true, 'message' => '交易密钥不能为空']]],
             ['type' => 'password', 'field' => 'notify_key', 'title' => '异步通知密钥', 'value' => '', 'validate' => [['required' => true, 'message' => '异步通知密钥不能为空']]],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_UPLOAD_AUTHCODE => '付款码支付',
+                self::PRODUCT_ZFBZF_JSAPI => '支付宝 JSAPI',
+                self::PRODUCT_WXZF_JSAPI => '微信 JSAPI',
+                self::PRODUCT_ZFBZF => '支付宝扫码',
+                self::PRODUCT_WXZF => '微信扫码',
+                self::PRODUCT_UPSMZF => '银联扫码',
+            ]),
         ];
     }
 
@@ -59,14 +79,44 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     public function pay(array $order): array
     {
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'scan') {
-            return $this->scanPay($order);
-        }
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
 
+            'auth_code' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_UPLOAD_AUTHCODE,
+                    'wxpay' => self::PRODUCT_UPLOAD_AUTHCODE,
+                    'bank' => self::PRODUCT_UPLOAD_AUTHCODE,
+                ],
+                'handler' => fn (): array => $this->scanPay($order),
+            ],
+
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ZFBZF_JSAPI,
+                    'wxpay' => self::PRODUCT_WXZF_JSAPI,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ZFBZF,
+                    'wxpay' => self::PRODUCT_WXZF,
+                    'bank' => self::PRODUCT_UPSMZF,
+                ],
+                'handler' => fn (): array => $this->qrcodePay($order),
+            ],
+        ], '乐刷');
+    }
+
+    /**
+     * 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function qrcodePay(array $order): array
+    {
         $payType = (string) $order['pay_type_code'];
         $payWay = match ($payType) {
             'wxpay' => 'WXZF',
@@ -198,7 +248,7 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             'service' => 'get_tdcode',
             'jspay_flag' => $payType === 'wxpay' ? '1' : '1',
             'pay_way' => $payWay,
-            'sub_openid' => (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
+            'sub_openid' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
             'appid' => (string) ($payment['sub_appid'] ?? ''),
         ];
 
@@ -214,7 +264,7 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             $payInfo = is_array($decoded) ? $decoded : ['tradeNO' => $payInfo];
         }
 
-        return $this->payResult('jsapi', $payType, 'jsapi', 'get_tdcode', ((array) $payInfo) + ['raw' => $data], $data, $order);
+        return $this->payResult('jsapi', $payType, $payWay . '_JSAPI', 'get_tdcode', ((array) $payInfo) + ['raw' => $data], $data, $order);
     }
 
     /**
@@ -234,7 +284,7 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             throw new PaymentException('乐刷付款码下单失败：' . $e->getMessage(), 40200);
         }
 
-        return $this->payResult('ok', (string) $order['pay_type_code'], 'scan', 'upload_authcode', ['raw' => $data], $data, $order);
+        return $this->payResult('ok', (string) $order['pay_type_code'], 'upload_authcode', 'upload_authcode', ['raw' => $data], $data, $order);
     }
 
     /**

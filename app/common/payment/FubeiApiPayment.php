@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\fubei\FubeiClient;
 use app\common\sdk\fubei\FubeiSdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -23,6 +25,8 @@ use support\Response;
  */
 class FubeiApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
     private const PRODUCT_ALIPAY_H5 = 'alipay_h5';
     private const PRODUCT_ALIPAY_JSAPI = 'alipay_jsapi';
     private const PRODUCT_WXPAY_JSAPI = 'wxpay_jsapi';
@@ -38,6 +42,7 @@ class FubeiApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     protected array $paymentInfo = [
         'code' => 'fubei_api',
         'name' => '付呗开放接口支付',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'wxpay', 'bank'],
@@ -125,19 +130,38 @@ class FubeiApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
 
-        if ($payType === 'wxpay') {
-            return $this->jsapiPay($order, self::PRODUCT_WXPAY_JSAPI, 'wxpay');
-        }
-        if ($payType === 'bank') {
-            return $this->createOrder($order, self::PRODUCT_BANK_SCAN, 'unionpay');
-        }
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order, self::PRODUCT_ALIPAY_JSAPI, 'alipay');
-        }
+        return $this->executeDirectPaymentProduct($order, [
+            'jsapi' => [
+                'products' => ['wxpay' => self::PRODUCT_WXPAY_JSAPI, 'alipay' => self::PRODUCT_ALIPAY_JSAPI],
+                'handler' => function () use ($order, $payType): array {
+                    return match ($payType) {
+                        'wxpay' => $this->jsapiPay($order, self::PRODUCT_WXPAY_JSAPI, 'wxpay'),
+                        'alipay' => $this->jsapiPay($order, self::PRODUCT_ALIPAY_JSAPI, 'alipay'),
+                    };
+                },
+            ],
+            'h5' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_H5],
 
-        return $this->alipayH5($order);
+                'handler' => fn (): array => $this->alipayH5($order),
+            ],
+            'jump' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_H5],
+
+                'handler' => fn (): array => $this->alipayH5($order),
+            ],
+            'web' => [
+                'products' => ['alipay' => self::PRODUCT_ALIPAY_H5],
+
+                'handler' => fn (): array => $this->alipayH5($order),
+            ],
+            'qrcode' => [
+                'products' => ['bank' => self::PRODUCT_BANK_SCAN],
+
+                'handler' => fn (): array => $this->createOrder($order, self::PRODUCT_BANK_SCAN, 'unionpay'),
+            ],
+        ], '付呗');
     }
 
     /**

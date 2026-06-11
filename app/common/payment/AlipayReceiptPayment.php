@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\FileConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\ChannelNotifyInterface;
@@ -58,6 +59,7 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
     protected array $paymentInfo = [
         'code' => 'alipay_receipt',
         'name' => '支付宝个人收款监听',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_HANGUP,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay'],

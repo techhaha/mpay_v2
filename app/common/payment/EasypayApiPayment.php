@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\easypay\EasypayClient;
 use app\common\sdk\easypay\EasypaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -19,6 +21,15 @@ use support\Response;
  */
 class EasypayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_ALI_PAY_JSAPI = 'AliPayJsapi';
+    private const PRODUCT_WE_CHAT_JSAPI = 'WeChatJsapi';
+    private const PRODUCT_UNION_PAY_JSAPI = 'UnionPayJsapi';
+    private const PRODUCT_ALI_PAY_NATIVE = 'AliPayNative';
+    private const PRODUCT_WE_CHAT_NATIVE = 'WeChatNative';
+    private const PRODUCT_UNION_PAY_NATIVE = 'UnionPayNative';
+
     private ?EasypayClient $client = null;
 
     /**
@@ -29,6 +40,7 @@ class EasypayApiPayment extends BasePayment implements PaymentInterface, PayPlug
     protected array $paymentInfo = [
         'code' => 'easypay_api',
         'name' => '易生易企通支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.easypay.com.cn/',
         'version' => '1.0.0',
@@ -51,6 +63,14 @@ class EasypayApiPayment extends BasePayment implements PaymentInterface, PayPlug
             ['type' => 'textarea', 'field' => 'platform_public_key', 'title' => '易生公钥', 'value' => '', 'props' => ['rows' => 4], 'validate' => [['required' => true, 'message' => '易生公钥不能为空']]],
             ['type' => 'textarea', 'field' => 'merchant_private_key', 'title' => '商户私钥', 'value' => '', 'props' => ['rows' => 5], 'validate' => [['required' => true, 'message' => '商户私钥不能为空']]],
             ['type' => 'switch', 'field' => 'sandbox', 'title' => '测试环境', 'value' => false],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_ALI_PAY_JSAPI => '支付宝 JSAPI',
+                self::PRODUCT_WE_CHAT_JSAPI => '微信 JSAPI',
+                self::PRODUCT_UNION_PAY_JSAPI => '银联 JSAPI',
+                self::PRODUCT_ALI_PAY_NATIVE => '支付宝扫码',
+                self::PRODUCT_WE_CHAT_NATIVE => '微信扫码',
+                self::PRODUCT_UNION_PAY_NATIVE => '银联扫码',
+            ]),
         ];
     }
 
@@ -62,12 +82,37 @@ class EasypayApiPayment extends BasePayment implements PaymentInterface, PayPlug
      */
     public function pay(array $order): array
     {
-        $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
 
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALI_PAY_JSAPI,
+                    'wxpay' => self::PRODUCT_WE_CHAT_JSAPI,
+                    'bank' => self::PRODUCT_UNION_PAY_JSAPI,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALI_PAY_NATIVE,
+                    'wxpay' => self::PRODUCT_WE_CHAT_NATIVE,
+                    'bank' => self::PRODUCT_UNION_PAY_NATIVE,
+                ],
+                'handler' => fn (): array => $this->scanPay($order),
+            ],
+        ], '易生易企通');
+    }
+
+    /**
+     * 扫码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function scanPay(array $order): array
+    {
+        $payType = (string) $order['pay_type_code'];
         $channelPayType = match ($payType) {
             'wxpay' => 'WeChatNative',
             'bank' => 'UnionPayNative',
@@ -225,7 +270,7 @@ class EasypayApiPayment extends BasePayment implements PaymentInterface, PayPlug
         };
         $payload = $this->tradePayload($order, $channelPayType);
         if ($payType === 'wxpay') {
-            $payload['wxBizParam'] = ['subAppid' => (string) ($payment['sub_appid'] ?? ''), 'subOpenId' => (string) ($payment['sub_openid'] ?? '')];
+            $payload['wxBizParam'] = ['subAppid' => (string) ($payment['sub_appid'] ?? ''), 'subOpenId' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? '')];
         } elseif ($payType === 'bank') {
             $payload['qrBizParam'] = ['userId' => (string) ($payment['sub_openid'] ?? ''), 'transType' => '10', 'areaInfo' => '1561000'];
         } else {

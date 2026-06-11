@@ -23,9 +23,9 @@ return new class {
         sort($files, SORT_STRING);
 
         $statement = $pdo->prepare(
-            'INSERT INTO `ma_payment_plugin` (`code`, `name`, `class_name`, `config_schema`, `pay_types`, `transfer_types`, `version`, `author`, `link`, `status`, `allow_merchant`, `remark`, `created_at`, `updated_at`) ' .
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, "", NOW(), NOW()) ' .
-            'ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `class_name` = VALUES(`class_name`), `config_schema` = VALUES(`config_schema`), ' .
+            'INSERT INTO `ma_payment_plugin` (`code`, `name`, `class_name`, `plugin_type`, `config_schema`, `pay_types`, `transfer_types`, `version`, `author`, `link`, `status`, `allow_merchant`, `remark`, `created_at`, `updated_at`) ' .
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, "", NOW(), NOW()) ' .
+            'ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `class_name` = VALUES(`class_name`), `plugin_type` = VALUES(`plugin_type`), `config_schema` = VALUES(`config_schema`), ' .
             '`pay_types` = VALUES(`pay_types`), `transfer_types` = VALUES(`transfer_types`), `version` = VALUES(`version`), `author` = VALUES(`author`), `link` = VALUES(`link`), `updated_at` = NOW()'
         );
         $count = 0;
@@ -51,6 +51,7 @@ return new class {
                 $code,
                 (string) $plugin->getName(),
                 $shortClassName,
+                (int) $plugin->getPluginType(),
                 json_encode($plugin->getConfigSchema(), JSON_UNESCAPED_UNICODE),
                 json_encode($plugin->getEnabledPayTypes(), JSON_UNESCAPED_UNICODE),
                 json_encode($plugin->getEnabledTransferTypes(), JSON_UNESCAPED_UNICODE),

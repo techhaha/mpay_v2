@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\hnapay\HnapayClient;
 use app\common\sdk\hnapay\HnapaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,13 @@ use support\Response;
  */
 class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_ALIPAY = 'ALIPAY';
+    private const PRODUCT_WECHATPAY = 'WECHATPAY';
+    private const PRODUCT_UNIONPAY = 'UNIONPAY';
+    private const PRODUCT_HNA_ZFB = 'HnaZFB';
+
     private ?HnapayClient $client = null;
 
     /**
@@ -30,6 +39,7 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'hnapay_api',
         'name' => '新生支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.hnapay.com/',
         'version' => '1.0.0',
@@ -51,6 +61,12 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             ['type' => 'textarea', 'field' => 'merchant_private_key', 'title' => '商户私钥', 'value' => '', 'validate' => [['required' => true, 'message' => '商户私钥不能为空']]],
             ['type' => 'input', 'field' => 'merchant_id', 'title' => '报备编号', 'value' => ''],
             ['type' => 'select', 'field' => 'interface_type', 'title' => '接口类型', 'value' => 'scan', 'options' => [['label' => '扫码支付', 'value' => 'scan'], ['label' => '公众号/生活号支付', 'value' => 'jsapi'], ['label' => '支付宝H5', 'value' => 'h5']]],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_ALIPAY => '支付宝扫码/JSAPI',
+                self::PRODUCT_WECHATPAY => '微信扫码/JSAPI',
+                self::PRODUCT_UNIONPAY => '银联扫码/JSAPI',
+                self::PRODUCT_HNA_ZFB => '支付宝 H5',
+            ]),
         ];
     }
 
@@ -62,24 +78,53 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     public function pay(array $order): array
     {
-        $method = (string) ($order['extra']['payment']['method'] ?? $this->configText('interface_type'));
-        if ($method === 'h5' && (string) $order['pay_type_code'] === 'alipay') {
-            $html = $this->client()->h5Html((string) $order['pay_no'], [
-                'tranAmt' => FormatHelper::amount((int) $order['amount']),
-                'payType' => 'HnaZFB',
-                'frontUrl' => (string) $order['return_url'],
-                'notifyUrl' => (string) $order['callback_url'],
-                'orderSubject' => mb_strcut((string) $order['subject'], 0, 127, 'UTF-8'),
-                'merchantId' => json_encode(['02' => $this->configText('merchant_id')], JSON_UNESCAPED_UNICODE),
-                'merUserIp' => (string) $order['client_ip'],
-            ]);
+        return $this->executeDirectPaymentProduct($order, [
 
-            return $this->payResult('html', 'alipay', 'h5', 'multipay/h5', ['html' => $html], [], $order);
-        }
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY,
+                    'wxpay' => self::PRODUCT_WECHATPAY,
+                    'bank' => self::PRODUCT_UNIONPAY,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_HNA_ZFB,
+                ],
+                'handler' => fn (): array => (string) $order['pay_type_code'] === 'alipay'
+                    ? $this->h5Pay($order)
+                    : throw new PaymentException('新生支付当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
 
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_HNA_ZFB,
+                ],
+                'handler' => fn (): array => (string) $order['pay_type_code'] === 'alipay'
+                ? $this->h5Pay($order)
+                : throw new PaymentException('新生支付当前支付方式不支持跳转产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY,
+                    'wxpay' => self::PRODUCT_WECHATPAY,
+                    'bank' => self::PRODUCT_UNIONPAY,
+                ],
+                'handler' => fn (): array => $this->scanPay($order),
+            ],
+        ], '新生支付');
+    }
+
+    /**
+     * 扫码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function scanPay(array $order): array
+    {
         $orgCode = $this->orgCode((string) $order['pay_type_code']);
         try {
             $data = $this->client()->scanPay([
@@ -97,6 +142,27 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         }
 
         return $this->payResult('qrcode', (string) $order['pay_type_code'], $orgCode, 'scanPay', ['qrcode' => (string) ($data['qrCodeUrl'] ?? ''), 'raw' => $data], $data, $order);
+    }
+
+    /**
+     * 支付宝 H5 表单支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function h5Pay(array $order): array
+    {
+        $html = $this->client()->h5Html((string) $order['pay_no'], [
+            'tranAmt' => FormatHelper::amount((int) $order['amount']),
+            'payType' => 'HnaZFB',
+            'frontUrl' => (string) $order['return_url'],
+            'notifyUrl' => (string) $order['callback_url'],
+            'orderSubject' => mb_strcut((string) $order['subject'], 0, 127, 'UTF-8'),
+            'merchantId' => json_encode(['02' => $this->configText('merchant_id')], JSON_UNESCAPED_UNICODE),
+            'merUserIp' => (string) $order['client_ip'],
+        ]);
+
+        return $this->payResult('html', 'alipay', 'HnaZFB', 'multipay/h5', ['html' => $html], [], $order);
     }
 
     /**
@@ -211,7 +277,7 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         ];
         if ($orgCode === 'WECHATPAY') {
             $payload['appId'] = (string) ($payment['sub_appid'] ?? '');
-            $payload['openId'] = (string) ($payment['sub_openid'] ?? '');
+            $payload['openId'] = (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? '');
         } else {
             $payload['aliAppId'] = (string) ($payment['sub_appid'] ?? '');
             $payload['buyerId'] = (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? '');

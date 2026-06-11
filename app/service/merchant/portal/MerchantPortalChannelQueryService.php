@@ -4,6 +4,7 @@ namespace app\service\merchant\portal;
 
 use app\common\base\BaseService;
 use app\common\constant\CommonConstant;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\RouteConstant;
 use app\repository\payment\config\PaymentChannelRepository;
 use app\repository\payment\config\PaymentPollGroupBindRepository;
@@ -50,6 +51,7 @@ class MerchantPortalChannelQueryService extends BaseService
         $query = $this->paymentChannelRepository->query()
             ->from('ma_payment_channel as c')
             ->leftJoin('ma_payment_type as t', 'c.pay_type_id', '=', 't.id')
+            ->leftJoin('ma_payment_plugin as p', 'c.plugin_code', '=', 'p.code')
             ->select([
                 'c.id',
                 'c.merchant_id',
@@ -71,6 +73,7 @@ class MerchantPortalChannelQueryService extends BaseService
             ])
             ->selectRaw("COALESCE(t.code, '') AS pay_type_code")
             ->selectRaw("COALESCE(t.name, '') AS pay_type_name")
+            ->selectRaw('COALESCE(p.plugin_type, 1) AS plugin_type')
             ->where(function ($builder) use ($merchantId, $assignedChannelIds) {
                 $builder->where('c.merchant_id', $merchantId);
                 if ($assignedChannelIds !== []) {
@@ -100,6 +103,11 @@ class MerchantPortalChannelQueryService extends BaseService
         $channelMode = trim((string) ($filters['channel_mode'] ?? ''));
         if ($channelMode !== '') {
             $query->where('c.channel_mode', (int) $channelMode);
+        }
+
+        $pluginType = (int) ($filters['plugin_type'] ?? 0);
+        if (PaymentPluginTypeConstant::isValid($pluginType)) {
+            $query->where('p.plugin_type', $pluginType);
         }
 
         $paginator = $query
@@ -142,6 +150,8 @@ class MerchantPortalChannelQueryService extends BaseService
         $row->max_amount_text = $this->formatAmountOrUnlimited((int) $row->max_amount);
         $row->created_at_text = $this->formatDateTime($row->created_at ?? null);
         $row->updated_at_text = $this->formatDateTime($row->updated_at ?? null);
+        $row->plugin_type = (int) ($row->plugin_type ?? PaymentPluginTypeConstant::TYPE_DIRECT);
+        $row->plugin_type_text = PaymentPluginTypeConstant::label((int) $row->plugin_type);
         $row->is_writable = $isWritable;
         $row->source_type = $isWritable ? 'merchant' : 'system';
         $row->source_text = $isWritable ? '自建通道' : (in_array((int) $row->id, $assignedChannelIds, true) ? '系统分配' : '系统通道');

@@ -5,6 +5,7 @@ use app\common\middleware\Cors;
 use app\http\api\controller\cashier\CashierController;
 use app\http\api\controller\epay\EpayV1Controller;
 use app\http\api\controller\epay\EpayV2Controller;
+use app\http\api\controller\payment\PaymentOnboardingNotifyController;
 use app\http\api\controller\system\SystemPublicConfigController;
 
 // 收银台项目：页面路由
@@ -50,6 +51,8 @@ Route::group('', function () {
 
 // 开放支付：ePay V2 标准接口
 Route::group('/api', function () {
+    Route::any('/payment-onboarding/{pluginCode}/{configId:\d+}/notify', [PaymentOnboardingNotifyController::class, 'notify'])->name('paymentOnboardingNotify')->setParams(['real_name' => '支付渠道进件回调']);
+
     // 支付订单
     Route::group('/pay', function () {
         // 文档约定是 POST，同时兼容旧版 SDK `getPayLink()` 生成的 GET 请求。

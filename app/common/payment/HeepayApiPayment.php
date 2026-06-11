@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\heepay\HeepayClient;
 use app\common\sdk\heepay\HeepaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentException;
 use support\Request;
 use support\Response;
@@ -19,6 +21,14 @@ use support\Response;
  */
 class HeepayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_CODE_22 = '22';
+    private const PRODUCT_CODE_30 = '30';
+    private const PRODUCT_CODE_34 = '34';
+    private const PRODUCT_CODE_20 = '20';
+    private const PRODUCT_CODE_64 = '64';
+
     private ?HeepayClient $client = null;
 
     /**
@@ -29,6 +39,7 @@ class HeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'heepay_api',
         'name' => '汇付宝支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.heepay.com/',
         'version' => '1.0.0',
@@ -50,6 +61,13 @@ class HeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             ['type' => 'input', 'field' => 'bank_id', 'title' => '上游商户BankId', 'value' => ''],
             ['type' => 'password', 'field' => 'pay_key', 'title' => '支付密钥', 'value' => '', 'validate' => [['required' => true, 'message' => '支付密钥不能为空']]],
             ['type' => 'password', 'field' => 'refund_key', 'title' => '退款密钥', 'value' => ''],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_CODE_22 => '支付宝支付',
+                self::PRODUCT_CODE_30 => '微信支付',
+                self::PRODUCT_CODE_34 => '银联 H5',
+                self::PRODUCT_CODE_20 => '银联网页',
+                self::PRODUCT_CODE_64 => '银联扫码',
+            ]),
         ];
     }
 
@@ -62,13 +80,64 @@ class HeepayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        $payCode = match ($payType) {
-            'wxpay' => '30',
-            'bank' => $method === 'h5' ? '34' : ($method === 'web' ? '20' : '64'),
-            default => '22',
-        };
 
+        return $this->executeDirectPaymentProduct($order, [
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_22,
+                    'wxpay' => self::PRODUCT_CODE_30,
+                    'bank' => self::PRODUCT_CODE_34,
+                ],
+                'handler' => fn (): array => $this->jumpPay($order, match ($payType) {
+                    'bank' => '34',
+                    'wxpay' => '30',
+                    default => '22',
+                }),
+            ],
+
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_22,
+                    'wxpay' => self::PRODUCT_CODE_30,
+                    'bank' => self::PRODUCT_CODE_34,
+                ],
+                'handler' => fn (): array => $this->jumpPay($order, match ($payType) {
+                    'bank' => '34',
+                    'wxpay' => '30',
+                    default => '22',
+                }),
+            ],
+
+            'web' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_22,
+                    'wxpay' => self::PRODUCT_CODE_30,
+                    'bank' => self::PRODUCT_CODE_20,
+                ],
+                'handler' => fn (): array => $this->jumpPay($order, $payType === 'bank' ? '20' : ($payType === 'wxpay' ? '30' : '22')),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_CODE_22,
+                    'wxpay' => self::PRODUCT_CODE_30,
+                    'bank' => self::PRODUCT_CODE_64,
+                ],
+                'handler' => fn (): array => $this->jumpPay($order, $payType === 'bank' ? '64' : ($payType === 'wxpay' ? '30' : '22')),
+            ],
+        ], '汇付宝');
+    }
+
+    /**
+     * 构建汇付宝跳转支付地址。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payCode 汇付宝支付产品编码
+     * @return array<string, mixed>
+     */
+    private function jumpPay(array $order, string $payCode): array
+    {
+        $payType = (string) $order['pay_type_code'];
         $url = $this->client()->payUrl($this->basePayload($order) + ['pay_type' => $payCode], $payCode === '20');
 
         return [

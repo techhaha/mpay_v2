@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\FileConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\ChannelNotifyPayloadInterface;
@@ -68,6 +69,7 @@ class AlipayBillReceiptPayment extends BasePayment implements PaymentInterface, 
     protected array $paymentInfo = [
         'code' => 'alipay_bill_receipt',
         'name' => '支付宝账单收款',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_BACKEND,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay'],
@@ -128,6 +130,7 @@ class AlipayBillReceiptPayment extends BasePayment implements PaymentInterface, 
                 'options' => [
                     ['label' => '金额变动', 'value' => 'amount'],
                     ['label' => '付款备注', 'value' => 'remark'],
+                    ['label' => '免输转账', 'value' => 'alipay_transfer'],
                 ],
                 'control' => [
                     [
@@ -211,9 +214,9 @@ class AlipayBillReceiptPayment extends BasePayment implements PaymentInterface, 
      * 发起支付宝账单收款。
      *
      * 这里不会调用上游 API，只做三件事：
-     * 1. 根据配置选择金额变动或付款备注模式。
+     * 1. 根据配置选择金额变动、付款备注或免输转账模式。
      * 2. 写入本次识别所需的订单元数据和过期时间。
-     * 3. 返回收银台 `receiptQrcode` 页面需要的二维码、金额、备注码和倒计时参数。
+     * 3. 返回收银台页面需要的二维码、金额、备注码和倒计时参数。
      *
      * @param array<string, mixed> $order 标准插件下单参数
      * @return array<string, mixed>
@@ -222,9 +225,17 @@ class AlipayBillReceiptPayment extends BasePayment implements PaymentInterface, 
     {
         $payNo = (string) $order['pay_no'];
         $mode = $this->receiptMatchMode();
-        $prepared = $mode === 'remark'
+        $prepared = in_array($mode, ['remark', 'alipay_transfer'], true)
             ? $this->prepareRemarkReceipt($payNo)
             : $this->prepareAmountReceipt($payNo);
+
+        if ($mode === 'alipay_transfer') {
+            return $this->payResult(
+                $this->alipayTransferParams($prepared),
+                $payNo,
+                (string) ($order['pay_type_code'] ?? '')
+            );
+        }
 
         $qrcode = trim((string) $this->getConfig('receipt_qrcode_content', ''));
         $image = trim((string) $this->getConfig('receipt_qrcode_image', ''));
@@ -401,15 +412,84 @@ class AlipayBillReceiptPayment extends BasePayment implements PaymentInterface, 
     }
 
     /**
+     * 组装支付宝免输转账承接参数。
+     *
+     * @param array<string, mixed> $prepared 备注识别参数
+     * @return array<string, mixed> 收银台承接参数
+     */
+    private function alipayTransferParams(array $prepared): array
+    {
+        $amount = FormatHelper::amount((int) $prepared['pay_amount']);
+        $remarkCode = (string) $prepared['remark_code'];
+        $transferUrl = $this->alipayTransferUrl($amount, $remarkCode);
+
+        return [
+            '_page' => 'alipayTransfer',
+            'transfer_url' => $transferUrl,
+            'qrcode' => $transferUrl,
+            'amount' => $amount,
+            'original_amount' => FormatHelper::amount((int) $prepared['original_amount']),
+            'receipt_match_mode' => 'alipay_transfer',
+            'remark_code' => $remarkCode,
+            'receipt_valid_seconds' => $this->receiptValidSeconds(),
+            'expire_at' => (string) $prepared['expire_at'],
+            'expire_at_timestamp' => (int) strtotime((string) $prepared['expire_at']),
+            'server_time_timestamp' => time(),
+            'description' => '请使用支付宝扫码或打开转账页，金额和备注将自动填写。',
+            'tips' => '转账备注：' . $remarkCode,
+        ];
+    }
+
+    /**
+     * 生成支付宝免输转账 URL。
+     *
+     * @param string $amount 金额，单位元
+     * @param string $remarkCode 转账备注
+     * @return string 支付宝转账 URL
+     */
+    private function alipayTransferUrl(string $amount, string $remarkCode): string
+    {
+        $userId = trim((string) $this->getConfig('bill_user_id', ''));
+        if ($userId === '') {
+            throw new PaymentException('支付宝账单插件未配置支付宝用户ID', 40200);
+        }
+
+        $innerScheme = 'alipays://platformapi/startapp?' . http_build_query([
+            'appId' => '20000116',
+            'actionType' => 'toAccount',
+            'goBack' => 'NO',
+            'amount' => $amount,
+            'userId' => $userId,
+            'memo' => $remarkCode,
+        ], '', '&', PHP_QUERY_RFC3986);
+        $innerRenderUrl = 'https://render.alipay.com/p/s/i?' . http_build_query([
+            'scheme' => $innerScheme,
+        ], '', '&', PHP_QUERY_RFC3986);
+        $middleScheme = 'alipays://platformapi/startapp?' . http_build_query([
+            'appId' => '20000218',
+            'url' => $innerRenderUrl,
+        ], '', '&', PHP_QUERY_RFC3986);
+        $middleRenderUrl = 'https://render.alipay.com/p/s/i?' . http_build_query([
+            'scheme' => $middleScheme,
+        ], '', '&', PHP_QUERY_RFC3986);
+
+        return 'https://render.alipay.com/p/c/mdeduct-landing?' . http_build_query([
+            'scheme' => $middleRenderUrl,
+        ], '', '&', PHP_QUERY_RFC3986);
+    }
+
+    /**
      * 读取订单匹配模式。
      *
-     * 只允许 `amount` 和 `remark` 两种模式，非法配置值按 `amount` 处理。
+     * 只允许 `amount`、`remark` 和 `alipay_transfer` 三种模式，非法配置值按 `amount` 处理。
      *
      * @return string 匹配模式
      */
     private function receiptMatchMode(): string
     {
-        return (string) $this->getConfig('receipt_match_mode', 'amount') === 'remark' ? 'remark' : 'amount';
+        $mode = (string) $this->getConfig('receipt_match_mode', 'amount');
+
+        return in_array($mode, ['amount', 'remark', 'alipay_transfer'], true) ? $mode : 'amount';
     }
 
     /**
@@ -513,7 +593,7 @@ class AlipayBillReceiptPayment extends BasePayment implements PaymentInterface, 
 
                 $this->persistReceiptMeta($payOrder, [
                     'platform' => 'alipay_bill_receipt',
-                    'mode' => 'remark',
+                    'mode' => $this->receiptMatchMode(),
                     'original_amount' => $originalAmount,
                     'receipt_amount' => $originalAmount,
                     'remark_code' => $remarkCode,
@@ -645,7 +725,7 @@ class AlipayBillReceiptPayment extends BasePayment implements PaymentInterface, 
             return $directPayNo;
         }
 
-        return $this->receiptMatchMode() === 'remark'
+        return in_array($this->receiptMatchMode(), ['remark', 'alipay_transfer'], true)
             ? $this->locatePayNoByRemark($record)
             : $this->locatePayNoByAmount($record);
     }

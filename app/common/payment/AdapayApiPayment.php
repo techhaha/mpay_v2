@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\adapay\AdapayClient;
 use app\common\sdk\adapay\AdapaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,14 @@ use support\Response;
  */
 class AdapayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_ALIPAY_PUB = 'alipay_pub';
+    private const PRODUCT_WX_PUB = 'wx_pub';
+    private const PRODUCT_ALIPAY_QR = 'alipay_qr';
+    private const PRODUCT_WX_LITE = 'wx_lite';
+    private const PRODUCT_UNION_QR = 'union_qr';
+
     private ?AdapayClient $client = null;
 
     /**
@@ -30,6 +40,7 @@ class AdapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'adapay_api',
         'name' => 'AdaPay支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.adapay.tech/',
         'version' => '1.0.0',
@@ -50,6 +61,13 @@ class AdapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             ['type' => 'password', 'field' => 'api_key', 'title' => 'API Key', 'value' => '', 'validate' => [['required' => true, 'message' => 'API Key不能为空']]],
             ['type' => 'textarea', 'field' => 'merchant_private_key', 'title' => '商户RSA私钥', 'value' => '', 'props' => ['rows' => 5], 'validate' => [['required' => true, 'message' => '商户RSA私钥不能为空']]],
             ['type' => 'textarea', 'field' => 'platform_public_key', 'title' => 'AdaPay平台公钥', 'value' => '', 'props' => ['rows' => 4], 'validate' => [['required' => true, 'message' => 'AdaPay平台公钥不能为空']]],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_ALIPAY_PUB => '支付宝 JSAPI',
+                self::PRODUCT_WX_PUB => '微信 JSAPI',
+                self::PRODUCT_ALIPAY_QR => '支付宝扫码',
+                self::PRODUCT_WX_LITE => '微信小程序码',
+                self::PRODUCT_UNION_QR => '银联扫码',
+            ]),
         ];
     }
 
@@ -62,10 +80,37 @@ class AdapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+
+        return $this->executeDirectPaymentProduct($order, [
+
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_PUB,
+                    'wxpay' => self::PRODUCT_WX_PUB,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_QR,
+                    'wxpay' => self::PRODUCT_WX_LITE,
+                    'bank' => self::PRODUCT_UNION_QR,
+                ],
+                'handler' => fn (): array => $this->qrcodePay($order, $payType),
+            ],
+        ], 'AdaPay');
+    }
+
+    /**
+     * 二维码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $payType 支付方式
+     * @return array<string, mixed>
+     */
+    private function qrcodePay(array $order, string $payType): array
+    {
         if ($payType === 'wxpay') {
             return $this->wxScanPay($order);
         }
@@ -241,7 +286,7 @@ class AdapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         $payment = (array) ($order['extra']['payment'] ?? []);
         $channel = $payType === 'wxpay' ? 'wx_pub' : 'alipay_pub';
         $expend = $payType === 'wxpay'
-            ? ['openid' => (string) ($payment['sub_openid'] ?? '')]
+            ? ['openid' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? '')]
             : ['buyer_id' => (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? '')];
 
         try {

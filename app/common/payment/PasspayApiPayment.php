@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\passpay\PasspayClient;
 use app\common\sdk\passpay\PasspaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,18 @@ use support\Response;
  */
 class PasspayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_WECHAT_PUB = 'wechatPub';
+    private const PRODUCT_ALIPAY_PUB = 'alipayPub';
+    private const PRODUCT_WECHAT_WAP = 'wechatWap';
+    private const PRODUCT_ALIPAY_WAP = 'alipayWap';
+    private const PRODUCT_ALIPAY_PC = 'alipayPc';
+    private const PRODUCT_WECHAT_QR = 'wechatQr';
+    private const PRODUCT_ALIPAY_QR = 'alipayQr';
+    private const PRODUCT_QQ_QR = 'qqQr';
+    private const PRODUCT_UNION_QR = 'unionQr';
+
     private ?PasspayClient $client = null;
 
     /**
@@ -30,6 +44,7 @@ class PasspayApiPayment extends BasePayment implements PaymentInterface, PayPlug
     protected array $paymentInfo = [
         'code' => 'passpay_api',
         'name' => '精秀支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.jxpays.com/',
         'version' => '1.0.0',
@@ -51,6 +66,17 @@ class PasspayApiPayment extends BasePayment implements PaymentInterface, PayPlug
             ['type' => 'textarea', 'field' => 'merchant_private_key', 'title' => '商户私钥', 'value' => '', 'validate' => [['required' => true, 'message' => '商户私钥不能为空']]],
             ['type' => 'textarea', 'field' => 'platform_public_key', 'title' => '平台公钥', 'value' => '', 'validate' => [['required' => true, 'message' => '平台公钥不能为空']]],
             ['type' => 'input', 'field' => 'pay_channel_id', 'title' => '通道ID', 'value' => ''],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_WECHAT_PUB => '微信 JSAPI',
+                self::PRODUCT_ALIPAY_PUB => '支付宝 JSAPI',
+                self::PRODUCT_WECHAT_WAP => '微信 H5',
+                self::PRODUCT_ALIPAY_WAP => '支付宝 H5',
+                self::PRODUCT_ALIPAY_PC => '支付宝电脑网站',
+                self::PRODUCT_WECHAT_QR => '微信扫码',
+                self::PRODUCT_ALIPAY_QR => '支付宝扫码',
+                self::PRODUCT_QQ_QR => 'QQ 扫码',
+                self::PRODUCT_UNION_QR => '银联扫码',
+            ]),
         ];
     }
 
@@ -63,18 +89,75 @@ class PasspayApiPayment extends BasePayment implements PaymentInterface, PayPlug
     public function pay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
 
-        $tradeType = match ($payType) {
-            'wxpay' => $method === 'h5' ? 'wechatWap' : 'wechatQr',
-            'qqpay' => 'qqQr',
-            'bank' => 'unionQr',
-            default => $method === 'h5' ? 'alipayWap' : ($method === 'web' ? 'alipayPc' : 'alipayQr'),
-        };
+        return $this->executeDirectPaymentProduct($order, [
 
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_PUB,
+                    'wxpay' => self::PRODUCT_WECHAT_PUB,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+            'h5' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_WAP,
+                    'wxpay' => self::PRODUCT_WECHAT_WAP,
+                ],
+                'handler' => fn (): array => match ($payType) {
+                    'wxpay' => $this->tradePay($order, 'wechatWap'),
+                    'alipay' => $this->tradePay($order, 'alipayWap'),
+                    default => throw new PaymentException('精秀支付当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                },
+            ],
+
+            'jump' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_WAP,
+                    'wxpay' => self::PRODUCT_WECHAT_WAP,
+                ],
+                'handler' => fn (): array => match ($payType) {
+                    'wxpay' => $this->tradePay($order, 'wechatWap'),
+                    'alipay' => $this->tradePay($order, 'alipayWap'),
+                    default => throw new PaymentException('精秀支付当前支付方式不支持跳转产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                },
+            ],
+
+            'web' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_PC,
+                ],
+                'handler' => fn (): array => $payType === 'alipay'
+                ? $this->tradePay($order, 'alipayPc')
+                : throw new PaymentException('精秀支付当前支付方式不支持网页产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_QR,
+                    'wxpay' => self::PRODUCT_WECHAT_QR,
+                    'qqpay' => self::PRODUCT_QQ_QR,
+                    'bank' => self::PRODUCT_UNION_QR,
+                ],
+                'handler' => fn (): array => $this->tradePay($order, match ($payType) {
+                    'wxpay' => 'wechatQr',
+                    'qqpay' => 'qqQr',
+                    'bank' => 'unionQr',
+                    default => 'alipayQr',
+                }),
+            ],
+        ], '精秀支付');
+    }
+
+    /**
+     * 按精秀 trade_type 下单。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param string $tradeType 精秀支付产品
+     * @return array<string, mixed>
+     */
+    private function tradePay(array $order, string $tradeType): array
+    {
         try {
             $data = $this->client()->execute('pay.order/create', $this->basePayload($order) + ['trade_type' => $tradeType]);
         } catch (PasspaySdkException $e) {
@@ -89,7 +172,7 @@ class PasspayApiPayment extends BasePayment implements PaymentInterface, PayPlug
         $page = str_contains(strtolower($tradeType), 'wap') || str_contains(strtolower($tradeType), 'pc') ? 'jump' : 'qrcode';
         $params = $page === 'jump' ? ['url' => $url, 'raw' => $data] : ['qrcode' => $url, 'raw' => $data];
 
-        return $this->payResult($page, $payType, $tradeType, 'pay.order/create', $params, $data, $order);
+        return $this->payResult($page, (string) $order['pay_type_code'], $tradeType, 'pay.order/create', $params, $data, $order);
     }
 
     /**
@@ -197,7 +280,7 @@ class PasspayApiPayment extends BasePayment implements PaymentInterface, PayPlug
             $data = $this->client()->execute('pay.order/create', $this->basePayload($order) + [
                 'trade_type' => $tradeType,
                 'sub_appid' => (string) ($payment['sub_appid'] ?? ''),
-                'user_id' => (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
+                'user_id' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
                 'channe_expend' => json_encode(['is_raw' => 1]),
             ]);
         } catch (PasspaySdkException $e) {

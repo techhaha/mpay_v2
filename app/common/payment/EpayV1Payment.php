@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\AuthConstant;
 use app\common\constant\EpayProtocolConstant;
 use app\common\constant\NotifyConstant;
@@ -43,6 +44,7 @@ class EpayV1Payment extends BasePayment implements PaymentInterface, PayPluginIn
     protected array $paymentInfo = [
         'code' => 'epay_v1',
         'name' => '彩虹易支付V1',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['alipay', 'wxpay'],

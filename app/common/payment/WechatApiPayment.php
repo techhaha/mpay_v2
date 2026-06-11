@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\EpayProtocolConstant;
 use app\common\constant\FileConstant;
 use app\common\constant\PaymentPluginStatusConstant;
@@ -47,6 +48,7 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     protected array $paymentInfo = [
         'code' => 'wechat_api',
         'name' => '微信官方API支付',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'version' => '1.0.0',
         'pay_types' => ['wxpay'],

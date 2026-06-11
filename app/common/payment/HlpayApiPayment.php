@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\hlpay\HlpayClient;
 use app\common\sdk\hlpay\HlpaySdkException;
+use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
 use support\Request;
@@ -20,6 +22,15 @@ use support\Response;
  */
 class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
 {
+    use DirectPaymentProductSelectorTrait;
+
+    private const PRODUCT_ALIPAY_JSAPI = 'ALIPAY_JSAPI';
+    private const PRODUCT_WECHAT_JSAPI = 'WECHAT_JSAPI';
+    private const PRODUCT_UNION_PAY_JSAPI = 'UNION_PAY_JSAPI';
+    private const PRODUCT_ALIPAY_NATIVE = 'ALIPAY_NATIVE';
+    private const PRODUCT_WECHAT_NATIVE = 'WECHAT_NATIVE';
+    private const PRODUCT_UNION_PAY_NATIVE = 'UNION_PAY_NATIVE';
+
     private ?HlpayClient $client = null;
 
     /**
@@ -30,6 +41,7 @@ class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     protected array $paymentInfo = [
         'code' => 'hlpay_api',
         'name' => '汇联支付API',
+        'plugin_type' => PaymentPluginTypeConstant::TYPE_DIRECT,
         'author' => 'MPAY',
         'link' => 'https://www.huilianlink.com/',
         'version' => '1.0.0',
@@ -52,6 +64,14 @@ class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             ['type' => 'input', 'field' => 'sub_sn', 'title' => '子商户编码', 'value' => ''],
             ['type' => 'input', 'field' => 'channel_code', 'title' => '通道编码', 'value' => ''],
             ['type' => 'select', 'field' => 'scene_type', 'title' => '场景类型', 'value' => '1', 'options' => [['label' => '线下', 'value' => '1'], ['label' => '线上', 'value' => '2']]],
+            $this->directPaymentEnabledProductsField([
+                self::PRODUCT_ALIPAY_JSAPI => '支付宝 JSAPI',
+                self::PRODUCT_WECHAT_JSAPI => '微信 JSAPI',
+                self::PRODUCT_UNION_PAY_JSAPI => '银联 JSAPI',
+                self::PRODUCT_ALIPAY_NATIVE => '支付宝扫码',
+                self::PRODUCT_WECHAT_NATIVE => '微信扫码',
+                self::PRODUCT_UNION_PAY_NATIVE => '银联扫码',
+            ]),
         ];
     }
 
@@ -63,11 +83,36 @@ class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
      */
     public function pay(array $order): array
     {
-        $method = (string) ($order['extra']['payment']['method'] ?? '');
-        if ($method === 'jsapi') {
-            return $this->jsapiPay($order);
-        }
+        return $this->executeDirectPaymentProduct($order, [
 
+            'jsapi' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_JSAPI,
+                    'wxpay' => self::PRODUCT_WECHAT_JSAPI,
+                    'bank' => self::PRODUCT_UNION_PAY_JSAPI,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+
+            'qrcode' => [
+                'products' => [
+                    'alipay' => self::PRODUCT_ALIPAY_NATIVE,
+                    'wxpay' => self::PRODUCT_WECHAT_NATIVE,
+                    'bank' => self::PRODUCT_UNION_PAY_NATIVE,
+                ],
+                'handler' => fn (): array => $this->scanPay($order),
+            ],
+        ], '汇联支付');
+    }
+
+    /**
+     * 扫码支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>
+     */
+    private function scanPay(array $order): array
+    {
         $payType = (string) $order['pay_type_code'];
         $product = match ($payType) {
             'wxpay' => 'WECHAT',
@@ -193,7 +238,7 @@ class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
         $payType = (string) $order['pay_type_code'];
         $payment = (array) ($order['extra']['payment'] ?? []);
         $product = $payType === 'wxpay' ? 'WECHAT' : ($payType === 'bank' ? 'UNION_PAY' : 'ALIPAY');
-        $extra = ['userId' => (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? '')];
+        $extra = ['userId' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? $payment['buyer_id'] ?? '')];
         if ((string) ($payment['sub_appid'] ?? '') !== '') {
             $extra['subAppid'] = (string) $payment['sub_appid'];
         }
