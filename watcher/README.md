@@ -62,7 +62,7 @@ QUEUE_DATABASE=1
 如果 Redis 就安装在当前服务器，默认 `127.0.0.1` 通常可以直接使用，因为容器使用 `--network host` 方式运行。
 
 
-如果账号需要验证码登陆，还需要配置图鉴识别接口，官方注册（http://www.ttshitu.com/）
+如果账号需要验证码登陆，还需要配置图鉴识别接口，官方注册（[http://www.ttshitu.com/](http://www.ttshitu.com/)）
 
 ```bash
 TTSHITU_USERNAME=admin
