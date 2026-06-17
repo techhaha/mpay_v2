@@ -164,8 +164,6 @@ class EpayV2Payment extends BasePayment implements PaymentInterface, PayPluginIn
     {
         $payload = $this->signPayload($payload);
         $action = $this->gatewayUrl('/api/pay/submit');
-        $query = http_build_query($payload, '', '&', PHP_QUERY_RFC3986);
-        $url = $action . (str_contains($action, '?') ? '&' : '?') . $query;
 
         return [
             'pay_page' => 'jump',
@@ -173,9 +171,8 @@ class EpayV2Payment extends BasePayment implements PaymentInterface, PayPluginIn
             'pay_product' => 'submit',
             'pay_action' => 'submitPay',
             'pay_params' => [
-                'url' => $url,
                 'action' => $action,
-                'method' => 'get',
+                'method' => 'post',
                 'payload' => $payload,
             ],
             // 页面跳转阶段还拿不到上游真实单号，先用本地 out_trade_no/pay_no 占位。
@@ -523,7 +520,11 @@ class EpayV2Payment extends BasePayment implements PaymentInterface, PayPluginIn
             ]);
         }
 
-        $this->verifyPayload($decoded, $verifyMessage);
+        $hasSignature = trim((string) ($decoded['sign'] ?? '')) !== '';
+        $isSuccessResponse = !array_key_exists('code', $decoded) || (int) $decoded['code'] === 0;
+        if ($isSuccessResponse || $hasSignature) {
+            $this->verifyPayload($decoded, $verifyMessage);
+        }
 
         return $decoded;
     }

@@ -293,7 +293,7 @@ trait WebReceiptPaymentTrait
                 'title' => '码牌商户名',
                 'value' => '',
                 'props' => [
-                    'placeholder' => '可选；填写后监听工具会校验或切换到该商户',
+                    'placeholder' => '单商户可留空；多商户账号建议填写，监听工具会切换或校验目标商户',
                 ],
             ],
             [
@@ -302,7 +302,7 @@ trait WebReceiptPaymentTrait
                 'title' => '收款账号标识',
                 'value' => '',
                 'props' => [
-                    'placeholder' => '可选；用于区分同平台多账号，可填商户号或登录账号',
+                    'placeholder' => '单商户可留空；多商户/多门店账号填写平台商户号、门店ID或商户编号',
                 ],
             ],
             [
@@ -311,7 +311,7 @@ trait WebReceiptPaymentTrait
                 'title' => '收款终端号',
                 'value' => '',
                 'props' => [
-                    'placeholder' => '可选；用于筛选平台流水中的终端号或设备编号',
+                    'placeholder' => '单终端可留空；多个码牌/终端/收款单时建议填写，用于过滤平台流水',
                 ],
             ],
             ...$this->receiptExtraConfigSchema(),

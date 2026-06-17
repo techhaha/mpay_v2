@@ -120,25 +120,53 @@ class PayOrderChannelDispatchService extends BaseService
         $paymentType = $this->paymentTypeRepository->find((int) $payOrder->pay_type_id);
 
         return [
-            'pay_no' => (string) $payOrder->pay_no,
-            'order_id' => (string) $payOrder->pay_no,
-            'biz_no' => (string) $payOrder->biz_no,
-            'trace_no' => (string) $payOrder->trace_no,
-            'channel_request_no' => (string) $payOrder->channel_request_no,
+            'pay_no' => $payOrder->pay_no,
+            'order_id' => $payOrder->pay_no,
+            'biz_no' => $payOrder->biz_no,
+            'trace_no' => $payOrder->trace_no,
+            'channel_request_no' => $payOrder->channel_request_no,
             'merchant_id' => (int) $payOrder->merchant_id,
-            'merchant_no' => (string) $merchant->merchant_no,
+            'merchant_no' => $merchant->merchant_no,
             'pay_type_id' => (int) $payOrder->pay_type_id,
-            'pay_type_code' => (string) ($paymentType->code ?? ''),
+            'pay_type_code' => $paymentType->code,
             'amount' => (int) $payOrder->pay_amount,
-            'subject' => (string) ($bizOrder->subject ?? ''),
-            'body' => (string) ($bizOrder->body ?? ''),
+            'subject' => $bizOrder->subject,
+            'body' => $bizOrder->body,
             'callback_url' => rtrim(sys_config('site_url'), '/') . '/api/pay/' . $payOrder->pay_no . '/callback',
-            'notify_url' => (string) ($payOrder->notify_url ?? ''),
-            'return_url' => (string) ($payOrder->return_url ?? ''),
-            'client_ip' => (string) ($payOrder->client_ip ?? ''),
+            'notify_url' => $payOrder->notify_url,
+            'return_url' => $this->resolveReturnUrl($payOrder, $bizOrder),
+            'client_ip' => $payOrder->client_ip,
             '_env' => (string) (($payOrder->device ?? '') ?: 'pc'),
             'extra' => (array) ($payOrder->ext_json ?? []),
         ];
+    }
+
+    /**
+     * 解析传给支付插件的同步跳转地址。
+     *
+     * 页面跳转支付已要求商户传 return_url；API 下单允许为空，这里兜底为平台支付承接页，
+     * 避免上游 ePay 类插件收到空同步地址。
+     *
+     * @param PayOrder $payOrder 支付单
+     * @param BizOrder $bizOrder 业务单
+     * @return string 同步跳转地址
+     */
+    private function resolveReturnUrl(PayOrder $payOrder, BizOrder $bizOrder): string
+    {
+        $returnUrl = trim((string) ($payOrder->return_url ?? ''));
+        if ($returnUrl !== '') {
+            return $returnUrl;
+        }
+
+        $returnUrl = trim((string) ($bizOrder->return_url ?? ''));
+        if ($returnUrl !== '') {
+            return $returnUrl;
+        }
+
+        $siteUrl = rtrim((string) sys_config('site_url'), '/');
+        $path = '/payment/' . rawurlencode((string) $payOrder->pay_no);
+
+        return $siteUrl !== '' ? $siteUrl . $path : $path;
     }
 
     /**

@@ -1,6 +1,6 @@
 <h1 align="center"></h1>
 <p align="center">
-  <img src="public/assets/brand/mpay-logo.svg" alt="MPAY V2 Webman" width="400">
+  <img src="https://foruda.gitee.com/images/1779352690595058298/81c08ce0_12697045.png" alt="MPAY V2 Webman" width="400">
 </p>
 
 <h1 align="center">码支付 V2</h1>

@@ -1,3 +1,9 @@
-.env
-/runtime
+/runtime/*
+/.idea
+/.vscode
 /vendor
+*.log
+.env
+epay-platform-private.pem
+epay-platform-public.pem
+/doc

@@ -3,6 +3,7 @@
 namespace app\service\merchant\group;
 
 use app\common\base\BaseService;
+use app\common\constant\CommonConstant;
 use app\exception\ValidationException;
 use app\model\merchant\MerchantGroup;
 use app\repository\merchant\base\MerchantGroupRepository;
@@ -94,8 +95,10 @@ class MerchantGroupService extends BaseService
      */
     public function create(array $data): MerchantGroup
     {
-        $this->assertGroupNameUnique((string) ($data['group_name'] ?? ''));
-        return $this->merchantGroupRepository->create($data);
+        $payload = $this->normalizePayload($data);
+        $this->assertGroupNameUnique((string) $payload['group_name']);
+
+        return $this->merchantGroupRepository->create($payload);
     }
 
     /**
@@ -107,8 +110,14 @@ class MerchantGroupService extends BaseService
      */
     public function update(int $id, array $data): ?MerchantGroup
     {
-        $this->assertGroupNameUnique((string) ($data['group_name'] ?? ''), $id);
-        if (!$this->merchantGroupRepository->updateById($id, $data)) {
+        $current = $this->merchantGroupRepository->find($id);
+        if (!$current) {
+            return null;
+        }
+
+        $payload = $this->normalizePayload($data, $current);
+        $this->assertGroupNameUnique((string) $payload['group_name'], $id);
+        if (!$this->merchantGroupRepository->updateById($id, $payload)) {
             return null;
         }
 
@@ -124,6 +133,28 @@ class MerchantGroupService extends BaseService
     public function delete(int $id): bool
     {
         return $this->merchantGroupRepository->deleteById($id);
+    }
+
+    /**
+     * 标准化商户分组写入数据。
+     *
+     * 表单空字符串会在控制器层转成 null，这里统一恢复成数据库需要的空字符串或默认状态。
+     *
+     * @param array $data 分组数据
+     * @param MerchantGroup|null $current 当前分组
+     * @return array<string, mixed> 标准化后的写入数据
+     */
+    private function normalizePayload(array $data, ?MerchantGroup $current = null): array
+    {
+        $groupName = array_key_exists('group_name', $data) ? $data['group_name'] : ($current?->group_name ?? '');
+        $status = array_key_exists('status', $data) ? $data['status'] : ($current?->status ?? CommonConstant::STATUS_ENABLED);
+        $remark = array_key_exists('remark', $data) ? $data['remark'] : ($current?->remark ?? '');
+
+        return [
+            'group_name' => trim((string) $groupName),
+            'status' => (int) $status,
+            'remark' => trim((string) $remark),
+        ];
     }
 
     /**

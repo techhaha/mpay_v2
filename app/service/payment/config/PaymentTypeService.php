@@ -151,7 +151,7 @@ class PaymentTypeService extends BaseService
      */
     public function create(array $data): PaymentType
     {
-        return $this->paymentTypeRepository->create($data);
+        return $this->paymentTypeRepository->create($this->normalizePayload($data));
     }
 
     /**
@@ -163,7 +163,7 @@ class PaymentTypeService extends BaseService
      */
     public function update(int $id, array $data): ?PaymentType
     {
-        if (!$this->paymentTypeRepository->updateById($id, $data)) {
+        if (!$this->paymentTypeRepository->updateById($id, $this->normalizePayload($data, true))) {
             return null;
         }
 
@@ -179,5 +179,33 @@ class PaymentTypeService extends BaseService
     public function delete(int $id): bool
     {
         return $this->paymentTypeRepository->deleteById($id);
+    }
+
+    /**
+     * 标准化支付方式写入数据。
+     *
+     * @param array $data 写入数据
+     * @param bool $partial 是否只处理传入字段
+     * @return array<string, mixed> 标准化后的写入数据
+     */
+    private function normalizePayload(array $data, bool $partial = false): array
+    {
+        $payload = [];
+
+        foreach (['code', 'name', 'icon', 'remark'] as $field) {
+            if (!$partial || array_key_exists($field, $data)) {
+                $payload[$field] = trim((string) ($data[$field] ?? ''));
+            }
+        }
+
+        if (!$partial || array_key_exists('sort_no', $data)) {
+            $payload['sort_no'] = (int) ($data['sort_no'] ?? 0);
+        }
+
+        if (!$partial || array_key_exists('status', $data)) {
+            $payload['status'] = (int) ($data['status'] ?? CommonConstant::STATUS_ENABLED);
+        }
+
+        return $payload;
     }
 }

@@ -24,9 +24,6 @@ class PostarReceiptPayment extends BasePayment implements PaymentInterface, PayP
     /**
      * 插件基础信息和网页码牌能力。
      *
-     * 星驿付收款单流水接口仍需要收款单 ID 和部门 ID，因此通过
-     * `receiptExtraConfigSchema()` 补充平台专属配置。
-     *
      * @var array<string, mixed>
      */
     protected array $paymentInfo = [
@@ -39,41 +36,4 @@ class PostarReceiptPayment extends BasePayment implements PaymentInterface, PayP
         'transfer_types' => [],
         'receipt_supports_remark' => true,
     ];
-
-    /**
-     * 星驿付收款单查询接口需要的业务参数。
-     *
-     * 登录地址、流水接口和验证码策略仍在 Python watcher 中维护。
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    protected function receiptExtraConfigSchema(): array
-    {
-        return [
-            [
-                'type' => 'input',
-                'field' => 'postar_ren_page_id',
-                'title' => '收款单ID',
-                'value' => '',
-                'props' => [
-                    'placeholder' => '请输入星驿付收款单 renPageId',
-                ],
-                'validate' => [
-                    ['required' => true, 'message' => '收款单ID不能为空'],
-                ],
-            ],
-            [
-                'type' => 'input',
-                'field' => 'postar_dept_id',
-                'title' => '部门ID',
-                'value' => '',
-                'props' => [
-                    'placeholder' => '请输入星驿付收款单 deptId',
-                ],
-                'validate' => [
-                    ['required' => true, 'message' => '部门ID不能为空'],
-                ],
-            ],
-        ];
-    }
 }
