@@ -26,6 +26,14 @@
 | 管理后台 | `admin` | `Aa123456` |
 | 商户后台 | `M20260521120046881802` | `Aa123456` |
 
+## 📚 文档与教程
+
+| 文档 | 说明 |
+| --- | --- |
+| [项目 Wiki](https://gitee.com/technical-laohu/mpay_v2_webman/wikis) | 完整使用手册、接入指南、部署运维和排障文档 |
+| [码牌类插件配置使用教程](https://gitee.com/technical-laohu/mpay_v2_webman/wikis/%E7%A0%81%E7%89%8C%E7%B1%BB%E6%8F%92%E4%BB%B6%E9%85%8D%E7%BD%AE%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B) | receipt_watcher 网页流水/二维码牌监听场景，适用于收钱吧、付呗、USDT TRC20 等码牌类插件 |
+| [支付宝微信个人收款监听配置教程](https://gitee.com/technical-laohu/mpay_v2_webman/wikis/%E6%94%AF%E4%BB%98%E5%AE%9D%E5%BE%AE%E4%BF%A1%E4%B8%AA%E4%BA%BA%E6%94%B6%E6%AC%BE%E7%9B%91%E5%90%AC%E9%85%8D%E7%BD%AE%E6%95%99%E7%A8%8B#%E6%94%AF%E4%BB%98%E5%AE%9D%E5%BE%AE%E4%BF%A1%E4%B8%AA%E4%BA%BA%E6%94%B6%E6%AC%BE%E7%9B%91%E5%90%AC%E9%85%8D%E7%BD%AE%E6%95%99%E7%A8%8B) | SmsForwarder 手机通知栏监听场景，适用于支付宝/微信个人收款码 |
+
 ## ✨ 项目介绍
 
 **MPAY V2** 的核心目标是把支付系统里容易分散的能力统一起来：商户、支付方式、支付插件、插件配置、支付通道、轮询组、路由策略、业务单、支付单、回调通知、退款、清算和资金账户都由后端统一建模和管理。
