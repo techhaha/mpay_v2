@@ -6,7 +6,8 @@
 <h1 align="center">码支付 V2</h1>
 
 <p align="center">
-  <a href="https://gitee.com/technical-laohu/mpay_v2_webman">项目主页</a> | 
+  <a href="https://gitee.com/technical-laohu/mpay_v2_webman">Gitee 项目</a> | 
+  <a href="https://github.com/techhaha/mpay_v2">GitHub 项目</a> | 
   <a href="https://gitee.com/technical-laohu/mpay_v2_webman/wikis">项目文档</a> | 
   <a href="https://gitee.com/technical-laohu/mpay_v2_webman/releases">发行版下载</a> | 
   <a href="https://gitee.com/technical-laohu/mpay_v2_webman/issues">问题反馈</a>
@@ -16,7 +17,14 @@
 
 程序通过发行版安装包部署，内置安装向导会完成环境检测、数据库初始化、系统配置写入和管理员账号创建。
 
-### 发行版还在测试中，预计高考前发布，技术人员可以clone测试，技术小白等正式发布
+### 发行版已经发布测试版，欢迎安装测试提BUG
+
+## 🌐 开源地址
+
+| 平台 | 项目地址 |
+| --- | --- |
+| Gitee | [technical-laohu/mpay_v2_webman](https://gitee.com/technical-laohu/mpay_v2_webman) |
+| GitHub | [techhaha/mpay_v2](https://github.com/techhaha/mpay_v2) |
 
 ## 🔎 演示环境
 
