@@ -30,13 +30,17 @@ class ReceiptWatcherService extends BaseService
      */
     private const ACCOUNTS_KEY = 'receipt_watcher_accounts';
     private const QUERY_ACCOUNTS_KEY = 'receipt_watcher_query_accounts';
+    private const PRELOGIN_ACCOUNTS_KEY = 'receipt_watcher_prelogin_accounts';
     private const ACCOUNT_STREAM_KEY = 'receipt_watcher_account_stream';
     private const ACCOUNT_ENQUEUED_KEY_PREFIX = 'receipt_watcher_account_enqueued_';
+    private const PRELOGIN_ENQUEUED_KEY_PREFIX = 'receipt_watcher_prelogin_enqueued_';
     private const ACCOUNT_TASK_KEY_PREFIX = 'receipt_watcher_account_';
     private const ORDERS_KEY_PREFIX = 'receipt_watcher_orders_';
     private const LOCK_KEY_PREFIX = 'receipt_watcher_lock_';
     private const FLOW_SEEN_KEY_PREFIX = 'receipt_watcher_flow_seen_';
     private const FLOW_LOCK_KEY_PREFIX = 'receipt_watcher_flow_lock_';
+    private const TASK_TYPE_QUERY = 'query';
+    private const TASK_TYPE_PRELOGIN = 'prelogin';
 
     /**
      * 构造方法。
@@ -66,6 +70,7 @@ class ReceiptWatcherService extends BaseService
         $pluginCodes = $this->supportedPluginCodes();
         if ($pluginCodes === []) {
             $this->clearQueryTasks();
+            $this->clearPreloginTasks();
             Redis::del(self::ACCOUNTS_KEY);
             return [
                 'accounts' => 0,
@@ -119,6 +124,7 @@ class ReceiptWatcherService extends BaseService
             Redis::hSet(self::ACCOUNTS_KEY, $accountKey, $this->jsonEncode($account));
         }
         $this->removeStaleQueryTasks(array_keys($accounts));
+        $this->syncPreloginTasks(array_keys($accounts));
 
         return [
             'accounts' => count($accounts),
@@ -136,6 +142,7 @@ class ReceiptWatcherService extends BaseService
     {
         if (!$this->watcherEnabled()) {
             $this->clearQueryTasks();
+            $this->clearPreloginTasks();
             return [
                 'scanned' => 0,
                 'accounts' => 0,
@@ -275,6 +282,8 @@ class ReceiptWatcherService extends BaseService
                     '~',
                     '10000',
                     '*',
+                    'task_type',
+                    self::TASK_TYPE_QUERY,
                     'account_key',
                     $accountKey,
                     'plugin_code',
@@ -297,6 +306,135 @@ class ReceiptWatcherService extends BaseService
             } catch (Throwable $e) {
                 Redis::del($enqueuedKey);
                 Log::warning('[ReceiptWatcherService] 投放账号查询任务失败：' . $e->getMessage());
+            }
+        }
+
+        return $summary;
+    }
+
+    /**
+     * 将到期账号预登录任务投放到 Redis 账号任务流。
+     *
+     * 预登录只维护第三方平台登录态，不要求账号下存在待支付订单，也不会确认订单。
+     *
+     * @param int $limit 单轮最多投放账号数
+     * @return array<string, int> 执行摘要
+     */
+    public function dispatchDuePreloginAccountTasks(int $limit = 100): array
+    {
+        if (!$this->watcherEnabled()) {
+            return [
+                'due' => 0,
+                'queued' => 0,
+                'stale' => 0,
+                'locked' => 0,
+                'deduped' => 0,
+            ];
+        }
+
+        $accounts = $this->accountMap();
+        if ($accounts === []) {
+            $this->refreshChannelCache();
+            $accounts = $this->accountMap();
+        }
+        if ($accounts === []) {
+            $this->clearPreloginTasks();
+            return [
+                'due' => 0,
+                'queued' => 0,
+                'stale' => 0,
+                'locked' => 0,
+                'deduped' => 0,
+            ];
+        }
+        if ((int) Redis::zCard(self::PRELOGIN_ACCOUNTS_KEY) <= 0) {
+            $this->syncPreloginTasks(array_keys($accounts));
+        }
+
+        $now = time();
+        $accountKeys = $this->redisRaw(
+            'ZRANGEBYSCORE',
+            self::PRELOGIN_ACCOUNTS_KEY,
+            '-inf',
+            (string) $now,
+            'LIMIT',
+            '0',
+            (string) max(1, $limit)
+        );
+        if (!is_array($accountKeys) || $accountKeys === []) {
+            return [
+                'due' => 0,
+                'queued' => 0,
+                'stale' => 0,
+                'locked' => 0,
+                'deduped' => 0,
+            ];
+        }
+
+        $summary = [
+            'due' => count($accountKeys),
+            'queued' => 0,
+            'stale' => 0,
+            'locked' => 0,
+            'deduped' => 0,
+        ];
+        $interval = $this->preloginIntervalSeconds();
+        $retryMax = $this->loginRetryMax();
+        foreach ($accountKeys as $rawAccountKey) {
+            $accountKey = (string) $rawAccountKey;
+            $account = $accounts[$accountKey] ?? null;
+            if (!is_array($account)) {
+                $summary['stale']++;
+                $this->removePreloginTask($accountKey);
+                continue;
+            }
+
+            if ((bool) Redis::exists($this->lockKey($accountKey))) {
+                $summary['locked']++;
+                continue;
+            }
+
+            $enqueuedKey = $this->preloginEnqueuedKey($accountKey);
+            $enqueued = $this->redisRaw('SET', $enqueuedKey, (string) $now, 'NX', 'EX', (string) $this->preloginEnqueuedTtl($interval));
+            if ($enqueued !== true && strtoupper((string) $enqueued) !== 'OK') {
+                $summary['deduped']++;
+                continue;
+            }
+
+            try {
+                $streamId = $this->redisRaw(
+                    'XADD',
+                    self::ACCOUNT_STREAM_KEY,
+                    'MAXLEN',
+                    '~',
+                    '10000',
+                    '*',
+                    'task_type',
+                    self::TASK_TYPE_PRELOGIN,
+                    'account_key',
+                    $accountKey,
+                    'plugin_code',
+                    (string) ($account['plugin_code'] ?? ''),
+                    'api_config_id',
+                    (string) ((int) ($account['api_config_id'] ?? 0)),
+                    'prelogin_interval_seconds',
+                    (string) $interval,
+                    'login_retry_max',
+                    (string) $retryMax,
+                    'due_at',
+                    (string) $now,
+                    'enqueued_at',
+                    (string) $now,
+                    'trace_id',
+                    bin2hex(random_bytes(8))
+                );
+                if ($streamId === false || $streamId === null || $streamId === '') {
+                    throw new RuntimeException('Redis XADD 返回空结果');
+                }
+                $summary['queued']++;
+            } catch (Throwable $e) {
+                Redis::del($enqueuedKey);
+                Log::warning('[ReceiptWatcherService] 投放账号预登录任务失败：' . $e->getMessage());
             }
         }
 
@@ -527,7 +665,6 @@ class ReceiptWatcherService extends BaseService
         Redis::del($this->accountTaskKey($accountKey));
         Redis::del($this->ordersKey($accountKey));
         Redis::del($this->accountEnqueuedKey($accountKey));
-        Redis::del($this->lockKey($accountKey));
     }
 
     /**
@@ -548,6 +685,77 @@ class ReceiptWatcherService extends BaseService
         } catch (Throwable $e) {
             Log::warning('[ReceiptWatcherService] 清理查询任务失败：' . $e->getMessage());
         }
+    }
+
+    /**
+     * 同步账号预登录计划。
+     *
+     * @param array<int, string> $activeAccountKeys 当前有效账号键
+     * @return void
+     */
+    private function syncPreloginTasks(array $activeAccountKeys): void
+    {
+        $this->removeStalePreloginTasks($activeAccountKeys);
+        foreach ($activeAccountKeys as $accountKey) {
+            $score = Redis::zScore(self::PRELOGIN_ACCOUNTS_KEY, $accountKey);
+            if ($score === false || $score === null) {
+                Redis::zAdd(self::PRELOGIN_ACCOUNTS_KEY, time(), $accountKey);
+            }
+        }
+    }
+
+    /**
+     * 清理所有账号预登录计划。
+     *
+     * @return void
+     */
+    private function clearPreloginTasks(): void
+    {
+        try {
+            $accountKeys = Redis::zRange(self::PRELOGIN_ACCOUNTS_KEY, 0, -1);
+            if (is_array($accountKeys)) {
+                foreach ($accountKeys as $accountKey) {
+                    $this->removePreloginTask((string) $accountKey);
+                }
+            }
+            Redis::del(self::PRELOGIN_ACCOUNTS_KEY);
+        } catch (Throwable $e) {
+            Log::warning('[ReceiptWatcherService] 清理预登录任务失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 移除已经不在账号缓存中的预登录计划。
+     *
+     * @param array<int, string> $activeAccountKeys 当前有效账号键
+     * @return void
+     */
+    private function removeStalePreloginTasks(array $activeAccountKeys): void
+    {
+        $active = array_fill_keys($activeAccountKeys, true);
+        $accountKeys = Redis::zRange(self::PRELOGIN_ACCOUNTS_KEY, 0, -1);
+        if (!is_array($accountKeys)) {
+            return;
+        }
+
+        foreach ($accountKeys as $accountKey) {
+            $accountKey = (string) $accountKey;
+            if (!isset($active[$accountKey])) {
+                $this->removePreloginTask($accountKey);
+            }
+        }
+    }
+
+    /**
+     * 移除账号预登录计划。
+     *
+     * @param string $accountKey 账号键
+     * @return void
+     */
+    private function removePreloginTask(string $accountKey): void
+    {
+        Redis::zRem(self::PRELOGIN_ACCOUNTS_KEY, $accountKey);
+        Redis::del($this->preloginEnqueuedKey($accountKey));
     }
 
     /**
@@ -604,6 +812,26 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 读取账号预登录间隔。
+     *
+     * @return int 预登录间隔秒数
+     */
+    private function preloginIntervalSeconds(): int
+    {
+        return max(60, (int) sys_config('receipt_watcher_prelogin_interval_seconds', 600));
+    }
+
+    /**
+     * 读取单次预登录登录动作最大重试次数。
+     *
+     * @return int 最大重试次数
+     */
+    private function loginRetryMax(): int
+    {
+        return max(1, (int) sys_config('receipt_watcher_login_retry_max', 10));
+    }
+
+    /**
      * 提取 watcher 需要的订单扩展信息。
      *
      * 支付单 ext_json 可能包含前端承接参数、上游原始响应等内容。这里仅透传
@@ -656,6 +884,17 @@ class ReceiptWatcherService extends BaseService
     }
 
     /**
+     * 生成账号预登录任务投放标记键。
+     *
+     * @param string $accountKey 账号键
+     * @return string 已投放标记键
+     */
+    private function preloginEnqueuedKey(string $accountKey): string
+    {
+        return self::PRELOGIN_ENQUEUED_KEY_PREFIX . $this->safeKeyPart($accountKey);
+    }
+
+    /**
      * 生成账号查询锁键。
      *
      * @param string $accountKey 账号键
@@ -688,6 +927,17 @@ class ReceiptWatcherService extends BaseService
         $interval = max(2, (int) ($task['query_interval_seconds'] ?? 3));
 
         return max(300, $interval * 4);
+    }
+
+    /**
+     * 计算预登录任务投放标记过期时间。
+     *
+     * @param int $interval 预登录间隔秒数
+     * @return int 已投放标记过期时间
+     */
+    private function preloginEnqueuedTtl(int $interval): int
+    {
+        return max(300, max(60, $interval) * 2);
     }
 
     /**

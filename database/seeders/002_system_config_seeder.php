@@ -94,6 +94,8 @@ return new class {
             'receipt_watcher_license_code' => '',
             'receipt_watcher_order_scan_batch_size' => '500',
             'receipt_watcher_order_scan_interval_seconds' => '3',
+            'receipt_watcher_prelogin_interval_seconds' => '600',
+            'receipt_watcher_login_retry_max' => '10',
             'receipt_watcher_plugin_codes' => "shouqianba_receipt\nfubei_receipt\nusdt_trc20_receipt",
         ],
         'storage' => [

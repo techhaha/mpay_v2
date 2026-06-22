@@ -6,8 +6,8 @@
 <h1 align="center">码支付 V2</h1>
 
 <p align="center">
-  <a href="https://gitee.com/technical-laohu/mpay_v2_webman">Gitee 项目</a> | 
-  <a href="https://github.com/techhaha/mpay_v2">GitHub 项目</a> | 
+  <a href="https://gitee.com/technical-laohu/mpay_v2_webman">Gitee 项目</a> |
+  <a href="https://github.com/techhaha/mpay_v2">GitHub 项目</a> |
   <a href="https://gitee.com/technical-laohu/mpay_v2_webman/wikis">项目文档</a> | 
   <a href="https://gitee.com/technical-laohu/mpay_v2_webman/releases">发行版下载</a> | 
   <a href="https://gitee.com/technical-laohu/mpay_v2_webman/issues">问题反馈</a>

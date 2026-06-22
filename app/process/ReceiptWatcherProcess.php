@@ -103,6 +103,10 @@ class ReceiptWatcherProcess
             $this->runIfDue('dispatch_due_accounts', 1, function (): array {
                 return $this->watcherService()->dispatchDueAccountTasks($this->scanBatchSize());
             });
+
+            $this->runIfDue('dispatch_due_prelogin_accounts', 1, function (): array {
+                return $this->watcherService()->dispatchDuePreloginAccountTasks($this->scanBatchSize());
+            });
         } catch (\Throwable $e) {
             $this->reportHeartbeat([
                 'summary' => '网页流水监听调度异常',
