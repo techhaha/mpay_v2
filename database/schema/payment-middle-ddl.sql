@@ -313,6 +313,7 @@ CREATE TABLE IF NOT EXISTS `ma_biz_order` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_merchant_order` (`merchant_id`, `merchant_order_no`),
   UNIQUE KEY `uk_biz_no` (`biz_no`),
+  KEY `idx_merchant_order_no` (`merchant_order_no`),
   KEY `idx_trace_no` (`trace_no`),
   KEY `idx_merchant_status_created` (`merchant_id`, `status`, `created_at`),
   KEY `idx_active_pay_no` (`active_pay_no`)
@@ -364,6 +365,8 @@ CREATE TABLE IF NOT EXISTS `ma_pay_order` (
   UNIQUE KEY `uk_channel_request_no` (`merchant_id`, `channel_request_no`),
   KEY `idx_trace_no` (`trace_no`),
   KEY `idx_merchant_status_created` (`merchant_id`, `status`, `created_at`),
+  KEY `idx_channel_order_no` (`channel_order_no`),
+  KEY `idx_channel_request_no` (`channel_request_no`),
   KEY `idx_channel_trade_no` (`channel_trade_no`),
   KEY `idx_channel_id_status` (`channel_id`, `status`),
   KEY `idx_poll_group_id` (`poll_group_id`)
@@ -401,6 +404,9 @@ CREATE TABLE IF NOT EXISTS `ma_refund_order` (
   KEY `idx_trace_no` (`trace_no`),
   KEY `idx_biz_status_created` (`biz_no`, `status`, `created_at`),
   KEY `idx_merchant_status_created` (`merchant_id`, `status`, `created_at`),
+  KEY `idx_merchant_refund_no` (`merchant_refund_no`),
+  KEY `idx_channel_refund_no` (`channel_refund_no`),
+  KEY `idx_channel_request_no` (`channel_request_no`),
   KEY `idx_pay_no` (`pay_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='退款单表';
 

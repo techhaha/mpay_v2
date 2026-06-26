@@ -22,6 +22,15 @@ class InstallCompletedListener
     public function requestRestart(array $payload = [], string $eventName = ''): void
     {
         $restart = $this->restartPayload($payload, $eventName);
+
+        if ($this->skipAutoRestartInDocker()) {
+            $restart['status'] = 'pending';
+            $restart['message'] = 'Docker 环境已跳过进程内自动重启，请执行 docker compose restart mpay-backend';
+            $restart['manual_command'] = 'docker compose restart mpay-backend';
+            $this->writeRestartRequired($restart);
+            return;
+        }
+
         $this->writeRestartRequired($restart);
 
         if (DIRECTORY_SEPARATOR === '\\') {
@@ -30,6 +39,18 @@ class InstallCompletedListener
         }
 
         $this->dispatchLinuxRestart($restart);
+    }
+
+    /**
+     * Docker 下由容器编排重启，避免 Webman 在 PID 1 前台模式中自我 daemonize。
+     *
+     * @return bool 是否跳过自动重启
+     */
+    private function skipAutoRestartInDocker(): bool
+    {
+        $value = strtolower(trim((string) getenv('MPAY_DOCKER_SKIP_AUTO_RESTART')));
+
+        return in_array($value, ['1', 'true', 'yes', 'on'], true);
     }
 
     /**

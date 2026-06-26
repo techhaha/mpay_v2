@@ -54,27 +54,8 @@ class RefundQueryService extends BaseService
         $query = $this->buildRefundOrderQuery($merchantId);
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
-        if ($keyword !== '') {
-            // 关键词同时命中退款单、支付单、业务单、商户和通道，方便后台按任一线索快速定位。
-            $query->where(function ($builder) use ($keyword) {
-                $builder->where('ro.refund_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('ro.pay_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('ro.biz_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('ro.trace_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('ro.merchant_refund_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('ro.channel_request_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('ro.channel_refund_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('ro.reason', 'like', '%' . $keyword . '%')
-                    ->orWhere('ro.last_error', 'like', '%' . $keyword . '%')
-                    ->orWhere('bo.merchant_order_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('bo.subject', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_short_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('g.group_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('c.name', 'like', '%' . $keyword . '%')
-                    ->orWhere('t.name', 'like', '%' . $keyword . '%');
-            });
+        if ($keyword !== '' && ($searchField = trim((string) ($filters['search_field'] ?? ''))) !== '') {
+            $this->applyRefundOrderSearch($query, $searchField, $keyword);
         }
 
         if (($merchantFilter = (int) ($filters['merchant_id'] ?? 0)) > 0) {
@@ -251,6 +232,33 @@ class RefundQueryService extends BaseService
         }
 
         return $query;
+    }
+
+    /**
+     * 按指定退款字段做精确搜索，避免列表页退回多字段模糊扫描。
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query 查询构造器
+     * @param string $searchField 前端选择的搜索字段
+     * @param string $keyword 搜索关键字
+     * @return void
+     */
+    private function applyRefundOrderSearch($query, string $searchField, string $keyword): void
+    {
+        $columnMap = [
+            'refund_no' => 'ro.refund_no',
+            'pay_no' => 'ro.pay_no',
+            'biz_no' => 'ro.biz_no',
+            'trace_no' => 'ro.trace_no',
+            'merchant_order_no' => 'bo.merchant_order_no',
+            'merchant_refund_no' => 'ro.merchant_refund_no',
+            'channel_request_no' => 'ro.channel_request_no',
+            'channel_refund_no' => 'ro.channel_refund_no',
+        ];
+
+        $column = $columnMap[$searchField] ?? '';
+        if ($column !== '') {
+            $query->where($column, $keyword);
+        }
     }
 
     /**

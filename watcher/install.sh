@@ -29,7 +29,7 @@ check_runtime() {
   kernel="$(uname -s 2>/dev/null || true)"
   [ "$kernel" = "Linux" ] || fail "当前脚本面向 Linux Docker 服务器，不支持 Windows/macOS Docker Desktop 作为生产运行环境。"
 
-  for cmd in docker grep sed readlink dirname mkdir chmod; do
+  for cmd in docker grep sed readlink dirname mkdir chmod rm; do
     command -v "$cmd" >/dev/null 2>&1 || fail "缺少系统命令：$cmd"
   done
 }
@@ -60,6 +60,27 @@ env_value() {
   line="${line%\'}"
   line="${line#\'}"
   printf '%s' "$line"
+}
+
+docker_log_max_size() {
+  local value
+  value="$(env_value RECEIPT_WATCHER_DOCKER_LOG_MAX_SIZE)"
+  [ -n "$value" ] || value="20m"
+  printf '%s' "$value"
+}
+
+docker_log_max_file() {
+  local value
+  value="$(env_value RECEIPT_WATCHER_DOCKER_LOG_MAX_FILE)"
+  [ -n "$value" ] || value="5"
+  printf '%s' "$value"
+}
+
+container_timezone() {
+  local value
+  value="$(env_value TZ)"
+  [ -n "$value" ] || value="Asia/Shanghai"
+  printf '%s' "$value"
 }
 
 check_files() {
@@ -104,7 +125,16 @@ check_env() {
 }
 
 prepare_dir() {
-  mkdir -p "$BASE_DIR/storage" "$BASE_DIR/logs"
+  [ -n "$BASE_DIR" ] && [ "$BASE_DIR" != "/" ] \
+    || fail "安装目录异常，拒绝清空 storage。"
+
+  local storage_dir="$BASE_DIR/storage"
+  if [ -e "$storage_dir" ]; then
+    info "清空旧 storage 数据：$storage_dir"
+    rm -rf -- "$storage_dir"
+  fi
+
+  mkdir -p "$storage_dir" "$BASE_DIR/logs"
   chmod 700 "$BASE_DIR" "$BASE_DIR/storage" "$BASE_DIR/logs" 2>/dev/null || true
   chmod 600 "$ENV_SRC" 2>/dev/null || true
 }
@@ -128,14 +158,26 @@ load_image() {
     || fail "镜像导入后未找到 $IMAGE。"
 }
 
+remove_container() {
+  info "删除旧容器：$NAME"
+  "${DOCKER[@]}" rm -f "$NAME" >/dev/null 2>&1 || true
+}
+
 run_container() {
   info "创建容器：$NAME"
-  "${DOCKER[@]}" rm -f "$NAME" >/dev/null 2>&1 || true
+  local log_max_size log_max_file container_tz
+  log_max_size="$(docker_log_max_size)"
+  log_max_file="$(docker_log_max_file)"
+  container_tz="$(container_timezone)"
   "${DOCKER[@]}" run -d \
     --name "$NAME" \
     --restart=always \
     --network host \
     --shm-size=1g \
+    -e "TZ=$container_tz" \
+    --log-driver json-file \
+    --log-opt "max-size=$log_max_size" \
+    --log-opt "max-file=$log_max_file" \
     -v "$BASE_DIR:/app/var" \
     "$IMAGE" >/dev/null
 
@@ -147,8 +189,9 @@ main() {
   check_files
   docker_cmd
   check_env
-  prepare_dir
   load_image
+  remove_container
+  prepare_dir
   run_container
 
   cat <<EOF
@@ -160,6 +203,8 @@ main() {
 挂载：$BASE_DIR => /app/var
 容器：$NAME
 镜像：$IMAGE
+容器时区：$(container_timezone)
+Docker 日志轮转：max-size=$(docker_log_max_size) max-file=$(docker_log_max_file)
 
 修改 .env 后生效：
   ${DOCKER[*]} restart $NAME

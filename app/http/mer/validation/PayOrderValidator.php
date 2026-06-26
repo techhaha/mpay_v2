@@ -17,6 +17,7 @@ class PayOrderValidator extends Validator
      * @var array
      */
     protected array $rules = [
+        'search_field' => 'sometimes|string|in:pay_no,biz_no,trace_no,merchant_order_no,channel_request_no,channel_order_no,channel_trade_no',
         'keyword' => 'sometimes|string|max:128',
         'merchant_id' => 'sometimes|integer|min:1',
         'pay_type_id' => 'sometimes|integer|min:1',
@@ -33,6 +34,7 @@ class PayOrderValidator extends Validator
      * @var array
      */
     protected array $attributes = [
+        'search_field' => '搜索字段',
         'keyword' => '关键字',
         'merchant_id' => '商户ID',
         'pay_type_id' => '支付方式',
@@ -49,7 +51,6 @@ class PayOrderValidator extends Validator
      * @var array
      */
     protected array $scenes = [
-        'index' => ['keyword', 'merchant_id', 'pay_type_id', 'status', 'channel_mode', 'callback_status', 'page', 'page_size'],
+        'index' => ['search_field', 'keyword', 'merchant_id', 'pay_type_id', 'status', 'channel_mode', 'callback_status', 'page', 'page_size'],
     ];
 }
-

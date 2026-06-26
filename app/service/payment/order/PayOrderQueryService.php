@@ -91,24 +91,8 @@ class PayOrderQueryService extends BaseService
         $query = $this->buildPayOrderQuery($merchantId, $includeActions);
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
-        if ($keyword !== '') {
-            // 关键词同时命中支付单、业务单、商户、通道和支付方式，方便后台一把搜全链路。
-            $query->where(function ($builder) use ($keyword) {
-                $builder->where('po.pay_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('po.biz_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('po.trace_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('po.channel_request_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('po.channel_order_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('po.channel_trade_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('bo.merchant_order_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('bo.subject', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('m.merchant_short_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('g.group_name', 'like', '%' . $keyword . '%')
-                    ->orWhere('c.name', 'like', '%' . $keyword . '%')
-                    ->orWhere('t.name', 'like', '%' . $keyword . '%');
-            });
+        if ($keyword !== '' && ($searchField = trim((string) ($filters['search_field'] ?? ''))) !== '') {
+            $this->applyPayOrderSearch($query, $searchField, $keyword);
         }
 
         if (($merchantFilter = (int) ($filters['merchant_id'] ?? 0)) > 0) {
@@ -394,6 +378,32 @@ class PayOrderQueryService extends BaseService
         }
 
         return $query;
+    }
+
+    /**
+     * 按指定订单字段做精确搜索，避免列表页退回多字段模糊扫描。
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query 查询构造器
+     * @param string $searchField 前端选择的搜索字段
+     * @param string $keyword 搜索关键字
+     * @return void
+     */
+    private function applyPayOrderSearch($query, string $searchField, string $keyword): void
+    {
+        $columnMap = [
+            'pay_no' => 'po.pay_no',
+            'biz_no' => 'po.biz_no',
+            'trace_no' => 'po.trace_no',
+            'merchant_order_no' => 'bo.merchant_order_no',
+            'channel_request_no' => 'po.channel_request_no',
+            'channel_order_no' => 'po.channel_order_no',
+            'channel_trade_no' => 'po.channel_trade_no',
+        ];
+
+        $column = $columnMap[$searchField] ?? '';
+        if ($column !== '') {
+            $query->where($column, $keyword);
+        }
     }
 
     /**
