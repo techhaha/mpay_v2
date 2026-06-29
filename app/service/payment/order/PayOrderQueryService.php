@@ -91,7 +91,8 @@ class PayOrderQueryService extends BaseService
         $query = $this->buildPayOrderQuery($merchantId, $includeActions);
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
-        if ($keyword !== '' && ($searchField = trim((string) ($filters['search_field'] ?? ''))) !== '') {
+        if ($keyword !== '') {
+            $searchField = trim((string) ($filters['search_field'] ?? 'merchant_order_no'));
             $this->applyPayOrderSearch($query, $searchField, $keyword);
         }
 

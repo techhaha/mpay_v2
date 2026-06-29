@@ -54,7 +54,8 @@ class RefundQueryService extends BaseService
         $query = $this->buildRefundOrderQuery($merchantId);
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
-        if ($keyword !== '' && ($searchField = trim((string) ($filters['search_field'] ?? ''))) !== '') {
+        if ($keyword !== '') {
+            $searchField = trim((string) ($filters['search_field'] ?? 'merchant_order_no'));
             $this->applyRefundOrderSearch($query, $searchField, $keyword);
         }
 
