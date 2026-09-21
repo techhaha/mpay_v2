@@ -53,7 +53,8 @@
 | 教程 | 适用场景 | 视频地址 |
 | --- | --- | --- |
 | 📌 宝塔面板源码安装教程 | 使用 `mpay.zip` 发行版，在宝塔面板部署 MPAY V2 | [哔哩哔哩观看](https://www.bilibili.com/video/BV138bw6aEK5/?share_source=copy_web) |
-| 📌 Docker 安装教程 | 使用 Docker 发行版一键部署 MPAY V2 服务 | 视频教程即将发布 |
+| 📌 Docker 安装教程 | 使用 Docker 发行版一键部署 MPAY V2 码支付服务 | [哔哩哔哩观看](https://www.bilibili.com/video/BV1TXhe69ENi/?share_source=copy_web) |
+| 📌 配套监听工具 Docker 安装教程 | 使用 Docker 部署 MPAY V2 码支付配套监听工具 | [哔哩哔哩观看](https://www.bilibili.com/video/BV11dhe6DEe4/?share_source=copy_web) |
 
 ## ✨ 项目介绍
 
