@@ -6,6 +6,7 @@ use app\common\base\BaseService;
 use app\common\constant\FundFreezeConstant;
 use app\common\constant\LedgerConstant;
 use app\exception\BalanceInsufficientException;
+use app\exception\BusinessStateException;
 use app\exception\ConflictException;
 use app\exception\ValidationException;
 use app\model\merchant\MerchantAccount;
@@ -152,15 +153,16 @@ class MerchantAccountCommandService extends BaseService
     }
 
     /**
-     * 扣减冻结余额。
+     * 扣减本单支付服务费冻结，并记录幂等账户流水。
      *
      * @param int $merchantId 商户ID
      * @param int $amount 金额（分）
-     * @param string $bizNo 业务单号
+     * @param string $bizNo 支付单号，作为服务费资金引用
      * @param string $idempotencyKey 幂等键
      * @param array $extJson 扩展字段
      * @param string $traceNo 追踪号
      * @return MerchantAccountLedger 流水记录
+     * @throws BusinessStateException 本单费用明细缺失、商户不符或剩余金额不足
      */
     public function deductFrozenAmount(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
@@ -170,16 +172,17 @@ class MerchantAccountCommandService extends BaseService
     }
 
     /**
-     * 在当前事务中扣减冻结余额。
+     * 在调用方事务中扣减本单支付服务费冻结。
      *
      * @param int $merchantId 商户ID
      * @param int $amount 金额（分）
-     * @param string $bizNo 业务单号
+     * @param string $bizNo 支付单号，作为服务费资金引用
      * @param string $idempotencyKey 幂等键
      * @param array $extJson 扩展字段
      * @param string $traceNo 追踪号
      * @return MerchantAccountLedger 流水记录
      * @throws ValidationException
+     * @throws BusinessStateException 本单费用明细缺失、商户不符或剩余金额不足
      */
     public function deductFrozenAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
@@ -205,10 +208,11 @@ class MerchantAccountCommandService extends BaseService
         $availableBefore = (int) $account->available_balance;
         $frozenBefore = (int) $account->frozen_balance;
 
+        // 锁定并扣减本单费用明细；明细、账户及流水由当前事务一起提交或回滚。
+        $this->reduceFundFreezeRecordIfNeeded($merchantId, $amount, $bizNo, LedgerConstant::BIZ_TYPE_PAY_DEDUCT, $extJson);
+
         $account->frozen_balance = $frozenBefore - $amount;
         $account->save();
-
-        $this->reduceFundFreezeRecordIfNeeded($merchantId, $amount, $bizNo, LedgerConstant::BIZ_TYPE_PAY_DEDUCT, $extJson);
 
         return $this->createLedger([
             'merchant_id' => $merchantId,
@@ -228,15 +232,16 @@ class MerchantAccountCommandService extends BaseService
     }
 
     /**
-     * 释放冻结余额。
+     * 释放本单支付服务费冻结，并记录幂等账户流水。
      *
      * @param int $merchantId 商户ID
      * @param int $amount 金额（分）
-     * @param string $bizNo 业务单号
+     * @param string $bizNo 支付单号，作为服务费资金引用
      * @param string $idempotencyKey 幂等键
      * @param array $extJson 扩展字段
      * @param string $traceNo 追踪号
      * @return MerchantAccountLedger 流水记录
+     * @throws BusinessStateException 本单费用明细缺失、商户不符或剩余金额不足
      */
     public function releaseFrozenAmount(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
@@ -246,16 +251,17 @@ class MerchantAccountCommandService extends BaseService
     }
 
     /**
-     * 在当前事务中释放冻结余额。
+     * 在调用方事务中释放本单支付服务费冻结。
      *
      * @param int $merchantId 商户ID
      * @param int $amount 金额（分）
-     * @param string $bizNo 业务单号
+     * @param string $bizNo 支付单号，作为服务费资金引用
      * @param string $idempotencyKey 幂等键
      * @param array $extJson 扩展字段
      * @param string $traceNo 追踪号
      * @return MerchantAccountLedger 流水记录
      * @throws ValidationException
+     * @throws BusinessStateException 本单费用明细缺失、商户不符或剩余金额不足
      */
     public function releaseFrozenAmountInCurrentTransaction(int $merchantId, int $amount, string $bizNo, string $idempotencyKey, array $extJson = [], string $traceNo = ''): MerchantAccountLedger
     {
@@ -693,11 +699,11 @@ class MerchantAccountCommandService extends BaseService
         $availableBefore = (int) $account->available_balance;
         $frozenBefore = (int) $account->frozen_balance;
 
+        $this->reduceFundFreezeRecordIfNeeded($merchantId, $amount, $bizNo, $bizType, $extJson);
+
         $account->available_balance = $availableBefore + $amount;
         $account->frozen_balance = $frozenBefore - $amount;
         $account->save();
-
-        $this->reduceFundFreezeRecordIfNeeded($merchantId, $amount, $bizNo, $bizType, $extJson);
 
         return $this->createLedger([
             'merchant_id' => $merchantId,
@@ -886,7 +892,10 @@ class MerchantAccountCommandService extends BaseService
     }
 
     /**
-     * 账户冻结余额减少时，同步扣减冻结明细剩余金额。
+     * 支付服务费扣减或释放时，锁定并减少本单费用冻结明细。
+     *
+     * 账户总冻结额不能替代本单占用；明细异常必须让调用方事务回滚，不能借用其他冻结。
+     * 风控冻结明细由风控服务维护，这里不重复处理。
      *
      * @param int $merchantId 商户ID
      * @param int $amount 金额（分）
@@ -894,6 +903,7 @@ class MerchantAccountCommandService extends BaseService
      * @param int $bizType 账户流水业务类型
      * @param array $extJson 扩展字段
      * @return void
+     * @throws BusinessStateException 本单费用明细缺失、商户不符或剩余金额不足
      */
     private function reduceFundFreezeRecordIfNeeded(int $merchantId, int $amount, string $bizNo, int $bizType, array $extJson = []): void
     {
@@ -901,17 +911,20 @@ class MerchantAccountCommandService extends BaseService
             return;
         }
 
-        $payNo = trim((string) ($extJson['pay_no'] ?? $bizNo));
-        if ($payNo === '') {
-            return;
-        }
-
+        $payNo = (string) ($extJson['pay_no'] ?? $bizNo);
         $freeze = $this->fundFreezeRepository->firstActiveForUpdateByPayNoAndType($payNo, FundFreezeConstant::TYPE_PAY_FEE, $this->now());
         if (!$freeze) {
-            return;
+            throw new BusinessStateException('支付服务费冻结明细不存在', ['pay_no' => $payNo]);
+        }
+        if ((int) $freeze->merchant_id !== $merchantId) {
+            throw new BusinessStateException('支付服务费冻结明细商户不符', ['pay_no' => $payNo, 'freeze_no' => $freeze->freeze_no]);
+        }
+        if ((int) $freeze->remaining_amount < $amount) {
+            throw new BusinessStateException('支付服务费冻结明细金额不足', ['pay_no' => $payNo, 'amount' => $amount,
+                'remaining_amount' => (int) $freeze->remaining_amount]);
         }
 
-        $remainingAmount = max(0, (int) $freeze->remaining_amount - $amount);
+        $remainingAmount = (int) $freeze->remaining_amount - $amount;
         $freeze->remaining_amount = $remainingAmount;
         if ($remainingAmount === 0) {
             $freeze->status = FundFreezeConstant::STATUS_RELEASED;

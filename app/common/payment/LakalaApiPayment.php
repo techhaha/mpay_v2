@@ -17,6 +17,7 @@ use app\common\sdk\lakala\LakalaSdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use GuzzleHttp\Client as HttpClient;
@@ -554,7 +555,7 @@ class LakalaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     {
         $handlers = $this->directPaymentUsableHandlers($order, $this->paymentHandlers($order));
         $candidates = $this->directPaymentProductCandidates($order, array_keys($handlers));
-        if (($candidates[0] ?? '') !== 'jsapi') {
+        if (!in_array((string) ($candidates[0] ?? ''), ['jsapi', 'mini'], true)) {
             return null;
         }
 
@@ -624,7 +625,13 @@ class LakalaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     private function paymentHandlers(array $order): array
     {
         $payType = (string) ($order['pay_type_code'] ?? '');
+        $payment = (array) ($order['extra']['payment'] ?? []);
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
         $wxProduct = $this->selectedWxProduct($order);
+        $jsapiHandler = ($payType === 'wxpay' && $wxProduct === self::PRODUCT_WXPAY_MINI)
+            || ($payType === 'alipay' && $method === 'mini')
+            ? 'mini'
+            : 'jsapi';
         $handlers = [
             'auth_code' => [
                 'products' => [
@@ -635,7 +642,7 @@ class LakalaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
 
                 'handler' => fn (): array => $this->micropay($order, $payType),
             ],
-            'jsapi' => [
+            $jsapiHandler => [
                 'products' => [
                     'alipay' => self::PRODUCT_ALIPAY_JSAPI,
                     'wxpay' => $wxProduct,
@@ -719,6 +726,11 @@ class LakalaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     private function selectedWxProduct(array $order): string
     {
         $payment = (array) ($order['extra']['payment'] ?? []);
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini' ? self::PRODUCT_WXPAY_MINI : self::PRODUCT_WXPAY_JSAPI;
+        }
+
         $mini = $this->firstText($payment['mini_openid'] ?? '', $payment['mini_code'] ?? '') !== ''
             || in_array($payment['is_mini'] ?? false, [true, 1, '1', 'true', 'on'], true)
             || strtolower($this->configText('wx_default_jsapi_product')) === 'mini';
@@ -2297,7 +2309,7 @@ class LakalaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     private function ensureProduct(string $product): void
     {
         if (!$this->productEnabled($product)) {
-            throw new PaymentException('当前拉卡拉通道未开启该支付产品', 40200, ['product' => $product]);
+            throw new PaymentProductUnavailableException('当前拉卡拉通道未开启该支付产品', 40200, ['product' => $product]);
         }
     }
 

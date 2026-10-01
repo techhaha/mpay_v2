@@ -769,7 +769,6 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
     {
         ['title' => $title, 'msg' => $msg] = $this->alipayNotificationFromPayload($payload);
 
-        \support\Log::info('notificationTextFromPayload', ['title' => $title, 'msg' => $msg]);
         return $title === '收款通知' ? $msg : $title;
     }
 

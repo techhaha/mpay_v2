@@ -509,7 +509,11 @@ class EasypayApiPayment extends BasePayment implements
             return $this->payResult($order, $product, 'jump', 'trade.jsapi', ['url' => $redirectUrl], $data, $transDate);
         }
         if ($state === '0') {
-            return $this->payResult($order, $product, 'ok', 'trade.jsapi', [], $data, $transDate);
+            // 下单链路保持 pending，由原严格查单或回调确认资金；不返回收银台内部 ok 模式。
+            return $this->payResult($order, $product, 'page', 'trade.jsapi', [
+                '_page' => 'paymentPending',
+                'description' => '支付请求已返回，请等待支付结果确认。',
+            ], $data, $transDate);
         }
 
         throw new PaymentUncertainException('易生银联 JSAPI 已受理但未返回可承接结果', 40200);
@@ -698,6 +702,7 @@ class EasypayApiPayment extends BasePayment implements
         return [
             'provider' => 'alipay',
             'product' => 'jsapi',
+            'channel_product' => self::PRODUCT_ALI_PAY_JSAPI,
             'auth_type' => 'alipay_oauth',
             'identity_field' => 'buyer_id',
             'identity_aliases' => [],
@@ -743,6 +748,7 @@ class EasypayApiPayment extends BasePayment implements
         return [
             'provider' => 'wxpay',
             'product' => 'mp',
+            'channel_product' => self::PRODUCT_WE_CHAT_JSAPI,
             'auth_type' => 'wechat_oauth',
             'identity_field' => 'sub_openid',
             'identity_aliases' => ['openid'],
@@ -769,6 +775,7 @@ class EasypayApiPayment extends BasePayment implements
         return [
             'provider' => 'unionpay',
             'product' => 'jsapi',
+            'channel_product' => self::PRODUCT_UNION_PAY_JSAPI,
             'auth_type' => 'unionpay_user_auth',
             'identity_field' => 'unionpay_auth_code',
             'identity_aliases' => [],

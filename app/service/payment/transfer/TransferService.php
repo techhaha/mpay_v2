@@ -675,8 +675,13 @@ class TransferService extends BaseService
 
             $latest->status = TransferConstant::TRANSFER_STATUS_FAILED;
             $latest->failed_at = $this->now();
-            $latest->channel_error_code = $this->firstText($result, ['channel_error_code', 'code']);
-            $latest->channel_error_msg = $message;
+            $latest->channel_error_code = mb_strcut(
+                $this->firstText($result, ['channel_error_code', 'code']),
+                0,
+                64,
+                'UTF-8'
+            );
+            $latest->channel_error_msg = mb_strcut($message, 0, 255, 'UTF-8');
             $latest->ext_json = array_merge((array) $latest->ext_json, [
                 'plugin_result' => $this->buildPluginResultSnapshot($result),
             ]);

@@ -50,6 +50,7 @@ class PayOrderReportService extends BaseService
         $row['biz_order_amount_text'] = $this->formatAmount((int) ($row['biz_order_amount'] ?? 0));
         $row['biz_paid_amount_text'] = $this->formatAmount((int) ($row['biz_paid_amount'] ?? 0));
         $row['biz_refund_amount_text'] = $this->formatAmount((int) ($row['biz_refund_amount'] ?? 0));
+        $row['pay_refund_amount_text'] = $this->formatAmount((int) ($row['pay_refund_amount'] ?? 0));
 
         $row['request_at_text'] = $this->formatDateTime($row['request_at'] ?? null, '—');
         $row['paid_at_text'] = $this->formatDateTime($row['paid_at'] ?? null, '—');

@@ -3,6 +3,7 @@
 namespace app\repository\payment\notify;
 
 use app\common\base\BaseRepository;
+use app\common\constant\NotifyConstant;
 use app\model\payment\NotifyTask;
 
 /**
@@ -37,6 +38,20 @@ class NotifyTaskRepository extends BaseRepository
     }
 
     /**
+     * 在当前事务内锁定通知任务，串行化同一任务的结果写回。
+     *
+     * @param string $notifyNo 通知任务号
+     * @return NotifyTask|null 任务不存在时返回 null
+     */
+    public function findForUpdateByNotifyNo(string $notifyNo): ?NotifyTask
+    {
+        return $this->model->newQuery()
+            ->where('notify_no', $notifyNo)
+            ->lockForUpdate()
+            ->first();
+    }
+
+    /**
      * 根据通知事件和引用单号查询通知任务。
      *
      * @param string $eventType 通知事件类型
@@ -68,22 +83,26 @@ class NotifyTaskRepository extends BaseRepository
     }
 
     /**
-     * 查询可重试的通知任务列表。
+     * 限量查询到期且仍有重试额度的通知任务。
      *
-     * @param int $status 状态
-     * @param array $columns 字段列表
-     * @return \Illuminate\Database\Eloquent\Collection<int, NotifyTask> 可重试任务列表
+     * 包含首次投递丢失的 PENDING 任务；同一时间的任务按 ID 稳定排序。
+     *
+     * @param int $limit 本轮最多投递的任务数
+     * @param int $retryLimit 最大失败次数
+     * @return \Illuminate\Database\Eloquent\Collection<int, NotifyTask> 到期任务
      */
-    public function listRetryable(int $status, array $columns = ['*'])
+    public function listRetryable(int $limit, int $retryLimit)
     {
         return $this->model->newQuery()
-            ->where('status', $status)
+            ->whereIn('status', [NotifyConstant::TASK_STATUS_PENDING, NotifyConstant::TASK_STATUS_FAILED])
+            ->where('retry_count', '<', $retryLimit)
             ->whereNotNull('next_retry_at')
             ->where('next_retry_at', '<=', date('Y-m-d H:i:s'))
             ->orderBy('next_retry_at')
-            ->get($columns);
+            ->orderBy('id')
+            ->limit(max(1, $limit))
+            ->get();
     }
 }
-
 
 

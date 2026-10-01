@@ -17,6 +17,7 @@ use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use app\model\payment\PayOrder;
@@ -1010,7 +1011,7 @@ class YsepayApiPayment extends BasePayment implements
     private function ensureProduct(string $product): void
     {
         if (!in_array($product, $this->enabledProducts(), true)) {
-            throw new PaymentDefinitiveException('银盛产品未在当前通道开通', 40200, [
+            throw new PaymentProductUnavailableException('银盛产品未在当前通道开通', 40200, [
                 'channel_error_code' => 'PRODUCT_NOT_OPEN',
                 'product' => $product,
             ]);
@@ -1028,15 +1029,17 @@ class YsepayApiPayment extends BasePayment implements
             return false;
         }
         $payment = $this->paymentPayload($order);
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
 
         return $this->firstText(
             $payment['mini_openid'] ?? '',
             $payment['mini_code'] ?? '',
             $payment['wx_login_code'] ?? '',
             $payment['mini_app_id'] ?? ''
-        ) !== ''
-            || strtolower(trim((string) ($payment['method'] ?? ''))) === 'mini'
-            || filter_var($payment['is_mini'] ?? false, FILTER_VALIDATE_BOOL);
+        ) !== '' || filter_var($payment['is_mini'] ?? false, FILTER_VALIDATE_BOOL);
     }
 
     /**

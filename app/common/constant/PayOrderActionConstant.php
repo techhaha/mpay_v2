@@ -15,6 +15,9 @@ final class PayOrderActionConstant
      */
     public const MANUAL_SUCCESS = 'manual_success';
 
+    /** 充值后全额补扣成功自收订单的待收服务费，不重新下单或退款。 */
+    public const COLLECT_SERVICE_FEE = 'collect_service_fee';
+
     /**
      * 重新通知商户。
      */
@@ -64,6 +67,7 @@ final class PayOrderActionConstant
     {
         return [
             self::MANUAL_SUCCESS => '手动补单',
+            self::COLLECT_SERVICE_FEE => '补扣服务费',
             self::RENOTIFY => '重新通知',
             self::ACTIVE_QUERY => '主动查询',
             self::API_REFUND => 'API退款',

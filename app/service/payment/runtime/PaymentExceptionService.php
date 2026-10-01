@@ -4,6 +4,7 @@ namespace app\service\payment\runtime;
 
 use app\common\base\BaseService;
 use app\common\constant\PaymentExceptionConstant;
+use app\exception\BalanceInsufficientException;
 use app\model\payment\PayOrder;
 use app\model\payment\PaymentExceptionRecord;
 use app\repository\payment\runtime\PaymentExceptionRecordRepository;
@@ -12,12 +13,76 @@ use app\repository\payment\runtime\PaymentExceptionRecordRepository;
  * 管理支付业务异常的当前处置状态。
  *
  * 异常记录用于后台发现和处置少量非标准业务结果，不替代支付单的渠道错误字段，
- * 也不改变支付单真实状态或商户协议响应。
+ * 也不改变支付单真实状态。重复支付异常同时保留退款归属事实，处置完成后仍用于隔离正常业务退款。
  *
  * @property PaymentExceptionRecordRepository $exceptionRepository 支付异常记录仓库
  */
 class PaymentExceptionService extends BaseService
 {
+    /**
+     * 在可信迟到成功事务中登记自收服务费欠费。
+     *
+     * 调用方持有支付单锁；异常与成功、费用 DUE 状态一起提交或回滚。
+     * detail_json 仅保留本次余额检查的证据，不放入订单 ext_json，也不创建自动追缴任务。
+     */
+    public function openPayFeeDueInCurrentTransaction(PayOrder $payOrder, BalanceInsufficientException $e): PaymentExceptionRecord
+    {
+        $record = $this->exceptionRepository->findForUpdateBySubjectType(
+            PaymentExceptionConstant::SUBJECT_PAY,
+            (string) $payOrder->pay_no,
+            PaymentExceptionConstant::TYPE_PAY_SERVICE_FEE_DUE
+        );
+        $data = [
+            'biz_no' => (string) $payOrder->biz_no,
+            'merchant_id' => (int) $payOrder->merchant_id,
+            'severity' => PaymentExceptionConstant::SEVERITY_WARNING,
+            'status' => PaymentExceptionConstant::STATUS_OPEN,
+            'source_type' => 'SYSTEM',
+            'source_id' => 0,
+            'summary' => '支付已成功，自收服务费余额不足，待充值后人工补扣',
+            'detail_json' => [
+                'service_fee_amount' => (int) $payOrder->service_fee_amount,
+                'available_amount' => (int) ($e->getData()['available_amount'] ?? 0),
+                'channel_id' => (int) $payOrder->channel_id,
+                'reason' => $e->getMessage(),
+            ],
+            'detected_at' => $record?->detected_at ?: $this->now(),
+            'resolution' => '', 'resolution_ref_no' => '', 'resolver_id' => 0, 'resolved_at' => null,
+        ];
+        if (!$record) {
+            $record = $this->exceptionRepository->create([
+                'exception_no' => $this->generateNo('EXC'),
+                'subject_type' => PaymentExceptionConstant::SUBJECT_PAY,
+                'subject_no' => (string) $payOrder->pay_no,
+                'exception_type' => PaymentExceptionConstant::TYPE_PAY_SERVICE_FEE_DUE,
+            ] + $data);
+        } else {
+            $record->fill($data);
+            $record->save();
+        }
+        return $record->refresh();
+    }
+
+    /** 在已锁定支付单的全额补扣事务中关闭欠费异常；重复销项不更新原处置证据。 */
+    public function resolvePayFeeDueInCurrentTransaction(string $payNo, int $adminId): bool
+    {
+        $record = $this->exceptionRepository->findForUpdateBySubjectType(
+            PaymentExceptionConstant::SUBJECT_PAY,
+            $payNo,
+            PaymentExceptionConstant::TYPE_PAY_SERVICE_FEE_DUE
+        );
+        if (!$record || !PaymentExceptionConstant::isOpen((int) $record->status)) {
+            return false;
+        }
+        $record->status = PaymentExceptionConstant::STATUS_RESOLVED;
+        $record->resolution = '自收通道服务费已全额补扣';
+        $record->resolution_ref_no = $payNo;
+        $record->resolver_id = $adminId;
+        $record->resolved_at = $this->now();
+        $record->save();
+        return true;
+    }
+
     /**
      * 构造方法。
      *
@@ -26,6 +91,25 @@ class PaymentExceptionService extends BaseService
     public function __construct(
         protected PaymentExceptionRecordRepository $exceptionRepository
     ) {
+    }
+
+    /**
+     * 判断支付单是否属于异常重复收款。
+     *
+     * PAY_LATE_DUPLICATE 记录表示支付归属事实，不按处置状态过滤；足额返还后已解决的
+     * 记录仍用于排除正常业务退款累计和商户退款通知。其他异常类型不影响该判断。
+     *
+     * @param string $payNo MPAY 支付单号
+     * @return bool 是否存在重复支付事实
+     */
+    public function isLateDuplicatePayment(string $payNo): bool
+    {
+        return $this->exceptionRepository->findBySubjectType(
+            PaymentExceptionConstant::SUBJECT_PAY,
+            $payNo,
+            PaymentExceptionConstant::TYPE_PAY_LATE_DUPLICATE,
+            ['id']
+        ) !== null;
     }
 
     /**

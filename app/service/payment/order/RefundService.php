@@ -3,6 +3,9 @@
 namespace app\service\payment\order;
 
 use app\common\base\BaseService;
+use app\common\constant\TradeConstant;
+use app\exception\BusinessStateException;
+use app\exception\ResourceNotFoundException;
 use app\model\payment\RefundOrder;
 
 /**
@@ -80,25 +83,105 @@ class RefundService extends BaseService
     }
 
     /**
-     * 退款重试。
+     * 重新派发待处理退款，或重试失败退款。
      *
      * @param string $refundNo 退款单号
      * @param array $input 输入参数
      * @param int|null $merchantId 商户ID
      * @return RefundOrder 退款单模型
-     * @throws app\exception\ResourceNotFoundException
+     * @throws ResourceNotFoundException
+     * @throws BusinessStateException
      */
     public function retryRefund(string $refundNo, array $input = [], ?int $merchantId = null): RefundOrder
     {
-        if ($merchantId !== null && $merchantId > 0) {
-            // 商户后台重试前先确认退款单归属，避免跨商户误操作。
-            $refundOrder = $this->queryService->findByRefundNo($refundNo, $merchantId);
-            if (!$refundOrder) {
-                throw new \app\exception\ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
-            }
+        $refundOrder = $this->queryService->findByRefundNo($refundNo, $merchantId);
+        if (!$refundOrder) {
+            throw new ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
         }
 
-        return $this->dispatchService->dispatch($refundNo, true);
+        $status = (int) $refundOrder->status;
+        $extJson = (array) ($refundOrder->ext_json ?? []);
+        $adminAction = (array) ($extJson['admin_action'] ?? []);
+        if ((string) ($adminAction['type'] ?? '') === 'manual_refund') {
+            throw new BusinessStateException('手动退款记录不能派发到上游通道', ['refund_no' => $refundNo]);
+        }
+        if (!in_array($status, [
+            TradeConstant::REFUND_STATUS_CREATED,
+            TradeConstant::REFUND_STATUS_FAILED,
+        ], true)) {
+            throw new BusinessStateException('当前退款状态不允许重新派发', [
+                'refund_no' => $refundNo,
+                'status' => $status,
+            ]);
+        }
+
+        return $this->dispatchService->dispatch(
+            $refundOrder,
+            $status === TradeConstant::REFUND_STATUS_FAILED
+        );
+    }
+
+    /**
+     * 用原退款单主动核对渠道状态，并返回更新后的后台详情。
+     *
+     * 仅处理已派发的处理中通道退款；查询可能据可信结果推进成功或失败，
+     * 不会再次调用上游退款申请接口，也不处理后台手动退款记录。
+     *
+     * @param string $refundNo 原退款单号
+     * @return array<string, mixed> 更新后的退款详情
+     * @throws ResourceNotFoundException 退款单不存在时抛出
+     * @throws BusinessStateException 退款来源或当前状态不允许主动查渠道时抛出
+     */
+    public function queryRefundStatus(string $refundNo): array
+    {
+        $refundOrder = $this->queryService->findByRefundNo($refundNo);
+        if (!$refundOrder) {
+            throw new ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
+        }
+
+        if (($refundOrder->ext_json['admin_action']['type'] ?? '') === 'manual_refund') {
+            throw new BusinessStateException('后台手动退款记录不查询上游通道', ['refund_no' => $refundNo]);
+        }
+        if ((int) $refundOrder->status !== TradeConstant::REFUND_STATUS_PROCESSING) {
+            throw new BusinessStateException('只有处理中的退款单可以主动查询渠道状态', [
+                'refund_no' => $refundNo,
+                'status' => (int) $refundOrder->status,
+            ]);
+        }
+
+        $this->dispatchService->queryStatus($refundOrder);
+
+        return $this->queryService->detail($refundNo);
+    }
+
+    /**
+     * 凭已核实的外部证据确认原退款单成功，并返回后台详情。
+     *
+     * @param string $refundNo 原退款单号
+     * @param array{confirmed_amount:int,channel_refund_no:string,evidence:string,reason:string} $input 已校验的外部证据
+     * @param int $adminId 当前管理员ID
+     * @return array<string, mixed> 更新后的退款详情
+     */
+    public function confirmRefundSuccess(string $refundNo, array $input, int $adminId): array
+    {
+        $this->lifecycleService->confirmRefundSuccessByAdmin($refundNo, $input, $adminId);
+
+        return $this->queryService->detail($refundNo);
+    }
+
+    /**
+     * 取消未派发的原退款单，并返回后台详情。
+     *
+     * @param string $refundNo 原退款单号
+     * @param string $reason 管理员取消原因
+     * @param int $adminId 当前管理员ID
+     * @return array<string, mixed> 更新后的退款详情
+     */
+    public function cancelRefund(string $refundNo, string $reason, int $adminId): array
+    {
+        $this->lifecycleService->cancelUnsentRefundByAdmin($refundNo, $reason, $adminId);
+
+        return $this->queryService->detail($refundNo);
     }
 
     /**

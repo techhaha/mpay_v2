@@ -6,7 +6,7 @@ use app\common\base\BaseModel;
 
 /**
  * 支付回调日志模型。
- * 用于记录同步和异步回调原始报文和处理状态。
+ * 用于记录支付与退款渠道回调的原始报文、关联单号和处理状态。
  */
 class PayCallbackLog extends BaseModel
 {
@@ -31,6 +31,7 @@ class PayCallbackLog extends BaseModel
      */
     protected $fillable = [
         'pay_no',
+        'refund_no',
         'channel_id',
         'callback_type',
         'request_data',
@@ -57,6 +58,7 @@ class PayCallbackLog extends BaseModel
      * @var mixed
      */
     protected $casts = [
+        'refund_no' => 'string',
         'channel_id' => 'integer',
         'callback_type' => 'integer',
         'request_data' => 'array',

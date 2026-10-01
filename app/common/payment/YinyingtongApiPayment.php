@@ -14,6 +14,7 @@ use app\common\sdk\yinyingtong\YinyingtongSdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
@@ -121,7 +122,7 @@ class YinyingtongApiPayment extends BasePayment implements PaymentInterface, Pay
                 ],
                 'handler' => fn (): array => $payType === 'wxpay'
                 ? $this->wxUrlSchemePay($order)
-                : throw new PaymentException('银盈通当前支付方式不支持URL Scheme产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                : throw new PaymentProductUnavailableException('银盈通当前支付方式不支持URL Scheme产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
             ],
 
             'qrcode' => [

@@ -10,6 +10,7 @@ use app\common\constant\TradeConstant;
 use app\common\util\FormatHelper;
 use app\exception\BusinessStateException;
 use app\exception\ConflictException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\ValidationException;
 use app\model\merchant\Merchant;
 use app\model\payment\BizOrder;
@@ -81,21 +82,64 @@ class PayOrderAttemptService extends BaseService
 
         $this->ensurePaymentTypeEnabled($payTypeId);
         $route = $this->paymentRouteService->resolveByMerchantGroup($merchantGroupId, $payTypeId, $payAmount, $input);
-        /** @var PaymentChannel $channel */
-        $channel = $route['selected_channel']['channel'];
-        $identityFlow = $this->paymentIdentityService->inspect($input, $merchant, $channel, $route);
-        if ($identityFlow !== null) {
-            return $identityFlow;
+        $selected = (array) $route['selected_channel'];
+        $candidates = [$selected];
+        foreach ((array) ($route['candidates'] ?? []) as $candidate) {
+            if ((int) ($candidate['channel_id'] ?? 0) !== (int) ($selected['channel_id'] ?? 0)) {
+                $candidates[] = $candidate;
+            }
         }
 
-        return $this->createAndDispatchPayAttempt(
-            $input,
-            $merchant,
-            $merchantGroupId,
-            $channel,
-            (int) ($route['poll_group']->id ?? 0),
-            $route
-        );
+        $productRejects = [];
+        $lastPayNo = '';
+        foreach ($candidates as $candidate) {
+            /** @var PaymentChannel $channel */
+            $channel = $candidate['channel'];
+            $route['selected_channel'] = $candidate;
+
+            try {
+                // 身份授权开始前只做插件本地产品判断；未开通当前产品时可换下一个候选通道。
+                $identityFlow = $this->paymentIdentityService->inspect($input, $merchant, $channel, $route);
+            } catch (PaymentProductUnavailableException $e) {
+                $productRejects[] = [
+                    'channel_id' => (int) $channel->id,
+                    'channel_name' => (string) $channel->name,
+                    'reason' => $e->getMessage(),
+                ];
+                continue;
+            }
+
+            if ($identityFlow !== null) {
+                return $identityFlow;
+            }
+
+            try {
+                return $this->createAndDispatchPayAttempt(
+                    $input,
+                    $merchant,
+                    $merchantGroupId,
+                    $channel,
+                    (int) ($route['poll_group']->id ?? 0),
+                    $route
+                );
+            } catch (PaymentProductUnavailableException $e) {
+                // 只接收产品处理器执行前的本地不可用；已预写产品的拒绝不会以此类型越过派发层。
+                $lastPayNo = (string) $e->getData()['pay_no'];
+                $productRejects[] = [
+                    'channel_id' => (int) $channel->id,
+                    'channel_name' => (string) $channel->name,
+                    'reason' => $e->getMessage(),
+                ];
+            }
+        }
+
+        throw new PaymentProductUnavailableException('未找到支持当前支付环境的已开通支付产品', 40200, [
+            // 所有候选拒绝时仍承接最后一笔真实支付单；未创建支付单时保持为空。
+            'pay_no' => $lastPayNo,
+            'pay_type_id' => $payTypeId,
+            'device' => (string) ($input['device'] ?? ''),
+            'channel_rejects' => $productRejects,
+        ]);
     }
 
     /**

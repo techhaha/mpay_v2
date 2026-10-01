@@ -10,21 +10,24 @@ use Throwable;
 /**
  * 队列任务基类。
  *
- * 提供消息字段校验、布尔值解析和统一失败日志，具体业务 Job 只需要实现 handle。
+ * 提供消息字段校验、布尔值解析和最终失败日志，具体业务 Job 只需要实现 handle。
  */
 abstract class AbstractQueueJob implements QueueJobInterface
 {
     /**
-     * 默认消费失败处理。
+     * 记录重试耗尽后的最终失败。
      *
-     * @param Throwable $exception 异常
-     * @param array<string, mixed> $package 原始队列包
+     * 中间重试异常由 Redis Queue 框架记录，本方法只由 AbstractRedisConsumer
+     * 在消息即将进入失败队列时调用。
+     *
+     * @param Throwable $exception 最后一次消费异常
+     * @param array<string, mixed> $package 已包含最终执行次数的队列包
      * @return void
      */
     public function failed(Throwable $exception, array $package): void
     {
-        Log::warning(sprintf(
-            '[%s] 消费失败 queue=%s attempts=%s error=%s',
+        Log::error(sprintf(
+            '[%s] 队列任务最终失败 queue=%s attempts=%s error=%s',
             $this->logName(),
             (string) ($package['queue'] ?? ''),
             (string) ($package['attempts'] ?? ''),

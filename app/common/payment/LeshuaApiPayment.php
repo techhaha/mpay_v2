@@ -8,11 +8,14 @@ use app\common\base\BasePayment;
 use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
+use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\leshua\LeshuaClient;
 use app\common\sdk\leshua\LeshuaSdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
+use app\common\trait\DirectPaymentIdentityTrait;
 use app\exception\PaymentException;
+use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
@@ -24,9 +27,10 @@ use support\Response;
  * 提供支付宝、微信和银联的扫码、支付宝/微信 JSAPI、付款码、支付通知与退款能力。
  * 当前适配协议没有可确认的主动查单和关单接口。
  */
-class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
+class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
 {
     use DirectPaymentProductSelectorTrait;
+    use DirectPaymentIdentityTrait;
 
     private const PRODUCT_UPLOAD_AUTHCODE = 'upload_authcode';
     private const PRODUCT_ZFBZF_JSAPI = 'ZFBZF_JSAPI';
@@ -34,6 +38,7 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     private const PRODUCT_ZFBZF = 'ZFBZF';
     private const PRODUCT_WXZF = 'WXZF';
     private const PRODUCT_UPSMZF = 'UPSMZF';
+    private const PRODUCT_WXZF_MINI = 'WXZF_MINI';
 
     private ?LeshuaClient $client = null;
 
@@ -69,10 +74,12 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                 self::PRODUCT_UPLOAD_AUTHCODE => '付款码支付',
                 self::PRODUCT_ZFBZF_JSAPI => '支付宝 JSAPI',
                 self::PRODUCT_WXZF_JSAPI => '微信 JSAPI',
+                self::PRODUCT_WXZF_MINI => '微信小程序',
                 self::PRODUCT_ZFBZF => '支付宝扫码',
                 self::PRODUCT_WXZF => '微信扫码',
                 self::PRODUCT_UPSMZF => '银联扫码',
             ]),
+            ...$this->directPaymentIdentityConfigFields(['wechat_oauth', 'mini_program', 'alipay_oauth']),
         ];
     }
 
@@ -84,7 +91,36 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     public function pay(array $order): array
     {
-        return $this->executeDirectPaymentProduct($order, [
+        return $this->executeDirectPaymentProduct($order, $this->paymentProducts($order), '乐刷');
+    }
+
+    /**
+     * 按与下单一致的产品声明预检身份；公众号、小程序和支付宝 UID 不互相替代。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>|null 当前产品的身份需求
+     */
+    public function identityRequirement(array $order): ?array
+    {
+        $product = $this->directPaymentSelection($order, $this->paymentProducts($order))['product'];
+
+        return match ($product) {
+            self::PRODUCT_WXZF_JSAPI => $this->directPaymentIdentityRequirement($order, $product, 'wechat_oauth'),
+            self::PRODUCT_WXZF_MINI => $this->directPaymentIdentityRequirement($order, $product, 'mini_program'),
+            self::PRODUCT_ZFBZF_JSAPI => $this->directPaymentIdentityRequirement($order, $product, 'alipay_oauth'),
+            default => null,
+        };
+    }
+
+    /**
+     * 声明已实现的产品；选择器在任何请求前过滤未开通产品及不合理环境。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, array<string, mixed>> 产品与处理器声明
+     */
+    private function paymentProducts(array $order): array
+    {
+        return [
 
             'auth_code' => [
                 'products' => [
@@ -102,6 +138,10 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                 ],
                 'handler' => fn (): array => $this->jsapiPay($order),
             ],
+            'mini' => [
+                'products' => ['wxpay' => self::PRODUCT_WXZF_MINI],
+                'handler' => fn (): array => $this->jsapiPay($order, true),
+            ],
 
             'qrcode' => [
                 'products' => [
@@ -111,7 +151,7 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                 ],
                 'handler' => fn (): array => $this->qrcodePay($order),
             ],
-        ], '乐刷');
+        ];
     }
 
     /**
@@ -140,7 +180,7 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             throw new PaymentException('乐刷下单失败：' . $e->getMessage(), 40200);
         }
 
-        $qrcode = (string) ($data['td_code'] ?? $data['jspay_url'] ?? '');
+        $qrcode = (string) ($data[$payType === 'wxpay' ? 'jspay_url' : 'td_code'] ?? '');
         if ($qrcode === '') {
             throw new PaymentException('乐刷未返回支付链接', 40200, ['response' => $data]);
         }
@@ -262,20 +302,28 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      * JSAPI 支付。
      *
      * @param array<string, mixed> $order 标准插件下单参数
+     * @param bool $mini 是否调用已选定的小程序产品
      * @return array<string, mixed> 标准支付结果
      */
-    private function jsapiPay(array $order): array
+    private function jsapiPay(array $order, bool $mini = false): array
     {
         $payType = (string) $order['pay_type_code'];
-        $payment = (array) ($order['extra']['payment'] ?? []);
+        $identity = $this->directPaymentIdentityData($order, $payType === 'alipay' ? 'alipay_oauth' : ($mini ? 'mini_program' : 'wechat_oauth'));
+        if ($identity['identity'] === '') {
+            throw new PaymentDefinitiveException('乐刷必须先取得当前产品的用户身份', 40200);
+        }
+        $product = $payType === 'alipay' ? self::PRODUCT_ZFBZF_JSAPI : ($mini ? self::PRODUCT_WXZF_MINI : self::PRODUCT_WXZF_JSAPI);
         $payWay = $payType === 'wxpay' ? 'WXZF' : 'ZFBZF';
         $payload = $this->basePayload($order) + [
             'service' => 'get_tdcode',
-            'jspay_flag' => $payType === 'wxpay' ? '1' : '1',
+            // 1 为公众号/生活号，3 为小程序，不按传入了哪个 openid 猜产品。
+            'jspay_flag' => $mini ? '3' : '1',
             'pay_way' => $payWay,
-            'sub_openid' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
-            'appid' => (string) ($payment['sub_appid'] ?? ''),
+            'sub_openid' => $identity['identity'],
         ];
+        if ($payType === 'wxpay') {
+            $payload['appid'] = $identity['app_id'];
+        }
 
         try {
             $data = $this->client()->request($payload);
@@ -289,7 +337,11 @@ class LeshuaApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             $payInfo = is_array($decoded) ? $decoded : ['tradeNO' => $payInfo];
         }
 
-        return $this->payResult('jsapi', $payType, $payWay . '_JSAPI', 'get_tdcode', ((array) $payInfo) + ['raw' => $data], $data, $order);
+        $params = $mini
+            ? ['_page' => 'wechatMini', 'request_payment' => (array) $payInfo, 'raw' => $data]
+            : ((array) $payInfo) + ['raw' => $data];
+
+        return $this->payResult($mini ? 'page' : 'jsapi', $payType, $product, 'get_tdcode', $params, $data, $order);
     }
 
     /**

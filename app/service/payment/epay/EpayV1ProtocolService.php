@@ -79,18 +79,20 @@ class EpayV1ProtocolService extends BaseService
     /**
      * 处理页面跳转支付入口。
      *
-     * @param array $payload 请求载荷
+     * @param array $payload 已校验的业务参数
+     * @param array $signaturePayload 原始验签参数
      * @param Request $request 请求对象
      * @return Response 跳转响应
      * @throws ValidationException
      */
-    public function submit(array $payload, Request $request): Response
+    public function submit(array $payload, array $signaturePayload, Request $request): Response
     {
         try {
+            $merchantId = $this->authorizeSubmitMerchant($signaturePayload);
             $typeCode = trim((string) ($payload['type'] ?? ''));
             if ($typeCode === '') {
                 // `type` 为空时先创建收银台业务单，选完方式后再进入正式支付单流程。
-                $targetUrl = $this->prepareCashierSubmit($payload, $request);
+                $targetUrl = $this->prepareCashierSubmit($payload, $request, $merchantId);
                 if ($targetUrl === '') {
                     throw new ValidationException('收银台跳转地址生成失败');
                 }
@@ -101,6 +103,7 @@ class EpayV1ProtocolService extends BaseService
             $attempt = $this->prepareSubmitAttempt(
                 $payload,
                 $request,
+                $merchantId,
                 EpayProtocolConstant::SUBMIT_TYPE_PAGE
             );
 
@@ -135,19 +138,42 @@ class EpayV1ProtocolService extends BaseService
     }
 
     /**
+     * 构建 V1 API 失败响应。
+     *
+     * 控制器参数校验和服务内业务异常共用同一协议格式。
+     *
+     * @param Throwable $e 请求异常
+     * @return array{code: int, msg: string} ePay V1 失败响应
+     */
+    public function failureResponse(Throwable $e): array
+    {
+        return [
+            'code' => self::FAILURE_CODE,
+            'msg' => $e->getMessage() ?: '请求失败',
+        ];
+    }
+
+    /**
      * 处理 API 支付入口。
      *
-     * @param array $payload 请求载荷
+     * @param array $payload 已校验的业务参数
+     * @param array $signaturePayload 原始验签参数
      * @param Request $request 请求对象
      * @return array<string, mixed> ePay 风格响应
      */
-    public function mapi(array $payload, Request $request): array
+    public function mapi(array $payload, array $signaturePayload, Request $request): array
     {
         try {
-            $attempt = $this->prepareSubmitAttempt($payload, $request, EpayProtocolConstant::SUBMIT_TYPE_API);
+            $merchantId = $this->authorizeSubmitMerchant($signaturePayload);
+            $attempt = $this->prepareSubmitAttempt(
+                $payload,
+                $request,
+                $merchantId,
+                EpayProtocolConstant::SUBMIT_TYPE_API
+            );
             return $this->buildMapiResponse($attempt);
         } catch (Throwable $e) {
-            return ['code' => self::FAILURE_CODE, 'msg' => $e->getMessage() ?: '请求失败'];
+            return $this->failureResponse($e);
         }
     }
 
@@ -208,7 +234,7 @@ class EpayV1ProtocolService extends BaseService
                 'order_lastday' => $lastDayOrders,
             ];
         } catch (Throwable $e) {
-            return ['code' => self::FAILURE_CODE, 'msg' => $e->getMessage() ?: '请求失败'];
+            return $this->failureResponse($e);
         }
     }
 
@@ -245,7 +271,7 @@ class EpayV1ProtocolService extends BaseService
                 })->all(),
             ];
         } catch (Throwable $e) {
-            return ['code' => self::FAILURE_CODE, 'msg' => $e->getMessage() ?: '请求失败'];
+            return $this->failureResponse($e);
         }
     }
 
@@ -269,7 +295,7 @@ class EpayV1ProtocolService extends BaseService
             // 旧协议查询单号时，要把支付单和业务单合并成同一份响应结构。
             return ['code' => self::SUCCESS_CODE, 'msg' => '查询订单号成功！'] + $this->formatEpayOrderRow($context['pay_order'], $context['biz_order']);
         } catch (Throwable $e) {
-            return ['code' => self::FAILURE_CODE, 'msg' => $e->getMessage() ?: '请求失败'];
+            return $this->failureResponse($e);
         }
     }
 
@@ -311,7 +337,7 @@ class EpayV1ProtocolService extends BaseService
                 }, $items),
             ];
         } catch (Throwable $e) {
-            return ['code' => self::FAILURE_CODE, 'msg' => $e->getMessage() ?: '请求失败'];
+            return $this->failureResponse($e);
         }
     }
 
@@ -344,13 +370,16 @@ class EpayV1ProtocolService extends BaseService
             ]);
 
             $refundOrder = $this->refundDispatchService->dispatch($refundOrder);
+            if ((int) $refundOrder->status === TradeConstant::REFUND_STATUS_PROCESSING) {
+                return ['code' => self::FAILURE_CODE, 'msg' => '退款处理中，尚未确认完成，请复用原退款单核对结果'];
+            }
             if ((int) $refundOrder->status !== TradeConstant::REFUND_STATUS_SUCCESS) {
                 return ['code' => self::FAILURE_CODE, 'msg' => (string) ($refundOrder->last_error ?: '退款失败')];
             }
 
             return ['code' => self::SUCCESS_CODE, 'msg' => '退款成功'];
         } catch (Throwable $e) {
-            return ['code' => self::FAILURE_CODE, 'msg' => $e->getMessage() ?: '请求失败'];
+            return $this->failureResponse($e);
         }
     }
 
@@ -359,11 +388,17 @@ class EpayV1ProtocolService extends BaseService
      *
      * @param array $payload 请求载荷
      * @param Request $request 请求对象
+     * @param int $merchantId 商户ID
+     * @param string $submitType 提交类型
      * @return array<string, mixed> 预处理数据
      */
-    private function prepareSubmitAttempt(array $payload, Request $request, string $submitType): array
+    private function prepareSubmitAttempt(
+        array $payload,
+        Request $request,
+        int $merchantId,
+        string $submitType
+    ): array
     {
-        $merchantId = $this->authorizeSubmitMerchant($payload);
         $paymentType = $this->paymentTypeService->findByCode((string) $payload['type']);
         if (!$paymentType || (int) $paymentType->status !== CommonConstant::STATUS_ENABLED) {
             throw new ValidationException('支付方式不支持');
@@ -391,11 +426,11 @@ class EpayV1ProtocolService extends BaseService
      *
      * @param array $payload 请求载荷
      * @param Request $request 请求对象
+     * @param int $merchantId 商户ID
      * @return string 收银台地址
      */
-    private function prepareCashierSubmit(array $payload, Request $request): string
+    private function prepareCashierSubmit(array $payload, Request $request, int $merchantId): string
     {
-        $merchantId = $this->authorizeSubmitMerchant($payload);
         $normalized = $this->buildSubmitPayload($payload, $request, $merchantId, EpayProtocolConstant::SUBMIT_TYPE_PAGE);
         $result = $this->payOrderService->prepareCashierBizOrder($normalized);
 
@@ -405,7 +440,7 @@ class EpayV1ProtocolService extends BaseService
     /**
      * 认证 V1 提交商户并校验签名。
      *
-     * @param array $payload 请求载荷
+     * @param array $payload 原始请求参数
      * @return int 商户ID
      */
     private function authorizeSubmitMerchant(array $payload): int
@@ -486,7 +521,9 @@ class EpayV1ProtocolService extends BaseService
     /**
      * 过滤旧协议签名参数。
      *
-     * @param array $payload 请求载荷
+     * V1 签名覆盖实际提交的全部非空参数，不受业务参数校验白名单影响。
+     *
+     * @param array $payload 原始请求参数
      * @return array<string, mixed> 签名参数
      */
     private function buildV1SignParams(array $payload): array

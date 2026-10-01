@@ -6,7 +6,7 @@ namespace app\common\constant;
  * 定义支付业务异常的主体、类型、处置状态和严重级别。
  *
  * 本类描述需要运营或系统继续处置的业务异常，不承载渠道请求错误，也不改变支付、
- * 退款、转账等业务单据的真实状态。除晚到重复支付外，其余异常类型仅预留稳定名称；
+ * 退款、转账等业务单据的真实状态。除晚到重复支付、服务费待补扣外，其余类型仅预留名称；
  * 常量已登记不表示检测、建单和处置流程已经实现。
  */
 final class PaymentExceptionConstant
@@ -40,6 +40,9 @@ final class PaymentExceptionConstant
      * 支付单真实成功，但所属业务单已由其他支付单完成，需要继续退款处置。
      */
     public const TYPE_PAY_LATE_DUPLICATE = 'PAY_LATE_DUPLICATE';
+
+    /** 支付已确认成功，自收服务费余额不足，需要充值后人工全额补扣。 */
+    public const TYPE_PAY_SERVICE_FEE_DUE = 'PAY_SERVICE_FEE_DUE';
 
     /**
      * 预留类型：本地支付金额与可信渠道金额不一致。
@@ -143,6 +146,7 @@ final class PaymentExceptionConstant
     {
         return [
             self::TYPE_PAY_LATE_DUPLICATE => '晚到重复支付',
+            self::TYPE_PAY_SERVICE_FEE_DUE => '服务费待补扣',
             self::TYPE_PAY_AMOUNT_MISMATCH => '支付金额不一致',
             self::TYPE_PAY_CHANNEL_REFERENCE_CONFLICT => '支付渠道引用冲突',
             self::TYPE_PAY_TERMINAL_STATUS_CONFLICT => '支付终态冲突',

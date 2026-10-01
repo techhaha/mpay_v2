@@ -15,6 +15,7 @@ use app\common\sdk\fuiou\FuiouSdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\model\payment\PayOrder;
 use app\repository\payment\trade\PayOrderRepository;
@@ -210,6 +211,7 @@ class FuiouApiPayment extends BasePayment implements
             return [
                 'provider' => 'alipay',
                 'product' => self::PRODUCT_ALIPAY_JSAPI,
+                'channel_product' => self::PRODUCT_ALIPAY_JSAPI,
                 'auth_type' => 'alipay_oauth',
                 'identity_field' => 'buyer_id',
                 'app_id' => $this->configText('alipay_oauth_app_id'),
@@ -232,7 +234,7 @@ class FuiouApiPayment extends BasePayment implements
         $mini = $this->isMiniIntent($payment);
         if ($mini) {
             if (!$this->configBool('bindwxa')) {
-                throw new PaymentException('富友通道未开启 bindwxa，不能使用 mini_openid', 40200);
+                throw new PaymentProductUnavailableException('富友通道未开启 bindwxa，不能使用 mini_openid', 40200);
             }
             if (!in_array(self::PRODUCT_WXPAY_MINI, $this->enabledProducts(), true)) {
                 return null;
@@ -245,7 +247,7 @@ class FuiouApiPayment extends BasePayment implements
             return [
                 'provider' => 'wxpay',
                 'product' => 'mini',
-                'pay_product' => self::PRODUCT_WXPAY_MINI,
+                'channel_product' => self::PRODUCT_WXPAY_MINI,
                 'auth_type' => 'mini_program',
                 'identity_field' => 'mini_openid',
                 'app_id' => $this->configText('wechat_mini_app_id'),
@@ -268,6 +270,7 @@ class FuiouApiPayment extends BasePayment implements
         return [
             'provider' => 'wxpay',
             'product' => self::PRODUCT_WXPAY_MP,
+            'channel_product' => self::PRODUCT_WXPAY_MP,
             'auth_type' => 'wechat_oauth',
             'identity_field' => 'openid',
             'app_id' => $this->configText('wechat_mp_app_id'),
@@ -293,7 +296,7 @@ class FuiouApiPayment extends BasePayment implements
             $this->assertBarcodeMatchesPayType($authCode, $payType);
         }
         if ($payType === 'wxpay' && $this->isMiniIntent($payment) && !$this->configBool('bindwxa')) {
-            throw new PaymentException('富友通道未开启 bindwxa，不能使用 mini_openid 或小程序支付', 40200);
+            throw new PaymentProductUnavailableException('富友通道未开启 bindwxa，不能使用 mini_openid 或小程序支付', 40200);
         }
         if ($payType === 'wxpay' && $this->isMiniIntent($payment)) {
             // 小程序意图是调用方的显式选择，不能在产品未开通时静默降级成普通二维码。
@@ -304,6 +307,7 @@ class FuiouApiPayment extends BasePayment implements
         $wxJsapiProduct = $this->isMiniIntent($payment)
             ? self::PRODUCT_WXPAY_MINI
             : self::PRODUCT_WXPAY_MP;
+        $jsapiHandler = $wxJsapiProduct === self::PRODUCT_WXPAY_MINI ? 'mini' : 'jsapi';
 
         return $this->executeDirectPaymentProduct($order, [
             'auth_code' => [
@@ -314,7 +318,7 @@ class FuiouApiPayment extends BasePayment implements
                 ],
                 'handler' => fn (): array => $this->barcodePay($order, $authCode),
             ],
-            'jsapi' => [
+            $jsapiHandler => [
                 'products' => [
                     'alipay' => self::PRODUCT_ALIPAY_JSAPI,
                     'wxpay' => $wxJsapiProduct,
@@ -634,7 +638,7 @@ class FuiouApiPayment extends BasePayment implements
                 throw new PaymentException('富友微信 JSAPI 产品选择不一致', 40200);
             }
             if ($mini && !$this->configBool('bindwxa')) {
-                throw new PaymentException('富友通道未开启 bindwxa，不能使用 mini_openid', 40200);
+                throw new PaymentProductUnavailableException('富友通道未开启 bindwxa，不能使用 mini_openid', 40200);
             }
             $tradeType = $mini ? self::TRADE_WECHAT_MINI : self::TRADE_WECHAT_MP;
             $userId = $mini
@@ -1028,6 +1032,11 @@ class FuiouApiPayment extends BasePayment implements
      */
     private function isMiniIntent(array $payment): bool
     {
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
+
         return $this->firstText($payment['mini_openid'] ?? '') !== ''
             || filter_var($payment['is_mini'] ?? false, FILTER_VALIDATE_BOOL);
     }
@@ -1289,7 +1298,7 @@ class FuiouApiPayment extends BasePayment implements
     private function ensureProduct(string $product): void
     {
         if (!in_array($product, $this->enabledProducts(), true)) {
-            throw new PaymentException('当前富友通道未开启该支付产品', 40200, ['product' => $product]);
+            throw new PaymentProductUnavailableException('当前富友通道未开启该支付产品', 40200, ['product' => $product]);
         }
     }
 

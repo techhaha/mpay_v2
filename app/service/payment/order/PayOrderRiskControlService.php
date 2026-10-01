@@ -17,7 +17,8 @@ use app\service\account\funds\MerchantAccountService;
 /**
  * 支付订单风控操作服务。
  *
- * 订单冻结以资金冻结明细为准，同步更新商户账户余额和账户流水，保证冻结账务可对账。
+ * 仅 TYPE_PAY_ORDER 阻断订单动作；服务费和指定金额冻结仍占用余额，但不表示订单风控。
+ * 冻结与解冻同步更新资金明细、商户账户和流水，保证冻结账务可对账。
  */
 class PayOrderRiskControlService extends BaseService
 {
@@ -37,7 +38,7 @@ class PayOrderRiskControlService extends BaseService
     }
 
     /**
-     * 判断支付单是否存在有效冻结。
+     * 判断支付单是否存在有效的订单风控冻结。
      *
      * @param PayOrder|array<string, mixed>|null $payOrder 支付单模型或列表行
      * @return bool 是否冻结
@@ -45,7 +46,8 @@ class PayOrderRiskControlService extends BaseService
     public function isFrozen(PayOrder|array|null $payOrder): bool
     {
         if (is_array($payOrder) && array_key_exists('freeze_no', $payOrder)) {
-            return trim((string) ($payOrder['freeze_no'] ?? '')) !== '';
+            return (int) $payOrder['freeze_type'] === FundFreezeConstant::TYPE_PAY_ORDER
+                && $payOrder['freeze_no'] !== '';
         }
 
         $payNo = $this->extractPayNo($payOrder);
@@ -53,7 +55,7 @@ class PayOrderRiskControlService extends BaseService
             return false;
         }
 
-        return $this->fundFreezeRepository->existsActiveByPayNo($payNo, $this->now());
+        return $this->fundFreezeRepository->existsActiveByPayNoAndType($payNo, FundFreezeConstant::TYPE_PAY_ORDER, $this->now());
     }
 
     /**
@@ -64,12 +66,13 @@ class PayOrderRiskControlService extends BaseService
      */
     public function freezeInfo(PayOrder|array|null $payOrder): array
     {
-        if (is_array($payOrder) && trim((string) ($payOrder['freeze_no'] ?? '')) !== '') {
-            return $this->freezeInfoFromRow($payOrder);
+        if (is_array($payOrder) && array_key_exists('freeze_no', $payOrder)) {
+            // 列表已投影风控字段，无冻结时直接返回，避免逐行再查数据库。
+            return $this->isFrozen($payOrder) ? $this->freezeInfoFromRow($payOrder) : $this->normalFreezeInfo();
         }
 
         $payNo = $this->extractPayNo($payOrder);
-        $freeze = $payNo !== '' ? $this->fundFreezeRepository->firstActiveByPayNo($payNo, $this->now()) : null;
+        $freeze = $payNo !== '' ? $this->fundFreezeRepository->firstActiveByPayNoAndType($payNo, FundFreezeConstant::TYPE_PAY_ORDER, $this->now()) : null;
         if (!$freeze) {
             return $this->normalFreezeInfo();
         }
@@ -154,7 +157,7 @@ class PayOrderRiskControlService extends BaseService
                 throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
             }
 
-            if ($this->fundFreezeRepository->firstActiveForUpdateByPayNo($payNo, $this->now())) {
+            if ($this->fundFreezeRepository->firstActiveForUpdateByPayNoAndType($payNo, FundFreezeConstant::TYPE_PAY_ORDER, $this->now())) {
                 return $payOrder->refresh();
             }
 
@@ -227,7 +230,7 @@ class PayOrderRiskControlService extends BaseService
                 throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
             }
 
-            $freeze = $this->fundFreezeRepository->firstActiveForUpdateByPayNo($payNo, $this->now());
+            $freeze = $this->fundFreezeRepository->firstActiveForUpdateByPayNoAndType($payNo, FundFreezeConstant::TYPE_PAY_ORDER, $this->now());
             if (!$freeze) {
                 return $payOrder->refresh();
             }

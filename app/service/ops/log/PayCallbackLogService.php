@@ -10,7 +10,7 @@ use app\repository\ops\log\PayCallbackLogRepository;
 /**
  * 支付回调日志查询服务。
  *
- * 负责查询支付回调记录、补充展示字段和还原回调处理状态。
+ * 负责查询支付与退款回调记录、补充展示字段和还原回调处理状态。
  *
  * @property PayCallbackLogRepository $payCallbackLogRepository 支付回调日志仓库
  */
@@ -43,6 +43,7 @@ class PayCallbackLogService extends BaseService
         if ($keyword !== '') {
             $query->where(function ($builder) use ($keyword) {
                 $builder->where('l.pay_no', 'like', '%' . $keyword . '%')
+                    ->orWhere('l.refund_no', 'like', '%' . $keyword . '%')
                     ->orWhere('bo.merchant_order_no', 'like', '%' . $keyword . '%')
                     ->orWhere('bo.subject', 'like', '%' . $keyword . '%')
                     ->orWhere('m.merchant_no', 'like', '%' . $keyword . '%')
@@ -123,6 +124,7 @@ class PayCallbackLogService extends BaseService
      */
     private function decorateRow(object $row): object
     {
+        $row->business_type_text = ((string) ($row->refund_no ?? '')) !== '' ? '退款回调' : '支付回调';
         $row->callback_type_text = (string) (NotifyConstant::callbackTypeMap()[(int) $row->callback_type] ?? '未知');
         $row->verify_status_text = (string) (NotifyConstant::verifyStatusMap()[(int) $row->verify_status] ?? '未知');
         $row->process_status_text = (string) (NotifyConstant::processStatusMap()[(int) $row->process_status] ?? '未知');
@@ -150,6 +152,7 @@ class PayCallbackLogService extends BaseService
             ->select([
                 'l.id',
                 'l.pay_no',
+                'l.refund_no',
                 'l.channel_id',
                 'l.callback_type',
                 'l.request_data',

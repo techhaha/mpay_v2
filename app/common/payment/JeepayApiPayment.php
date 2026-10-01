@@ -168,7 +168,7 @@ class JeepayApiPayment extends BasePayment implements
      */
     public function identityRequirement(array $order): ?array
     {
-        if ($this->selectedHandler($order) !== 'jsapi') {
+        if (!in_array($this->selectedHandler($order), ['jsapi', 'mini'], true)) {
             return null;
         }
 
@@ -245,17 +245,7 @@ class JeepayApiPayment extends BasePayment implements
      */
     public function pay(array $order): array
     {
-        $handlers = $this->directPaymentUsableHandlers($order, $this->paymentHandlers($order));
-        $candidates = $this->directPaymentProductCandidates($order, array_keys($handlers));
-        $selected = $candidates[0] ?? '';
-        if ($selected === '' || !isset($handlers[$selected])) {
-            throw new PaymentDefinitiveException('Jeepay没有适合当前环境且已开通的支付产品', 40200, [
-                'pay_type' => (string) ($order['pay_type_code'] ?? ''),
-                'available_products' => array_keys($handlers),
-            ]);
-        }
-
-        return $handlers[$selected]();
+        return $this->executeDirectPaymentProduct($order, $this->paymentHandlers($order), 'Jeepay');
     }
 
     /**
@@ -504,7 +494,7 @@ class JeepayApiPayment extends BasePayment implements
             $mini = $this->isMiniIntent($payment);
             $product = $mini ? self::PRODUCT_WXPAY_MINI : self::PRODUCT_WXPAY_MP;
             $wayCode = $mini ? self::WAY_WX_LITE : self::WAY_WX_JSAPI;
-            $handlers['jsapi'] = [
+            $handlers[$mini ? 'mini' : 'jsapi'] = [
                 'products' => ['wxpay' => $product],
                 'handler' => fn (): array => $this->productPay($order, $product, $wayCode),
             ];
@@ -1142,9 +1132,13 @@ class JeepayApiPayment extends BasePayment implements
      */
     private function isMiniIntent(array $payment): bool
     {
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
+
         return trim((string) ($payment['mini_openid'] ?? '')) !== ''
             || trim((string) ($payment['mini_app_id'] ?? '')) !== ''
-            || strtolower(trim((string) ($payment['method'] ?? ''))) === 'mini'
             || filter_var($payment['is_mini'] ?? false, FILTER_VALIDATE_BOOL);
     }
 

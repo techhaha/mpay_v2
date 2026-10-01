@@ -17,6 +17,7 @@ use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use app\model\payment\PayOrder;
@@ -229,13 +230,14 @@ class AdapayApiPayment extends BasePayment implements
 
         $mini = $payType === 'wxpay' && $this->isMiniIntent($payment);
         $wxProduct = $mini ? self::PRODUCT_WX_LITE : self::PRODUCT_WX_PUB;
+        $jsapiHandler = $mini ? 'mini' : 'jsapi';
         if ($mini) {
             $this->ensureProduct(self::PRODUCT_WX_LITE);
             $order['_env'] = 'wechat';
         }
 
         return $this->executeDirectPaymentProduct($order, [
-            'jsapi' => [
+            $jsapiHandler => [
                 'products' => [
                     'alipay' => self::PRODUCT_ALIPAY_PUB,
                     'wxpay' => $wxProduct,
@@ -1035,11 +1037,17 @@ class AdapayApiPayment extends BasePayment implements
      */
     private function isMiniIntent(array $payment): bool
     {
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
+
         return $this->firstText(
             $payment['mini_openid'] ?? '',
             $payment['wx_login_code'] ?? '',
             $payment['mini_code'] ?? ''
-        ) !== '' || filter_var($payment['is_mini'] ?? false, FILTER_VALIDATE_BOOL);
+        ) !== ''
+            || filter_var($payment['is_mini'] ?? false, FILTER_VALIDATE_BOOL);
     }
 
     /**
@@ -1074,7 +1082,7 @@ class AdapayApiPayment extends BasePayment implements
     private function ensureProduct(string $product): void
     {
         if (!in_array($product, $this->enabledProducts(), true)) {
-            throw new PaymentDefinitiveException('当前AdaPay通道未开启该支付产品', 40200, ['product' => $product]);
+            throw new PaymentProductUnavailableException('当前AdaPay通道未开启该支付产品', 40200, ['product' => $product]);
         }
     }
 

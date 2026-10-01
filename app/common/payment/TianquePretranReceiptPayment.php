@@ -20,7 +20,6 @@ use app\repository\payment\config\PaymentTypeRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use support\Cache;
 use support\Db;
-use support\Log;
 use support\Redis;
 use support\Request;
 use support\Response;

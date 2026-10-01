@@ -18,6 +18,7 @@ use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use GuzzleHttp\Exception\GuzzleException;
 use app\model\payment\PayOrder;
@@ -278,6 +279,7 @@ class FubeiApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             return [
                 'provider' => 'wxpay',
                 'product' => self::PRODUCT_WXPAY_JSAPI,
+                'channel_product' => self::PRODUCT_WXPAY_JSAPI,
                 'auth_type' => 'wechat_oauth',
                 'identity_field' => 'openid',
                 'app_id' => $this->configText('wechat_app_id'),
@@ -297,6 +299,7 @@ class FubeiApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             return [
                 'provider' => 'alipay',
                 'product' => self::PRODUCT_ALIPAY_JSAPI,
+                'channel_product' => self::PRODUCT_ALIPAY_JSAPI,
                 'auth_type' => 'alipay_oauth',
                 'identity_field' => 'buyer_id',
                 'identity_aliases' => ['buyer_open_id'],
@@ -1117,7 +1120,7 @@ class FubeiApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     private function ensureProduct(string $product): void
     {
         if (!in_array($product, $this->enabledProducts(), true)) {
-            throw new PaymentException('当前付呗通道未开启该支付产品', 40200, ['product' => $product]);
+            throw new PaymentProductUnavailableException('当前付呗通道未开启该支付产品', 40200, ['product' => $product]);
         }
     }
 

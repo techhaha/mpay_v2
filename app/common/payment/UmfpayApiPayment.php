@@ -14,6 +14,7 @@ use app\common\sdk\umfpay\UmfpaySdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
@@ -99,7 +100,7 @@ class UmfpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                 ],
                 'handler' => fn (): array => $payType === 'wxpay'
                 ? $this->jsapiPay($order)
-                : throw new PaymentException('联动优势当前支付方式不支持JSAPI产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                : throw new PaymentProductUnavailableException('联动优势当前支付方式不支持JSAPI产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
             ],
 
             'qrcode' => [

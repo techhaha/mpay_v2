@@ -175,7 +175,7 @@ class KuaiqianApiPayment extends BasePayment implements
         return [
             'provider' => 'wxpay',
             'product' => self::PRODUCT_CODE_26_1,
-            'pay_product' => self::PRODUCT_CODE_26_1,
+            'channel_product' => self::PRODUCT_CODE_26_1,
             'auth_type' => 'wechat_oauth',
             'identity_field' => 'openid',
             'identity_aliases' => ['sub_openid'],

@@ -21,7 +21,10 @@ class RefundActionValidator extends Validator
         'processing_at' => 'sometimes|date_format:Y-m-d H:i:s',
         'failed_at' => 'sometimes|date_format:Y-m-d H:i:s',
         'last_error' => 'sometimes|string|max:512',
-        'channel_refund_no' => 'sometimes|string|max:64',
+        'channel_refund_no' => 'required|string|max:64',
+        'confirmed_amount' => 'required|integer|min:1',
+        'evidence' => 'required|string|max:1000',
+        'reason' => 'required|string|max:255',
     ];
 
     /**
@@ -35,6 +38,9 @@ class RefundActionValidator extends Validator
         'failed_at' => '失败时间',
         'last_error' => '错误信息',
         'channel_refund_no' => '渠道退款单号',
+        'confirmed_amount' => '实际退款金额（分）',
+        'evidence' => '外部退款证据',
+        'reason' => '操作原因',
     ];
 
     /**
@@ -43,6 +49,9 @@ class RefundActionValidator extends Validator
      * @var array
      */
     protected array $scenes = [
+        'query' => ['refund_no'],
+        'confirm_success' => ['refund_no', 'confirmed_amount', 'channel_refund_no', 'evidence', 'reason'],
+        'cancel' => ['refund_no', 'reason'],
         'retry' => ['refund_no', 'processing_at'],
         'mark_fail' => ['refund_no', 'failed_at', 'last_error'],
         'mark_processing' => ['refund_no', 'processing_at'],

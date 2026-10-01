@@ -4,6 +4,7 @@ namespace app\service\payment\order;
 
 use app\common\base\BaseService;
 use app\common\constant\CommonConstant;
+use app\common\constant\FundFreezeConstant;
 use app\common\constant\NotifyConstant;
 use app\common\constant\PaymentExceptionConstant;
 use app\common\constant\TradeConstant;
@@ -162,9 +163,13 @@ class PayOrderQueryService extends BaseService
             ->orderByDesc('po.id')
             ->paginate(max(1, $pageSize), ['*'], 'page', max(1, $page));
 
+        $refundAmounts = $this->refundOrderRepository->sumSuccessfulAmountsByPayNos(
+            array_map(static fn ($item): string => (string) $item->pay_no, $paginator->items())
+        );
         $list = [];
         foreach ($paginator->items() as $item) {
             $row = $item->toArray();
+            $row['pay_refund_amount'] = $refundAmounts[$row['pay_no']] ?? 0;
             if ($merchantId !== null && !$includeActions) {
                 $row = $this->withoutInternalRecoveryMetadata($row);
             }
@@ -245,6 +250,7 @@ class PayOrderQueryService extends BaseService
         $payOrderView = null;
         if ($detailRow) {
             $row = $detailRow->toArray();
+            $row['pay_refund_amount'] = $this->refundOrderRepository->sumSuccessfulAmountByPayNo($payNo);
             if ($merchantId !== null && !$includeActions) {
                 $row = $this->withoutInternalRecoveryMetadata($row);
             }
@@ -356,22 +362,12 @@ class PayOrderQueryService extends BaseService
      */
     private function loadRefundOrders(PayOrder $payOrder): array
     {
-        $refundOrders = $this->refundOrderRepository->query()
+        // 同业务单、同追踪号的其他支付退款不能展示为当前支付单的关联退款。
+        return $this->refundOrderRepository->query()
             ->where('pay_no', (string) $payOrder->pay_no)
             ->orderByDesc('id')
             ->get()
             ->all();
-
-        if (!empty($refundOrders)) {
-            return $refundOrders;
-        }
-
-        $traceNo = trim((string) ($payOrder->trace_no ?: $payOrder->biz_no));
-        if ($traceNo === '') {
-            return [];
-        }
-
-        return $this->refundOrderRepository->listByTraceNo($traceNo)->all();
     }
 
     /**
@@ -399,6 +395,8 @@ class PayOrderQueryService extends BaseService
      */
     private function buildPayOrderQuery(?int $merchantId = null, bool $includeActionColumns = false)
     {
+        // 订单列表展示风控冻结；费用与指定金额冻结在资金冻结列表展示。
+        $riskFreezeType = FundFreezeConstant::TYPE_PAY_ORDER;
         $query = $this->payOrderRepository->query()
             ->from('ma_pay_order as po')
             ->leftJoin('ma_biz_order as bo', 'bo.biz_no', '=', 'po.biz_no')
@@ -467,14 +465,14 @@ class PayOrderQueryService extends BaseService
                 't.name as pay_type_name',
                 't.icon as pay_type_icon',
             ])
-            ->selectRaw("COALESCE((SELECT ff.freeze_no FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), '') AS freeze_no")
+            ->selectRaw("COALESCE((SELECT ff.freeze_no FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.freeze_type = {$riskFreezeType} AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), '') AS freeze_no")
             ->selectRaw("COALESCE((SELECT nt.status FROM ma_notify_task nt WHERE nt.pay_no = po.pay_no ORDER BY nt.id DESC LIMIT 1), -1) AS merchant_notify_status")
-            ->selectRaw("COALESCE((SELECT ff.freeze_type FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), 0) AS freeze_type")
-            ->selectRaw("COALESCE((SELECT ff.remaining_amount FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), 0) AS freeze_remaining_amount")
-            ->selectRaw("COALESCE((SELECT ff.reason FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), '') AS freeze_reason")
-            ->selectRaw("COALESCE((SELECT ff.admin_id FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), 0) AS freeze_admin_id")
-            ->selectRaw("(SELECT ff.available_at FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1) AS freeze_available_at")
-            ->selectRaw("(SELECT ff.frozen_at FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1) AS frozen_at")
+            ->selectRaw("COALESCE((SELECT ff.freeze_type FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.freeze_type = {$riskFreezeType} AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), 0) AS freeze_type")
+            ->selectRaw("COALESCE((SELECT ff.remaining_amount FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.freeze_type = {$riskFreezeType} AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), 0) AS freeze_remaining_amount")
+            ->selectRaw("COALESCE((SELECT ff.reason FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.freeze_type = {$riskFreezeType} AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), '') AS freeze_reason")
+            ->selectRaw("COALESCE((SELECT ff.admin_id FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.freeze_type = {$riskFreezeType} AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1), 0) AS freeze_admin_id")
+            ->selectRaw("(SELECT ff.available_at FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.freeze_type = {$riskFreezeType} AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1) AS freeze_available_at")
+            ->selectRaw("(SELECT ff.frozen_at FROM ma_merchant_fund_freeze ff WHERE ff.pay_no = po.pay_no AND ff.freeze_type = {$riskFreezeType} AND ff.status = 1 AND ff.remaining_amount > 0 ORDER BY ff.id DESC LIMIT 1) AS frozen_at")
             ->selectRaw("'' AS unfreeze_reason")
             ->selectRaw("0 AS unfrozen_by")
             ->selectRaw("NULL AS unfrozen_at");
@@ -675,6 +673,7 @@ class PayOrderQueryService extends BaseService
             'api_refund' => 'API退款',
             'manual_refund' => '手动退款',
             'manual_success' => '手动补单',
+            'collect_service_fee' => '补扣服务费',
             'freeze' => '冻结订单',
             'unfreeze' => '解冻订单',
             'late_duplicate_payment' => '重复支付异常',

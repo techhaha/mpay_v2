@@ -24,35 +24,20 @@ class MerchantFundFreezeRepository extends BaseRepository
     }
 
     /**
-     * 查询指定支付单当前有效冻结。
+     * 查询指定支付单和冻结类型的有效冻结。
      *
      * @param string $payNo 支付单号
+     * @param int $freezeType 冻结类型
      * @param string $now 当前时间
      * @param array $columns 字段列表
      * @return MerchantFundFreeze|null 冻结记录
      */
-    public function firstActiveByPayNo(string $payNo, string $now, array $columns = ['*'])
+    public function firstActiveByPayNoAndType(string $payNo, int $freezeType, string $now, array $columns = ['*']): ?MerchantFundFreeze
     {
         return $this->activeQuery($now)
             ->where('pay_no', $payNo)
+            ->where('freeze_type', $freezeType)
             ->orderByDesc('id')
-            ->first($columns);
-    }
-
-    /**
-     * 加锁查询指定支付单当前有效冻结。
-     *
-     * @param string $payNo 支付单号
-     * @param string $now 当前时间
-     * @param array $columns 字段列表
-     * @return MerchantFundFreeze|null 冻结记录
-     */
-    public function firstActiveForUpdateByPayNo(string $payNo, string $now, array $columns = ['*'])
-    {
-        return $this->activeQuery($now)
-            ->where('pay_no', $payNo)
-            ->orderByDesc('id')
-            ->lockForUpdate()
             ->first($columns);
     }
 
@@ -76,16 +61,18 @@ class MerchantFundFreezeRepository extends BaseRepository
     }
 
     /**
-     * 查询指定支付单是否存在有效冻结。
+     * 查询指定支付单和冻结类型是否存在有效冻结。
      *
      * @param string $payNo 支付单号
+     * @param int $freezeType 冻结类型
      * @param string $now 当前时间
      * @return bool 是否存在
      */
-    public function existsActiveByPayNo(string $payNo, string $now): bool
+    public function existsActiveByPayNoAndType(string $payNo, int $freezeType, string $now): bool
     {
         return $this->activeQuery($now)
             ->where('pay_no', $payNo)
+            ->where('freeze_type', $freezeType)
             ->exists();
     }
 

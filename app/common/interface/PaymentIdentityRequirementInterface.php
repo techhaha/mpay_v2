@@ -18,7 +18,8 @@ interface PaymentIdentityRequirementInterface
      * 返回 null 表示当前环境可直接下单；返回数组表示需要进入身份获取流程。
      * 返回字段：
      * - provider：平台标识，如 wxpay、alipay。
-     * - product：插件最终倾向使用的支付产品，如 mp、mini。
+     * - product：身份流程展示类型，如 mp、mini、jsapi。
+     * - channel_product：插件最终调用的 `PRODUCT_*` 产品编码，身份恢复后据此固定产品。
      * - identity_field：回填到 extra.payment 的字段名，如 openid、buyer_id。
      * - identity_aliases：可接受的同一授权作用域字段别名；默认不做字段替代。
      * - app_id：授权使用的应用 AppID。

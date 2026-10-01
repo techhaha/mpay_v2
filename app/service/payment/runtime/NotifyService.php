@@ -76,7 +76,7 @@ class NotifyService extends BaseService
                 $duplicate->process_status = (int) ($input['process_status'] ?? NotifyConstant::PROCESS_STATUS_PENDING);
                 $duplicate->retry_count = (int) $duplicate->retry_count + 1;
                 $duplicate->next_retry_at = $input['next_retry_at'] ?? null;
-                $duplicate->last_error = (string) ($input['last_error'] ?? '');
+                $duplicate->last_error = mb_strcut((string) ($input['last_error'] ?? ''), 0, 255, 'UTF-8');
                 $duplicate->save();
 
                 return $duplicate->refresh();
@@ -98,12 +98,12 @@ class NotifyService extends BaseService
             'process_status' => (int) ($input['process_status'] ?? NotifyConstant::PROCESS_STATUS_PENDING),
             'retry_count' => (int) ($input['retry_count'] ?? 0),
             'next_retry_at' => $input['next_retry_at'] ?? null,
-            'last_error' => (string) ($input['last_error'] ?? ''),
+            'last_error' => mb_strcut((string) ($input['last_error'] ?? ''), 0, 255, 'UTF-8'),
         ]);
     }
 
     /**
-     * 记录支付回调日志。
+     * 记录支付域渠道回调日志。
      *
      * 渠道回调是排障证据，每次请求都要留痕；重复识别交给 request_hash，
      * 不在日志层吞掉后续通知。
@@ -131,6 +131,7 @@ class NotifyService extends BaseService
 
         return $this->payCallbackLogRepository->create([
             'pay_no' => $payNo,
+            'refund_no' => (string) ($input['refund_no'] ?? ''),
             'channel_id' => (int) ($input['channel_id'] ?? 0),
             'callback_type' => $callbackType,
             'request_data' => $this->maskSensitiveData($requestData),
@@ -148,10 +149,9 @@ class NotifyService extends BaseService
      * 通常用于支付成功、退款成功或清算完成后的商户异步通知。
      *
      * @param array $input 通知任务数据
-     * @param bool $deduplicate 是否按事件引用单号去重
      * @return NotifyTask 通知任务
      */
-    public function enqueueMerchantNotify(array $input, bool $deduplicate = true): NotifyTask
+    public function enqueueMerchantNotify(array $input): NotifyTask
     {
         $eventType = (string) ($input['event_type'] ?? NotifyConstant::EVENT_PAY_SUCCESS);
         $refNo = (string) ($input['ref_no'] ?? $input['pay_no'] ?? '');
@@ -159,11 +159,9 @@ class NotifyService extends BaseService
             throw new ValidationException('通知事件引用单号不能为空');
         }
 
-        if ($deduplicate) {
-            $existing = $this->notifyTaskRepository->findByEventRef($eventType, $refNo);
-            if ($existing) {
-                return $existing;
-            }
+        $existing = $this->notifyTaskRepository->findByEventRef($eventType, $refNo);
+        if ($existing) {
+            return $existing;
         }
 
         return $this->notifyTaskRepository->create([
@@ -185,67 +183,102 @@ class NotifyService extends BaseService
     }
 
     /**
+     * 重新投递已有商户通知事件。
+     *
+     * 同一业务事件只保留一条通知任务；人工重发时复用原通知号，
+     * 更新当前通知地址和载荷，并重新开始一次完整的重试周期。
+     *
+     * @param array<string, mixed> $input 通知任务数据
+     * @return NotifyTask 通知任务
+     */
+    public function requeueMerchantNotify(array $input): NotifyTask
+    {
+        $task = $this->enqueueMerchantNotify($input);
+        $task->notify_url = (string) ($input['notify_url'] ?? $task->notify_url);
+        $task->notify_data = $input['notify_data'] ?? $task->notify_data;
+        $task->status = NotifyConstant::TASK_STATUS_PENDING;
+        $task->retry_count = 0;
+        $task->next_retry_at = $this->nextRetryAt(0);
+        $task->last_notify_at = null;
+        $task->last_response = '';
+        $task->save();
+
+        return $task->refresh();
+    }
+
+    /**
      * 标记商户通知成功。
      *
-     * 成功后会刷新最后通知时间和响应内容。
+     * 只在短事务内锁定任务写回结果；已成功的任务不被重复请求改写。
      *
      * @param string $notifyNo 通知号
      * @param array $input 附加数据
      * @return NotifyTask 通知任务
-     * @throws ResourceNotFoundException
+     * @throws ResourceNotFoundException 通知号对应的任务不存在时抛出
      */
     public function markTaskSuccess(string $notifyNo, array $input = []): NotifyTask
     {
-        $task = $this->notifyTaskRepository->findByNotifyNo($notifyNo);
-        if (!$task) {
-            throw new ResourceNotFoundException('通知任务不存在', ['notify_no' => $notifyNo]);
-        }
+        return $this->transactionRetry(function () use ($notifyNo, $input): NotifyTask {
+            $task = $this->notifyTaskRepository->findForUpdateByNotifyNo($notifyNo);
+            if (!$task) {
+                throw new ResourceNotFoundException('通知任务不存在', ['notify_no' => $notifyNo]);
+            }
+            if ((int) $task->status === NotifyConstant::TASK_STATUS_SUCCESS) {
+                return $task;
+            }
 
-        $task->status = NotifyConstant::TASK_STATUS_SUCCESS;
-        $task->last_notify_at = $input['last_notify_at'] ?? $this->now();
-        $task->last_response = (string) ($input['last_response'] ?? '');
-        $task->save();
+            $task->status = NotifyConstant::TASK_STATUS_SUCCESS;
+            $task->next_retry_at = null;
+            $task->last_notify_at = $input['last_notify_at'] ?? $this->now();
+            $task->last_response = (string) ($input['last_response'] ?? '');
+            $task->save();
 
-        return $task->refresh();
+            return $task->refresh();
+        });
     }
 
     /**
      * 标记商户通知失败并计算下次重试时间。
      *
-     * 失败后会累计重试次数，并根据退避策略生成下一次重试时间。
+     * 失败后累计重试次数；若并发通知已成功，则不回退状态或覆盖成功响应。
      *
      * @param string $notifyNo 通知号
      * @param array $input 附加数据
      * @return NotifyTask 通知任务
-     * @throws ResourceNotFoundException
+     * @throws ResourceNotFoundException 通知号对应的任务不存在时抛出
      */
     public function markTaskFailed(string $notifyNo, array $input = []): NotifyTask
     {
-        $task = $this->notifyTaskRepository->findByNotifyNo($notifyNo);
-        if (!$task) {
-            throw new ResourceNotFoundException('通知任务不存在', ['notify_no' => $notifyNo]);
-        }
+        return $this->transactionRetry(function () use ($notifyNo, $input): NotifyTask {
+            $task = $this->notifyTaskRepository->findForUpdateByNotifyNo($notifyNo);
+            if (!$task) {
+                throw new ResourceNotFoundException('通知任务不存在', ['notify_no' => $notifyNo]);
+            }
+            if ((int) $task->status === NotifyConstant::TASK_STATUS_SUCCESS) {
+                return $task;
+            }
 
-        // 每次失败都累计一次重试，并根据新的次数重新计算下一次触发时间。
-        $retryCount = (int) $task->retry_count + 1;
-        $task->status = NotifyConstant::TASK_STATUS_FAILED;
-        $task->retry_count = $retryCount;
-        $task->last_notify_at = $input['last_notify_at'] ?? $this->now();
-        $task->last_response = (string) ($input['last_response'] ?? '');
-        $task->next_retry_at = $retryCount >= $this->retryLimit() ? null : $this->nextRetryAt($retryCount);
-        $task->save();
+            $retryCount = (int) $task->retry_count + 1;
+            $task->status = NotifyConstant::TASK_STATUS_FAILED;
+            $task->retry_count = $retryCount;
+            $task->last_notify_at = $input['last_notify_at'] ?? $this->now();
+            $task->last_response = (string) ($input['last_response'] ?? '');
+            $task->next_retry_at = $retryCount >= $this->retryLimit() ? null : $this->nextRetryAt($retryCount);
+            $task->save();
 
-        return $task->refresh();
+            return $task->refresh();
+        });
     }
 
     /**
-     * 获取待重试任务。
+     * 获取到期的待通知和失败任务。
      *
-     * @return iterable 待重试任务集合
+     * @param int $limit 本轮最多投递的任务数
+     * @return iterable<int, NotifyTask> 到期的待通知或失败任务
      */
-    public function listRetryableTasks(): iterable
+    public function listRetryableTasks(int $limit = 100): iterable
     {
-        return $this->notifyTaskRepository->listRetryable(NotifyConstant::TASK_STATUS_FAILED);
+        return $this->notifyTaskRepository->listRetryable($limit, $this->retryLimit());
     }
 
     /**

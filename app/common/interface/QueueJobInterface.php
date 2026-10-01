@@ -21,10 +21,13 @@ interface QueueJobInterface
     public function handle(array $data): void;
 
     /**
-     * 处理消费失败。
+     * 处理重试耗尽后的最终失败。
      *
-     * @param Throwable $exception 异常
-     * @param array<string, mixed> $package 原始队列包
+     * 中间重试由 Redis Queue 框架负责记录和调度，只有消息即将进入失败队列时
+     * 才调用本方法，供 Job 记录最终错误或执行任务专属的失败处理。
+     *
+     * @param Throwable $exception 最后一次消费异常
+     * @param array<string, mixed> $package 已包含最终执行次数的队列包
      * @return void
      */
     public function failed(Throwable $exception, array $package): void;

@@ -7,13 +7,16 @@ namespace app\common\payment;
 use app\common\base\BasePayment;
 use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
+use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\huolian\HuolianClient;
 use app\common\sdk\huolian\HuolianSdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
+use app\common\trait\DirectPaymentIdentityTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
+use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
@@ -22,12 +25,14 @@ use support\Response;
 /**
  * 火脸支付 API 插件。
  *
- * 提供支付宝、微信和银联的扫码、H5、微信小程序/JSAPI、支付通知与退款能力。
+ * 提供支付宝、微信和银联的扫码、H5、自有微信小程序、支付通知与退款能力。
+ * 小程序身份由平台统一中转，拉起参数交给小程序客户端，不提供公众号 JSAPI。
  * 当前适配协议没有可确认的主动查单和关单接口。
  */
-class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
+class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
 {
     use DirectPaymentProductSelectorTrait;
+    use DirectPaymentIdentityTrait;
 
     private const PRODUCT_APPLET = 'applet';
     private const PRODUCT_ALIPAY_H5 = 'alipay_h5';
@@ -69,13 +74,14 @@ class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPlug
             ['type' => 'input', 'field' => 'operator_account', 'title' => '收银员手机号', 'value' => '', 'validate' => [['required' => true, 'message' => '收银员手机号不能为空']]],
             ['type' => 'password', 'field' => 'refund_password', 'title' => '退款密码', 'value' => ''],
             $this->directPaymentEnabledProductsField([
-                self::PRODUCT_APPLET => '微信小程序/JSAPI',
+                self::PRODUCT_APPLET => '自有微信小程序支付',
                 self::PRODUCT_ALIPAY_H5 => '支付宝 H5',
                 self::PRODUCT_WECHAT_H5 => '微信 H5',
                 self::PRODUCT_ALIPAY => '支付宝扫码',
                 self::PRODUCT_WECHAT => '微信扫码',
                 self::PRODUCT_CLOUD => '银联扫码',
             ]),
+            ...$this->directPaymentIdentityConfigFields(['mini_program']),
         ];
     }
 
@@ -87,9 +93,36 @@ class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPlug
      */
     public function pay(array $order): array
     {
-        return $this->executeDirectPaymentProduct($order, [
+        return $this->executeDirectPaymentProduct($order, $this->paymentProducts($order), '火脸支付');
+    }
 
-            'jsapi' => [
+    /**
+     * 仅为自有小程序 applet 获取 mini_openid，聚合/H5 页面由机构承接。
+     *
+     * applet 不注册为公众号 JSAPI；机构托管小程序/支付插件不复用本身份流程。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>|null 身份需求
+     */
+    public function identityRequirement(array $order): ?array
+    {
+        $product = $this->directPaymentSelection($order, $this->paymentProducts($order))['product'];
+
+        return $product === self::PRODUCT_APPLET
+            ? $this->directPaymentIdentityRequirement($order, $product, 'mini_program')
+            : null;
+    }
+
+    /**
+     * 声明插件支持的产品，由身份预检和真实下单共同消费。
+     *
+     * @param array<string, mixed> $order 处理器消费的标准下单参数
+     * @return array<string, array<string, mixed>> 产品与请求处理器，不执行上游请求
+     */
+    private function paymentProducts(array $order): array
+    {
+        return [
+            'mini' => [
                 'products' => [
                     'wxpay' => self::PRODUCT_APPLET,
                 ],
@@ -127,7 +160,7 @@ class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPlug
                 ],
                 'handler' => fn (): array => $this->qrcodePay($order),
             ],
-        ], '火脸支付');
+        ];
     }
 
     /**
@@ -302,19 +335,22 @@ class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPlug
     }
 
     /**
-     * 小程序/JSAPI 预下单。
+     * 使用当前小程序 AppID 与 mini_openid 预下单。
      *
      * @param array<string, mixed> $order 标准插件下单参数
      * @return array<string, mixed> 标准支付结果
      */
     private function appletPay(array $order): array
     {
-        $payment = (array) ($order['extra']['payment'] ?? []);
+        $identity = $this->directPaymentIdentityData($order, 'mini_program');
+        if ($identity['identity'] === '') {
+            throw new PaymentDefinitiveException('火脸小程序支付缺少 mini_openid，请先完成身份授权', 40200);
+        }
         try {
             $data = $this->client()->execute('api.hl.order.pay.applet', $this->basePayload($order) + [
                 'payWay' => 'wechat',
-                'appId' => (string) ($payment['sub_appid'] ?? ''),
-                'openId' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? ''),
+                'appId' => $identity['app_id'],
+                'openId' => $identity['identity'],
             ]);
         } catch (HuolianSdkException $e) {
             throw new PaymentException('火脸小程序下单失败：' . $e->getMessage(), 40200);
@@ -326,7 +362,11 @@ class HuolianApiPayment extends BasePayment implements PaymentInterface, PayPlug
             $payInfo = is_array($decoded) ? $decoded : ['tradeNO' => $payInfo];
         }
 
-        return $this->payResult('jsapi', 'wxpay', 'applet', 'pay.applet', ((array) $payInfo) + ['raw' => $data], $data, $order);
+        return $this->payResult('page', 'wxpay', self::PRODUCT_APPLET, 'pay.applet', [
+            '_page' => 'wechatMini',
+            'request_payment' => (array) $payInfo,
+            'raw' => $data,
+        ], $data, $order);
     }
 
     /**

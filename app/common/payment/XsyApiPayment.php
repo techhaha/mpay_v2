@@ -8,11 +8,14 @@ use app\common\base\BasePayment;
 use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
+use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\xsy\XsyClient;
 use app\common\sdk\xsy\XsySdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
+use app\common\trait\DirectPaymentIdentityTrait;
 use app\exception\PaymentException;
+use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentUncertainException;
 use support\Request;
 use support\Response;
@@ -22,14 +25,18 @@ use support\Response;
  *
  * 负责支付宝、微信和银联的扫码、JSAPI、付款码支付，以及查单、关单、退款和异步通知适配。
  */
-class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
+class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
 {
     use DirectPaymentProductSelectorTrait;
+    use DirectPaymentIdentityTrait;
 
     private const PRODUCT_REVERSE_SCAN = 'reverseScan';
     private const PRODUCT_ALIPAY = 'ALIPAY';
     private const PRODUCT_WECHAT = 'WECHAT';
     private const PRODUCT_UNIONPAY = 'UNIONPAY';
+    private const PRODUCT_WXPAY_MINI = 'wxpay_mini';
+    private const PRODUCT_WXPAY_MP = 'wxpay_mp';
+    private const PRODUCT_ALIPAY_JSAPI = 'alipay_jsapi';
 
     private ?XsyClient $client = null;
 
@@ -65,10 +72,14 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
             ['type' => 'switch', 'field' => 'is_test', 'title' => '测试环境', 'value' => false],
             $this->directPaymentEnabledProductsField([
                 self::PRODUCT_REVERSE_SCAN => '付款码支付',
-                self::PRODUCT_ALIPAY => '支付宝支付',
-                self::PRODUCT_WECHAT => '微信支付',
-                self::PRODUCT_UNIONPAY => '银联支付',
+                self::PRODUCT_ALIPAY => '支付宝扫码',
+                self::PRODUCT_WECHAT => '微信扫码',
+                self::PRODUCT_UNIONPAY => '银联扫码',
+                self::PRODUCT_ALIPAY_JSAPI => '支付宝生活号',
+                self::PRODUCT_WXPAY_MP => '微信公众号',
+                self::PRODUCT_WXPAY_MINI => '微信小程序',
             ]),
+            ...$this->directPaymentIdentityConfigFields(['wechat_oauth', 'mini_program', 'alipay_oauth']),
         ];
     }
 
@@ -81,7 +92,36 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
      */
     public function pay(array $order): array
     {
-        return $this->executeDirectPaymentProduct($order, [
+        return $this->executeDirectPaymentProduct($order, $this->paymentProducts($order), '新生易');
+    }
+
+    /**
+     * 按与下单一致的产品声明预检身份；公众号、小程序和支付宝 UID 不互相替代。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>|null 当前产品的身份需求
+     */
+    public function identityRequirement(array $order): ?array
+    {
+        $product = $this->directPaymentSelection($order, $this->paymentProducts($order))['product'];
+
+        return match ($product) {
+            self::PRODUCT_WXPAY_MP => $this->directPaymentIdentityRequirement($order, $product, 'wechat_oauth'),
+            self::PRODUCT_WXPAY_MINI => $this->directPaymentIdentityRequirement($order, $product, 'mini_program'),
+            self::PRODUCT_ALIPAY_JSAPI => $this->directPaymentIdentityRequirement($order, $product, 'alipay_oauth'),
+            default => null,
+        };
+    }
+
+    /**
+     * 声明已实现的产品；选择器在任何请求前过滤未开通产品及不合理环境。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, array<string, mixed>> 产品与处理器声明
+     */
+    private function paymentProducts(array $order): array
+    {
+        return [
 
             'auth_code' => [
                 'products' => [
@@ -94,11 +134,14 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
 
             'jsapi' => [
                 'products' => [
-                    'alipay' => self::PRODUCT_ALIPAY,
-                    'wxpay' => self::PRODUCT_WECHAT,
-                    'bank' => self::PRODUCT_UNIONPAY,
+                    'alipay' => self::PRODUCT_ALIPAY_JSAPI,
+                    'wxpay' => self::PRODUCT_WXPAY_MP,
                 ],
                 'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+            'mini' => [
+                'products' => ['wxpay' => self::PRODUCT_WXPAY_MINI],
+                'handler' => fn (): array => $this->jsapiPay($order, true),
             ],
 
             'qrcode' => [
@@ -109,7 +152,7 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
                 ],
                 'handler' => fn (): array => $this->qrcodePay($order),
             ],
-        ], '新生易');
+        ];
     }
 
     /**
@@ -304,20 +347,25 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
      * 根据支付方式补充用户与子应用标识并发起 JSAPI 下单。
      *
      * @param array<string, mixed> $order 标准插件下单参数
+     * @param bool $mini 是否调用已选定的小程序产品
      *
      * @return array<string, mixed> 标准 JSAPI 待支付结果
      */
-    private function jsapiPay(array $order): array
+    private function jsapiPay(array $order, bool $mini = false): array
     {
-        $payment = (array) ($order['extra']['payment'] ?? []);
+        $identity = $this->directPaymentIdentityData($order, (string) $order['pay_type_code'] === 'alipay' ? 'alipay_oauth' : ($mini ? 'mini_program' : 'wechat_oauth'));
+        if ($identity['identity'] === '') {
+            throw new PaymentDefinitiveException('新生易必须先取得当前产品的用户身份', 40200);
+        }
+        $product = (string) $order['pay_type_code'] === 'alipay' ? self::PRODUCT_ALIPAY_JSAPI : ($mini ? self::PRODUCT_WXPAY_MINI : self::PRODUCT_WXPAY_MP);
         $payType = $this->channelPayType((string) $order['pay_type_code']);
-        $payWay = (string) $order['pay_type_code'] === 'wxpay' ? '02' : '02';
+        $payWay = $mini ? '03' : '02';
         try {
             $data = $this->client()->request('/trade/jsapiScan', $this->basePayload($order) + [
                 'payType' => $payType,
                 'payWay' => $payWay,
-                'subAppId' => (string) ($payment['sub_appid'] ?? ''),
-                'userId' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
+                'subAppId' => $identity['app_id'],
+                'userId' => $identity['identity'],
             ]);
         } catch (XsySdkException $e) {
             throw new PaymentException('新生易JSAPI下单失败：' . $e->getMessage(), 40200);
@@ -334,7 +382,11 @@ class XsyApiPayment extends BasePayment implements PaymentInterface, PayPluginIn
             ]
             : ['tradeNO' => (string) ($data['source'] ?? '')];
 
-        return $this->payResult('jsapi', (string) $order['pay_type_code'], $payType, 'jsapiScan', $params + ['raw' => $data], $data, $order);
+        $payParams = $mini
+            ? ['_page' => 'wechatMini', 'request_payment' => $params, 'raw' => $data]
+            : $params + ['raw' => $data];
+
+        return $this->payResult($mini ? 'page' : 'jsapi', (string) $order['pay_type_code'], $product, 'jsapiScan', $payParams, $data, $order);
     }
 
     /**

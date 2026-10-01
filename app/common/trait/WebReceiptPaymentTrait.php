@@ -8,13 +8,13 @@ use app\common\constant\FileConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
+use app\exception\UnsupportedPaymentOperationException;
 use app\model\payment\PayOrder;
 use app\repository\payment\config\PaymentChannelRepository;
 use app\repository\payment\config\PaymentTypeRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use support\Cache;
 use support\Db;
-use support\Log;
 use support\Request;
 use support\Response;
 
@@ -127,7 +127,7 @@ trait WebReceiptPaymentTrait
      */
     public function refund(array $order): array
     {
-        throw new PaymentException($this->getName() . '收款不支持接口退款', 40200);
+        throw new UnsupportedPaymentOperationException($this->getName() . '收款不支持接口退款', 40200);
     }
 
     /**
@@ -663,15 +663,6 @@ trait WebReceiptPaymentTrait
             ]);
         }
 
-        if ($orders->count() > 1) {
-            Log::warning(sprintf(
-                '[%s] 金额流水匹配到多笔订单，按时间最近选择 amount=%s count=%d',
-                static::class,
-                FormatHelper::amount($amount),
-                $orders->count()
-            ));
-        }
-
         return $this->closestPayNo($orders->all(), $paidAt);
     }
 
@@ -726,15 +717,6 @@ trait WebReceiptPaymentTrait
                 'paid_at' => date('Y-m-d H:i:s', $paidAt),
                 'record' => $record,
             ]);
-        }
-
-        if ($candidates->count() > 1) {
-            Log::warning(sprintf(
-                '[%s] 备注流水匹配到多笔订单，按时间最近选择 remark=%s count=%d',
-                static::class,
-                $remarkCode,
-                $candidates->count()
-            ));
         }
 
         return $this->closestPayNo($candidates->all(), $paidAt);

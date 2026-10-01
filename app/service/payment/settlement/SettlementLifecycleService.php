@@ -271,7 +271,7 @@ class SettlementLifecycleService extends BaseService
             }
 
             $settlementOrder->status = TradeConstant::SETTLEMENT_STATUS_REVERSED;
-            $settlementOrder->fail_reason = $reason;
+            $settlementOrder->fail_reason = mb_strcut($reason, 0, 255, 'UTF-8');
             $settlementOrder->failed_at = $this->now();
             $extJson = (array) $settlementOrder->ext_json;
             if (trim($reason) !== '') {

@@ -165,14 +165,26 @@ class PayOrderRepository extends BaseRepository
      *
      * @param string $now 当前时间
      * @param int $limit 限制条数
+     * @param string $afterExpireAt 上一批最后一笔订单的到期时间
+     * @param int $afterId 到期时间相同时按主键续扫
      * @return \Illuminate\Database\Eloquent\Collection<int, PayOrder> 支付单列表
      */
-    public function listExpiredMutable(string $now, int $limit = 100)
+    public function listExpiredMutable(string $now, int $limit = 100, string $afterExpireAt = '', int $afterId = 0)
     {
-        return $this->model->newQuery()
+        $query = $this->model->newQuery()
             ->whereIn('status', TradeConstant::orderMutableStatuses())
             ->whereNotNull('expire_at')
-            ->where('expire_at', '<=', $now)
+            ->where('expire_at', '<=', $now);
+        if ($afterExpireAt !== '') {
+            $query->where(function ($query) use ($afterExpireAt, $afterId): void {
+                $query->where('expire_at', '>', $afterExpireAt)
+                    ->orWhere(function ($query) use ($afterExpireAt, $afterId): void {
+                        $query->where('expire_at', $afterExpireAt)->where('id', '>', $afterId);
+                    });
+            });
+        }
+
+        return $query
             ->orderBy('expire_at')
             ->orderBy('id')
             ->limit(max(1, $limit))
@@ -184,17 +196,35 @@ class PayOrderRepository extends BaseRepository
      *
      * @param string $before 最早拉起时间
      * @param int $limit 限制条数
+     * @param string $afterRequestAt 从该请求时间之后继续扫描
+     * @param int $afterId 请求时间相同时从该主键之后继续扫描
      * @return \Illuminate\Database\Eloquent\Collection<int, PayOrder> 支付单列表
      */
-    public function listPayingForActiveQuery(string $before, int $limit = 50)
+    public function listPayingForActiveQuery(
+        string $before,
+        int $limit = 50,
+        string $afterRequestAt = '',
+        int $afterId = 0
+    )
     {
-        return $this->model->newQuery()
+        $query = $this->model->newQuery()
             ->where('status', TradeConstant::ORDER_STATUS_PAYING)
             ->where('request_at', '<=', $before)
             ->where(function ($query) {
                 $query->whereNull('expire_at')
                     ->orWhere('expire_at', '>', date('Y-m-d H:i:s'));
-            })
+            });
+        if ($afterRequestAt !== '') {
+            $query->where(function ($query) use ($afterRequestAt, $afterId): void {
+                $query->where('request_at', '>', $afterRequestAt)
+                    ->orWhere(function ($query) use ($afterRequestAt, $afterId): void {
+                        $query->where('request_at', $afterRequestAt)
+                            ->where('id', '>', $afterId);
+                    });
+            });
+        }
+
+        return $query
             ->orderBy('request_at')
             ->orderBy('id')
             ->limit(max(1, $limit))

@@ -15,6 +15,7 @@ use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
@@ -105,7 +106,7 @@ class XorpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                 ],
                 'handler' => fn (): array => $payType === 'wxpay'
                     ? $this->wechatCashier($order)
-                    : throw new PaymentException('XorPay 当前支付方式不支持JSAPI产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                    : throw new PaymentProductUnavailableException('XorPay 当前支付方式不支持JSAPI产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
             ],
 
             'qrcode' => [

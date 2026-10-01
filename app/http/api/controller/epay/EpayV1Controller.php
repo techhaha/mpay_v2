@@ -35,18 +35,18 @@ class EpayV1Controller extends BaseController
      */
     public function submit(Request $request): Response
     {
-        $payload = $request->all();
+        $requestPayload = $request->all();
 
         try {
             Limiter::check('epay-v1-submit-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
-            if ((int) ($payload['pid'] ?? 0) > 0) {
-                Limiter::check('epay-v1-submit-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
+            if ((int) ($requestPayload['pid'] ?? 0) > 0) {
+                Limiter::check('epay-v1-submit-merchant:' . (int) $requestPayload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
             }
-            $payload = $this->validated($payload, EpayV1Validator::class, 'submit');
+            $payload = $this->validated($requestPayload, EpayV1Validator::class, 'submit');
 
-            return $this->epayV1ProtocolService->submit($payload, $request);
+            return $this->epayV1ProtocolService->submit($payload, $requestPayload, $request);
         } catch (Throwable $e) {
-            return $this->epayV1ProtocolService->entryErrorResponse($payload, $e);
+            return $this->epayV1ProtocolService->entryErrorResponse($requestPayload, $e);
         }
     }
 
@@ -58,14 +58,19 @@ class EpayV1Controller extends BaseController
      */
     public function mapi(Request $request): Response
     {
-        $payload = $request->all();
-        Limiter::check('epay-v1-mapi-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
-        if ((int) ($payload['pid'] ?? 0) > 0) {
-            Limiter::check('epay-v1-mapi-merchant:' . (int) $payload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
-        }
-        $payload = $this->validated($payload, EpayV1Validator::class, 'mapi');
+        $requestPayload = $request->all();
 
-        return json($this->epayV1ProtocolService->mapi($payload, $request));
+        try {
+            Limiter::check('epay-v1-mapi-ip:' . $request->getRealIp(), 120, 60, '接口请求过于频繁，请稍后再试');
+            if ((int) ($requestPayload['pid'] ?? 0) > 0) {
+                Limiter::check('epay-v1-mapi-merchant:' . (int) $requestPayload['pid'], 60, 60, '商户接口请求过于频繁，请稍后再试');
+            }
+            $payload = $this->validated($requestPayload, EpayV1Validator::class, 'mapi');
+
+            return json($this->epayV1ProtocolService->mapi($payload, $requestPayload, $request));
+        } catch (Throwable $e) {
+            return json($this->epayV1ProtocolService->failureResponse($e));
+        }
     }
 
     /**
@@ -77,19 +82,24 @@ class EpayV1Controller extends BaseController
     public function api(Request $request): Response
     {
         $payload = $request->all();
-        Limiter::check('epay-v1-api-ip:' . $request->getRealIp(), 300, 60, '接口请求过于频繁，请稍后再试');
-        if ((int) ($payload['pid'] ?? 0) > 0) {
-            Limiter::check('epay-v1-api-merchant:' . (int) $payload['pid'], 180, 60, '商户接口请求过于频繁，请稍后再试');
+
+        try {
+            Limiter::check('epay-v1-api-ip:' . $request->getRealIp(), 300, 60, '接口请求过于频繁，请稍后再试');
+            if ((int) ($payload['pid'] ?? 0) > 0) {
+                Limiter::check('epay-v1-api-merchant:' . (int) $payload['pid'], 180, 60, '商户接口请求过于频繁，请稍后再试');
+            }
+
+            $scene = $this->resolveApiScene((string) ($payload['act'] ?? ''));
+            if ($scene === null) {
+                return json($this->epayV1ProtocolService->failureResponse(new \InvalidArgumentException('不支持的操作类型')));
+            }
+
+            $payload = $this->validated($payload, EpayV1Validator::class, $scene);
+
+            return json($this->epayV1ProtocolService->api($payload));
+        } catch (Throwable $e) {
+            return json($this->epayV1ProtocolService->failureResponse($e));
         }
-
-        $scene = $this->resolveApiScene((string) ($payload['act'] ?? ''));
-        if ($scene === null) {
-            return json(['code' => 0, 'msg' => '不支持的操作类型']);
-        }
-
-        $payload = $this->validated($payload, EpayV1Validator::class, $scene);
-
-        return json($this->epayV1ProtocolService->api($payload));
     }
 
     /**

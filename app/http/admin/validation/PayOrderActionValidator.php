@@ -55,6 +55,7 @@ class PayOrderActionValidator extends Validator
         'api_refund' => ['pay_no'],
         'manual_refund' => ['pay_no', 'reason', 'refund_amount', 'money'],
         'manual_success' => ['pay_no', 'reason'],
+        'collect_service_fee' => ['pay_no', 'reason'],
         'freeze' => ['pay_no', 'reason'],
         'unfreeze' => ['pay_no', 'reason'],
     ];
@@ -70,7 +71,7 @@ class PayOrderActionValidator extends Validator
     public function rules(): array
     {
         $rules = parent::rules();
-        if (in_array($this->scene(), ['manual_refund', 'manual_success', 'freeze', 'unfreeze'], true)) {
+        if (in_array($this->scene(), ['manual_refund', 'manual_success', 'collect_service_fee', 'freeze', 'unfreeze'], true)) {
             $rules['reason'] = 'required|string|max:255';
         }
 

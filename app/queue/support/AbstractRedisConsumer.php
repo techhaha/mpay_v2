@@ -42,19 +42,30 @@ abstract class AbstractRedisConsumer implements Consumer
     }
 
     /**
-     * 处理消费失败。
+     * 把重试耗尽的消费异常交给业务 Job 处理。
      *
-     * @param Throwable $exception 异常
-     * @param array<string, mixed> $package 原始队列包
+     * Redis Queue 会在每次消费异常后调用本方法，并在回调返回后增加 attempts。
+     * 中间失败已经由框架记录；这里只在下一次计数超过 max_attempts 时触发
+     * Job 的最终失败处理，避免每次重试重复写相同的业务日志。
+     *
+     * @param Throwable $exception 本次消费异常
+     * @param array<string, mixed> $package 框架尚未增加本次 attempts 的队列包
      * @return void
      */
     public function onConsumeFailure(Throwable $exception, array $package): void
     {
+        $currentAttempt = (int) ($package['attempts'] ?? 0) + 1;
+        $maxAttempts = (int) ($package['max_attempts'] ?? 0);
+        if ($currentAttempt <= $maxAttempts) {
+            return;
+        }
+
+        $package['attempts'] = $currentAttempt;
         try {
             $this->job()->failed($exception, $package);
         } catch (Throwable $failureException) {
-            Log::warning(sprintf(
-                '[QueueConsumer] 失败处理异常 job=%s queue=%s error=%s failure_error=%s',
+            Log::error(sprintf(
+                '[QueueConsumer] 最终失败处理异常 job=%s queue=%s error=%s failure_error=%s',
                 $this->jobClass(),
                 (string) ($package['queue'] ?? ''),
                 $exception->getMessage(),

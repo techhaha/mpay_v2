@@ -2,6 +2,7 @@
 
 namespace app\http\api\validation;
 
+use app\common\constant\PaymentMethodConstant;
 use support\validation\Validator;
 
 /**
@@ -18,7 +19,7 @@ class EpayV2Validator extends Validator
         // RSA 签名是 Base64 文本，长度会明显超过 MD5，不能沿用 255 的短限制。
         'sign' => 'required|string|max:2048',
         'type' => 'nullable|string|max:32',
-        'method' => 'nullable|string|in:web,jump,jsapi,app,scan,applet',
+        'method' => 'nullable|string|max:32',
         'trade_no' => 'nullable|string|max:64',
         'out_trade_no' => 'nullable|string|max:64',
         'notify_url' => 'nullable|string|max:255',
@@ -131,7 +132,7 @@ class EpayV2Validator extends Validator
     {
         return $this->appendRules([
             'type' => 'required|string|max:32',
-            'method' => 'required|string|in:web,jump,jsapi,app,scan,applet',
+            'method' => 'required|string|in:' . implode(',', PaymentMethodConstant::values()),
             'out_trade_no' => 'required|string|max:64',
             'notify_url' => 'required|string|max:255',
             'return_url' => 'nullable|string|max:255',

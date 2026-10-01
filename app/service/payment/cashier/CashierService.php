@@ -29,6 +29,7 @@ use support\Log;
 use support\Request;
 use support\Response;
 use Throwable;
+use Webman\Exception\BusinessException;
 
 /**
  * 收银台服务。
@@ -224,10 +225,12 @@ class CashierService extends BaseService
 
         $token = trim((string) ($input['state'] ?? ''));
         $code = trim((string) ($input['code'] ?? ''));
+        $context = null;
 
         try {
-            return $this->withIdentityClaim($token, function () use ($token, $code): Response {
+            return $this->withIdentityClaim($token, function () use ($token, $code, &$context): Response {
                 $identity = $this->paymentIdentityService->wechatIdentity($token, $code);
+                $context = $identity['context'];
                 $result = $this->continueIdentityPayment($token, $identity['context'], $identity['identity']);
 
                 return $this->noStoreResponse(
@@ -235,7 +238,7 @@ class CashierService extends BaseService
                 );
             });
         } catch (Throwable $e) {
-            return $this->identityCallbackFailure($token, 'wechat', $e);
+            return $this->identityCallbackFailure($token, 'wechat', $e, $context);
         }
     }
 
@@ -251,10 +254,12 @@ class CashierService extends BaseService
 
         $token = trim((string) ($input['state'] ?? ''));
         $authCode = trim((string) ($input['auth_code'] ?? ''));
+        $context = null;
 
         try {
-            return $this->withIdentityClaim($token, function () use ($token, $authCode): Response {
+            return $this->withIdentityClaim($token, function () use ($token, $authCode, &$context): Response {
                 $identity = $this->paymentIdentityService->alipayIdentity($token, $authCode);
+                $context = $identity['context'];
                 $result = $this->continueIdentityPayment($token, $identity['context'], $identity['identity']);
 
                 return $this->noStoreResponse(
@@ -262,7 +267,7 @@ class CashierService extends BaseService
                 );
             });
         } catch (Throwable $e) {
-            return $this->identityCallbackFailure($token, 'alipay', $e);
+            return $this->identityCallbackFailure($token, 'alipay', $e, $context);
         }
     }
 
@@ -277,10 +282,12 @@ class CashierService extends BaseService
         $this->assertCashierEnabled();
 
         $token = trim((string) ($input['state'] ?? ''));
+        $context = null;
 
         try {
-            return $this->withIdentityClaim($token, function () use ($token, $input): Response {
+            return $this->withIdentityClaim($token, function () use ($token, $input, &$context): Response {
                 $identity = $this->paymentIdentityService->unionpayIdentity($token, $input);
+                $context = $identity['context'];
                 $result = $this->continueIdentityPayment($token, $identity['context'], $identity['identity']);
 
                 return $this->noStoreResponse(
@@ -288,7 +295,7 @@ class CashierService extends BaseService
                 );
             });
         } catch (Throwable $e) {
-            return $this->identityCallbackFailure($token, 'unionpay', $e);
+            return $this->identityCallbackFailure($token, 'unionpay', $e, $context);
         }
     }
 
@@ -335,13 +342,21 @@ class CashierService extends BaseService
         }
 
         $attempt = $this->payOrderService->preparePayAttemptByChannel($input, $channel);
-        $this->paymentIdentityService->forget($token);
+        try {
+            $this->paymentIdentityService->forget($token);
+        } catch (Throwable $e) {
+            // 支付尝试已创建并返回；缓存清理失败不能覆盖承接地址或诱导重新下单。
+            Log::warning(sprintf('[CashierIdentity] 身份缓存清理失败 pay_no=%s exception=%s error=%s',
+                (string) $attempt['pay_order']->pay_no, $e::class, $e->getMessage()));
+        }
 
         return $this->formatConfirmAttempt($attempt, $attempt['biz_order'] ?? $bizOrder);
     }
 
     /**
      * 在 token 独占锁内执行身份换取和支付续跑。
+     *
+     * 总是尝试释放锁；清理失败只记录诊断，原业务结果或异常继续返回。
      *
      * @template T
      * @param string $token 身份流程令牌
@@ -354,7 +369,13 @@ class CashierService extends BaseService
         try {
             return $callback();
         } finally {
-            $this->paymentIdentityService->releaseClaim($claim);
+            try {
+                $this->paymentIdentityService->releaseClaim($claim);
+            } catch (Throwable $e) {
+                // 锁清理故障只留诊断，不能替换主流程的结果或带 pay_no 的原异常。
+                Log::warning(sprintf('[CashierIdentity] 身份锁释放失败 token=%s exception=%s error=%s',
+                    substr(hash('sha256', $token), 0, 12), $e::class, $e->getMessage()));
+            }
         }
     }
 
@@ -374,23 +395,44 @@ class CashierService extends BaseService
     }
 
     /**
-     * 记录不含敏感值的授权失败摘要并返回承接页。
+     * 按授权或支付阶段返回失败承接地址。
+     *
+     * 获得身份前沿用授权失败页；身份已取得但没有支付单时进入支付入口错误页；
+     * 异常带 pay_no 时回到该订单的承接页，不把支付失败误报为授权失败。
      *
      * @param string $token 身份流程令牌
      * @param string $provider 授权平台
-     * @param Throwable $e 授权异常
-     * @return Response 授权失败承接页响应
+     * @param Throwable $e 授权或续跑异常
+     * @param array<string, mixed>|null $context 已成功获取身份的流程上下文，未取得身份时为 null
+     * @return Response 禁止缓存的失败承接页跳转
      */
-    private function identityCallbackFailure(string $token, string $provider, Throwable $e): Response
+    private function identityCallbackFailure(string $token, string $provider, Throwable $e, ?array $context): Response
     {
+        $payNo = $e instanceof BusinessException ? (string) ($e->getData()['pay_no'] ?? '') : '';
+        if ($payNo !== '') {
+            return $this->noStoreResponse(redirect($this->buildSiteUrl($this->buildPaymentPagePath($payNo))));
+        }
+
         Log::warning(sprintf(
-            '[CashierIdentity] provider=%s token=%s error=%s',
+            '[CashierIdentity] provider=%s stage=%s token=%s error=%s',
             $provider,
+            $context === null ? 'authorization' : 'payment',
             $token === '' ? 'missing' : substr(hash('sha256', $token), 0, 12),
             $e::class
         ));
 
         $path = '/cashier/identity/' . rawurlencode($token) . '?error=authorization_failed';
+        if ($context !== null) {
+            $query = [
+                'msg' => $e instanceof BusinessException
+                    ? $this->publicPaymentErrorMessage($e->getMessage())
+                    : '支付处理异常，请稍后查询订单或联系商户',
+                'code' => $e instanceof BusinessException ? (string) $e->getCode() : '40200',
+                'pid' => (string) $context['input']['merchant_id'],
+                'out_trade_no' => (string) $context['input']['merchant_order_no'],
+            ];
+            $path = '/payment/entry/error?' . http_build_query($query);
+        }
 
         return $this->noStoreResponse(redirect($this->buildSiteUrl($path)));
     }
@@ -420,7 +462,8 @@ class CashierService extends BaseService
         $payOrder = $attempt['pay_order'];
         $paymentResult = (array) ($attempt['payment_result'] ?? []);
         $presentation = (array) ($paymentResult['presentation'] ?? []);
-        $payParams = $this->publicPaymentParams((array) ($presentation['pay_params'] ?? []));
+        $payParams = (array) ($presentation['pay_params'] ?? []);
+        unset($payParams['raw']);
         $paymentPagePath = $this->buildPaymentPagePath((string) $payOrder->pay_no);
 
         return [
@@ -610,7 +653,6 @@ class CashierService extends BaseService
             'status_text' => (string) ($statusMap[(int) $bizOrder->status] ?? ''),
             'active_pay_no' => (string) ($bizOrder->active_pay_no ?? ''),
             'attempt_count' => (int) $bizOrder->attempt_count,
-            'ext_json' => (array) ($bizOrder->ext_json ?? []),
             'created_at' => FormatHelper::dateTime($bizOrder->created_at),
             'updated_at' => FormatHelper::dateTime($bizOrder->updated_at),
         ];
@@ -699,7 +741,7 @@ class CashierService extends BaseService
      * 构建公开的收银台支付承接数据。
      *
      * 正常状态沿用支付单保存的 presentation；终态或快照缺失时根据本地订单事实生成只读承接数据。
-     * 输出前递归移除 raw，避免服务端诊断信息进入公开页面。
+     * 输出前只移除 pay_params 第一层 raw，不修改插件自定义嵌套参数。
      *
      * @param PayOrder $payOrder 支付单
      * @return array<string, mixed>
@@ -719,7 +761,8 @@ class CashierService extends BaseService
             $presentation = $this->buildOrderStatePresentation($payOrder);
         }
 
-        $payParams = $this->publicPaymentParams((array) ($presentation['pay_params'] ?? []));
+        $payParams = (array) ($presentation['pay_params'] ?? []);
+        unset($payParams['raw']);
         $payParams['server_time_timestamp'] = time();
 
         return [
@@ -729,24 +772,6 @@ class CashierService extends BaseService
             'pay_action' => (string) ($presentation['pay_action'] ?? ''),
             'pay_params' => $payParams,
         ];
-    }
-
-    /**
-     * 移除仅供服务端诊断的原始渠道数据。
-     *
-     * @param array<string, mixed> $params 支付承接参数
-     * @return array<string, mixed> 可公开给收银台的参数
-     */
-    private function publicPaymentParams(array $params): array
-    {
-        unset($params['raw']);
-        foreach ($params as $key => $value) {
-            if (is_array($value)) {
-                $params[$key] = $this->publicPaymentParams($value);
-            }
-        }
-
-        return $params;
     }
 
     /**

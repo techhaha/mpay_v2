@@ -8,11 +8,15 @@ use app\common\base\BasePayment;
 use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
+use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\swiftpass\SwiftpassClient;
 use app\common\sdk\swiftpass\SwiftpassSdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
+use app\common\trait\DirectPaymentIdentityTrait;
 use app\exception\PaymentException;
+use app\exception\PaymentDefinitiveException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
@@ -23,13 +27,14 @@ use support\Response;
  *
  * 负责微信、支付宝、QQ、银联和京东支付产品的下单、退款及异步通知适配；当前协议未接入主动查单与关单能力。
  */
-class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
+class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
 {
     use DirectPaymentProductSelectorTrait;
+    use DirectPaymentIdentityTrait;
 
     private const PRODUCT_PAY_WEIXIN_JSPAY = 'pay.weixin.jspay';
     private const PRODUCT_PAY_ALIPAY_JSPAY = 'pay.alipay.jspay';
-    private const PRODUCT_PAY_UNIONPAY_JSPAY = 'pay.unionpay.jspay';
+    private const PRODUCT_WXPAY_MINI = 'wxpay_mini';
     private const PRODUCT_PAY_WEIXIN_WAPPAY = 'pay.weixin.wappay';
     private const PRODUCT_PAY_WEIXIN_NATIVE = 'pay.weixin.native';
     private const PRODUCT_PAY_ALIPAY_NATIVE = 'pay.alipay.native';
@@ -73,7 +78,7 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
             $this->directPaymentEnabledProductsField([
                 self::PRODUCT_PAY_WEIXIN_JSPAY => '微信 JSAPI',
                 self::PRODUCT_PAY_ALIPAY_JSPAY => '支付宝 JSAPI',
-                self::PRODUCT_PAY_UNIONPAY_JSPAY => '银联 JSAPI',
+                self::PRODUCT_WXPAY_MINI => '微信小程序',
                 self::PRODUCT_PAY_WEIXIN_WAPPAY => '微信 H5',
                 self::PRODUCT_PAY_WEIXIN_NATIVE => '微信扫码',
                 self::PRODUCT_PAY_ALIPAY_NATIVE => '支付宝扫码',
@@ -81,6 +86,7 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
                 self::PRODUCT_PAY_UNIONPAY_NATIVE => '银联扫码',
                 self::PRODUCT_PAY_JDPAY_NATIVE => '京东扫码',
             ]),
+            ...$this->directPaymentIdentityConfigFields(['wechat_oauth', 'mini_program', 'alipay_oauth']),
         ];
     }
 
@@ -93,17 +99,49 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
      */
     public function pay(array $order): array
     {
+        return $this->executeDirectPaymentProduct($order, $this->paymentProducts($order), '威富通');
+    }
+
+    /**
+     * 预检实际产品的身份，小程序与公众号即便共用服务码也必须独立授权。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>|null 当前产品的身份需求
+     */
+    public function identityRequirement(array $order): ?array
+    {
+        $product = $this->directPaymentSelection($order, $this->paymentProducts($order))['product'];
+
+        return match ($product) {
+            self::PRODUCT_PAY_WEIXIN_JSPAY => $this->directPaymentIdentityRequirement($order, $product, 'wechat_oauth'),
+            self::PRODUCT_WXPAY_MINI => $this->directPaymentIdentityRequirement($order, $product, 'mini_program'),
+            self::PRODUCT_PAY_ALIPAY_JSPAY => $this->directPaymentIdentityRequirement($order, $product, 'alipay_oauth'),
+            default => null,
+        };
+    }
+
+    /**
+     * 声明当前可调用产品；银联客户端身份协议尚未核验，不声明银联 JSAPI。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, array<string, mixed>> 产品与处理器声明
+     */
+    private function paymentProducts(array $order): array
+    {
         $payType = (string) $order['pay_type_code'];
 
-        return $this->executeDirectPaymentProduct($order, [
+        return [
 
             'jsapi' => [
                 'products' => [
                     'alipay' => self::PRODUCT_PAY_ALIPAY_JSPAY,
                     'wxpay' => self::PRODUCT_PAY_WEIXIN_JSPAY,
-                    'bank' => self::PRODUCT_PAY_UNIONPAY_JSPAY,
                 ],
                 'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+            'mini' => [
+                'products' => ['wxpay' => self::PRODUCT_WXPAY_MINI],
+                'handler' => fn (): array => $this->jsapiPay($order, true),
             ],
             'h5' => [
                 'products' => [
@@ -111,7 +149,7 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
                 ],
                 'handler' => fn (): array => $payType === 'wxpay'
                     ? $this->wxH5Pay($order)
-                    : throw new PaymentException('威富通当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                    : throw new PaymentProductUnavailableException('威富通当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
             ],
 
             'jump' => [
@@ -120,7 +158,7 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
                 ],
                 'handler' => fn (): array => $payType === 'wxpay'
                 ? $this->wxH5Pay($order)
-                : throw new PaymentException('威富通当前支付方式不支持跳转产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                : throw new PaymentProductUnavailableException('威富通当前支付方式不支持跳转产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
             ],
 
             'qrcode' => [
@@ -133,7 +171,7 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
                 ],
                 'handler' => fn (): array => $this->nativePay($order, $payType),
             ],
-        ], '威富通');
+        ];
     }
 
     /**
@@ -292,28 +330,28 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
      *
      * @param array<string, mixed> $order 标准插件下单参数
      *
-     * @return array<string, mixed> 标准 JSAPI 或银联跳转待支付结果
+     * @param bool $mini 是否调用已选定的小程序产品
+     * @return array<string, mixed> 标准 JSAPI 或小程序待支付结果
      */
-    private function jsapiPay(array $order): array
+    private function jsapiPay(array $order, bool $mini = false): array
     {
         $payType = (string) $order['pay_type_code'];
-        $payment = (array) ($order['extra']['payment'] ?? []);
-        $service = match ($payType) {
-            'wxpay' => 'pay.weixin.jspay',
-            'bank' => 'pay.unionpay.jspay',
-            default => 'pay.alipay.jspay',
-        };
+        $identity = $this->directPaymentIdentityData($order, $payType === 'alipay' ? 'alipay_oauth' : ($mini ? 'mini_program' : 'wechat_oauth'));
+        if ($identity['identity'] === '') {
+            throw new PaymentDefinitiveException('威富通必须先取得当前产品的用户身份', 40200);
+        }
+        $service = $payType === 'wxpay' ? self::PRODUCT_PAY_WEIXIN_JSPAY : self::PRODUCT_PAY_ALIPAY_JSPAY;
+        $product = $mini ? self::PRODUCT_WXPAY_MINI : $service;
 
         $payload = $this->basePayload($order) + ['service' => $service];
         if ($payType === 'wxpay') {
             $payload['is_raw'] = '1';
-            $payload['is_minipg'] = (string) ($payment['mini_openid'] ?? '') !== '' ? '1' : '0';
-            $payload['sub_appid'] = (string) ($payment['sub_appid'] ?? '');
-            $payload['sub_openid'] = (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? '');
-        } elseif ($payType === 'bank') {
-            $payload['user_id'] = (string) ($payment['sub_openid'] ?? '');
+            $payload['is_minipg'] = $mini ? '1' : '0';
+            $payload['sub_appid'] = $identity['app_id'];
+            $payload['sub_openid'] = $identity['identity'];
+            $payload['device_info'] = 'AND_WAP';
         } else {
-            $payload['buyer_id'] = (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? '');
+            $payload['buyer_id'] = $identity['identity'];
         }
 
         try {
@@ -322,17 +360,17 @@ class SwiftpassApiPayment extends BasePayment implements PaymentInterface, PayPl
             throw new PaymentException('威富通JSAPI下单失败：' . $e->getMessage(), 40200);
         }
 
-        if ($payType === 'bank') {
-            return $this->payResult('jump', $payType, $service, $service, ['url' => (string) ($data['pay_url'] ?? ''), 'raw' => $data], $data, $order);
-        }
-
         $payInfo = $data['pay_info'] ?? [];
         if (is_string($payInfo)) {
             $decoded = json_decode($payInfo, true);
             $payInfo = is_array($decoded) ? $decoded : ['tradeNO' => $payInfo];
         }
 
-        return $this->payResult('jsapi', $payType, $service, $service, ((array) $payInfo) + ['raw' => $data], $data, $order);
+        $params = $mini
+            ? ['_page' => 'wechatMini', 'request_payment' => (array) $payInfo, 'raw' => $data]
+            : ((array) $payInfo) + ['raw' => $data];
+
+        return $this->payResult($mini ? 'page' : 'jsapi', $payType, $product, $service, $params, $data, $order);
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace app\http\admin\controller\trade;
 
 use app\common\base\BaseController;
+use app\exception\UnauthorizedException;
 use app\http\admin\validation\PayOrderActionValidator;
 use app\http\admin\validation\PayOrderValidator;
 use app\service\payment\order\PayOrderAdminActionService;
@@ -13,13 +14,35 @@ use support\Response;
 /**
  * 支付订单管理控制器。
  *
- * 当前提供列表查询和详情查看，便于后台直接排查支付链路。
+ * 负责订单查询和管理员操作的身份确认、参数校验与响应包装；状态和资金交给业务服务。
  *
  * @property PayOrderService $payOrderService 支付订单服务
  * @property PayOrderAdminActionService $payOrderAdminActionService 支付订单后台操作服务
  */
 class PayOrderController extends BaseController
 {
+    /**
+     * 管理员全额补扣原支付单待收服务费。
+     *
+     * 必须有真实管理员身份，包括开发环境放宽中间件时；金额取订单快照，
+     * 入口只接收操作原因，不允许请求金额或请求中的单号覆盖路径目标。
+     *
+     * @throws UnauthorizedException 没有当前管理员身份
+     */
+    public function collectServiceFee(Request $request, string $payNo): Response
+    {
+        $adminId = $this->currentAdminId($request);
+        if ($adminId <= 0) {
+            throw new UnauthorizedException('管理员未授权');
+        }
+        $data = $this->validated(
+            array_replace($this->payload($request), ['pay_no' => $payNo]),
+            PayOrderActionValidator::class,
+            'collect_service_fee'
+        );
+        return $this->success($this->payOrderAdminActionService->collectServiceFee($payNo, $data, $adminId));
+    }
+
     /**
      * 构造方法。
      *

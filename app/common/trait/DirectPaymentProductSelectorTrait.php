@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace app\common\trait;
 
 use app\common\constant\EpayProtocolConstant;
+use app\common\constant\PaymentMethodConstant;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
+use Throwable;
 
 /**
  * 直连聚合插件支付产品候选选择。
@@ -31,7 +34,7 @@ trait DirectPaymentProductSelectorTrait
             'type' => 'checkbox',
             'field' => 'enabled_products',
             'title' => '已开通产品',
-            'value' => $values,
+            'value' => [],
             'options' => array_map(
                 static fn (string $value, string $label): array => ['label' => $label, 'value' => $value],
                 $values,
@@ -47,47 +50,110 @@ trait DirectPaymentProductSelectorTrait
      * 按当前支付环境执行最合适的支付产品。
      *
      * @param array<string, mixed> $order 标准插件下单参数
-     * @param array<string, callable|array<string, mixed>> $handlers 产品处理器，key 使用 auth_code/jsapi/h5/urlscheme/web/jump/qrcode/html
+     * @param array<string, callable|array<string, mixed>> $handlers 产品处理器，key 使用标准支付调用方式
      * @param string $gatewayName 插件展示名
      * @return array<string, mixed>
      */
     private function executeDirectPaymentProduct(array $order, array $handlers, string $gatewayName): array
     {
         $declaredHandlers = $handlers;
-        $handlers = $this->directPaymentUsableHandlers($order, $handlers);
-        $candidates = $this->directPaymentProductCandidates($order, array_keys($handlers));
+        $selection = $this->directPaymentSelection($order, $handlers);
+        $handlers = $selection['handlers'];
+        $selectedProduct = $this->directPaymentPinnedProduct($order);
+        $candidates = $selection['candidates'];
         $attempts = [];
 
         foreach ($candidates as $index => $product) {
+            $actualProduct = $this->directPaymentSelectedProduct($order, $declaredHandlers[$product], $product);
+            $this->preparePayProduct($actualProduct);
             try {
-                return $handlers[$product]();
+                $result = $handlers[$product]();
+                $returnedProduct = trim((string) ($result['pay_product'] ?? ''));
+                if ($selectedProduct !== '' || $this->hasPayProductPreflight()) {
+                    if ($returnedProduct === '' || !hash_equals($actualProduct, $returnedProduct)) {
+                        throw new PaymentUncertainException('支付插件返回产品与外呼前保存的产品不一致', 40200, [
+                            'selected_product' => $actualProduct,
+                            'actual_product' => $returnedProduct,
+                        ]);
+                    }
+                }
+
+                return $result;
             } catch (PaymentException $e) {
                 $attempts[] = [
-                    'product' => $product,
+                    'product' => $actualProduct,
                     'message' => $e->getMessage(),
                     'code' => (string) $e->getCode(),
                 ];
 
-                // 只有产品未开通、权限不足、缺少 JSAPI 身份等可换产品的错误才继续兜底。
-                if ($index === count($candidates) - 1 || !$this->directPaymentCanFallback($e)) {
+                // 外呼前产品已经提交；不能证明上一 handler 没有送出请求时，绝不切换产品。
+                if ($this->hasPayProductPreflight() || $index === count($candidates) - 1 || !$this->directPaymentCanFallback($e)) {
                     throw $this->withDirectPaymentAttempts(
                         $e,
                         $order,
                         $candidates,
                         $attempts,
-                        $this->directPaymentSelectedProduct($order, $declaredHandlers[$product] ?? null, $product)
+                        $actualProduct
                     );
                 }
+            } catch (Throwable $e) {
+                // handler 已执行；未知异常按不确定处理，并保存映射产品而不是能力键。
+                throw $this->withDirectPaymentAttempts(
+                    new PaymentUncertainException($e->getMessage(), 40200, [
+                        'channel_error_code' => 'PLUGIN_CREATE_ORDER_ERROR',
+                        'exception_class' => $e::class,
+                    ]),
+                    $order,
+                    $candidates,
+                    array_merge($attempts, [[
+                        'product' => $actualProduct,
+                        'message' => $e->getMessage(),
+                        'code' => '40200',
+                    ]]),
+                    $actualProduct
+                );
             }
         }
 
-        throw new PaymentDefinitiveException($gatewayName . '没有适合当前环境的支付产品', 40200, [
+        throw new PaymentProductUnavailableException($gatewayName . '没有适合当前环境的已开通支付产品', 40200, [
             'env' => $this->directPaymentEnv($order),
             'pay_type' => (string) ($order['pay_type_code'] ?? ''),
             'candidate_products' => $candidates,
             'available_products' => array_keys($handlers),
             'enabled_products' => $this->directPaymentEnabledProducts(),
         ]);
+    }
+
+    /**
+     * 预选当前订单的产品，不执行处理器或请求上游。
+     *
+     * 身份预检与 pay() 共用该结果，避免授权产品与实际下单产品不同。
+     * 固定产品仍须开通且满足原环境/显式 method；不能重新选择其他产品。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param array<string, callable|array<string, mixed>> $declarations 插件产品声明
+     * @return array{handlers:array<string, callable>,candidates:list<string>,product:string}
+     */
+    private function directPaymentSelection(array $order, array $declarations): array
+    {
+        $handlers = $this->directPaymentUsableHandlers($order, $declarations);
+        $candidates = $this->directPaymentProductCandidates($order, array_keys($handlers));
+        $selectedProduct = $this->directPaymentPinnedProduct($order);
+        if ($selectedProduct !== '') {
+            // 同一产品可同时绑定 h5/jump，固定时只从本次合理候选里找处理器。
+            $candidates = [$this->directPaymentHandlerForProduct(
+                $order,
+                $declarations,
+                array_intersect_key($handlers, array_flip($candidates)),
+                $selectedProduct
+            )];
+        }
+
+        return [
+            'handlers' => $handlers,
+            'candidates' => $candidates,
+            'product' => $this->directPaymentSelectedProduct($order, $declarations[$candidates[0]], $candidates[0]),
+        ];
     }
 
     /**
@@ -200,6 +266,49 @@ trait DirectPaymentProductSelectorTrait
     }
 
     /**
+     * 读取身份流程固定的插件产品。
+     */
+    private function directPaymentPinnedProduct(array $order): string
+    {
+        $payment = $this->directPaymentPayload($order);
+
+        return trim((string) ($payment['selected_product'] ?? ''));
+    }
+
+    /**
+     * 找到固定插件产品对应的处理器。
+     *
+     * @param array<string, callable|array<string, mixed>> $declaredHandlers
+     * @param array<string, callable> $usableHandlers
+     */
+    private function directPaymentHandlerForProduct(
+        array $order,
+        array $declaredHandlers,
+        array $usableHandlers,
+        string $selectedProduct
+    ): string {
+        $payType = (string) ($order['pay_type_code'] ?? '');
+
+        foreach ($declaredHandlers as $key => $definition) {
+            if (!is_array($definition) || !array_key_exists('products', $definition)) {
+                continue;
+            }
+
+            $matched = true;
+            $products = $this->directPaymentRequiredProducts($definition['products'], $payType, $matched);
+            if ($matched && in_array($selectedProduct, $products, true) && isset($usableHandlers[$key])) {
+                return (string) $key;
+            }
+        }
+
+        throw new PaymentProductUnavailableException('身份授权产品未在当前通道开通或插件未实现', 40200, [
+            'selected_product' => $selectedProduct,
+            'pay_type' => $payType,
+            'enabled_products' => $this->directPaymentEnabledProducts(),
+        ]);
+    }
+
+    /**
      * 判断 handler 依赖的插件产品是否已经在当前通道开通。
      *
      * @param array<int, string> $requiredProducts handler 依赖的插件产品
@@ -256,23 +365,56 @@ trait DirectPaymentProductSelectorTrait
 
         // 付款码支付是独立业务形态，不自动降级到普通扫码，避免用户拿付款码时生成二维码。
         if ($this->directPaymentHasAuthCode($payment)) {
-            return in_array('auth_code', $available, true) ? ['auth_code'] : [];
+            if (!in_array(PaymentMethodConstant::AUTH_CODE, $available, true)) {
+                throw new PaymentProductUnavailableException('当前通道未开通或插件未实现付款码支付', 40200, [
+                    'method' => PaymentMethodConstant::AUTH_CODE,
+                    'available_methods' => $available,
+                ]);
+            }
+
+            return [PaymentMethodConstant::AUTH_CODE];
         }
 
-        // 显式偏好仍受环境和插件能力约束。
-        $preferred = $this->directPaymentPreferredProducts($payType, $env);
+        // API 显式 method 是严格约束，不能在插件未实现或环境不匹配时静默降级。
         $methodProduct = $this->directPaymentMethodProduct((string) ($payment['method'] ?? ''));
-        if ($methodProduct !== ''
-            && in_array($methodProduct, $available, true)
-            && $this->directPaymentProductAllowed($methodProduct, $payType, $env)
-        ) {
-            array_unshift($preferred, $methodProduct);
+        if ($methodProduct !== '') {
+            if ($methodProduct === PaymentMethodConstant::AUTH_CODE) {
+                throw new PaymentDefinitiveException('付款码支付必须提供 auth_code', 40200);
+            }
+            if (!in_array($methodProduct, $available, true)) {
+                throw new PaymentProductUnavailableException('当前通道未开通或插件未实现指定支付方式', 40200, [
+                    'method' => $methodProduct,
+                    'available_methods' => $available,
+                ]);
+            }
+            if (!$this->directPaymentProductAllowed($methodProduct, $payType, $env)) {
+                throw new PaymentDefinitiveException('指定支付方式与当前支付环境不匹配', 40200, [
+                    'method' => $methodProduct,
+                    'env' => $env,
+                    'pay_type' => $payType,
+                ]);
+            }
+
+            return [$methodProduct];
         }
 
-        return array_values(array_filter(
+        $preferred = $this->directPaymentPreferredProducts($payType, $env);
+
+        $candidates = array_values(array_filter(
             array_unique($preferred),
             static fn (string $product): bool => in_array($product, $available, true)
         ));
+
+        if ($candidates === []) {
+            throw new PaymentProductUnavailableException('当前通道没有适合支付环境的已开通产品', 40200, [
+                'env' => $env,
+                'pay_type' => $payType,
+                'preferred_methods' => $preferred,
+                'available_methods' => $available,
+            ]);
+        }
+
+        return $candidates;
     }
 
     /**
@@ -288,18 +430,18 @@ trait DirectPaymentProductSelectorTrait
 
         if ($env === EpayProtocolConstant::DEVICE_WECHAT) {
             return $payType === 'wxpay'
-                ? ['jsapi', 'urlscheme', 'qrcode', 'jump']
+                ? ['jsapi', 'mini', 'urlscheme', 'qrcode', 'jump']
                 : ['h5', 'jump', 'urlscheme', 'qrcode', 'web'];
         }
 
         if ($env === EpayProtocolConstant::DEVICE_ALIPAY) {
             return $payType === 'alipay'
-                ? ['jsapi', 'h5', 'jump', 'web', 'qrcode']
+                ? ['jsapi', 'mini', 'h5', 'jump', 'web', 'qrcode']
                 : ['h5', 'jump', 'urlscheme', 'qrcode', 'web'];
         }
 
         if (in_array($env, [EpayProtocolConstant::DEVICE_MOBILE, EpayProtocolConstant::DEVICE_QQ], true)) {
-            return ['h5', 'jump', 'urlscheme', 'qrcode', 'web'];
+            return ['h5', 'jump', 'urlscheme', 'mini', 'qrcode', 'web'];
         }
 
         return $payType === 'alipay'
@@ -353,9 +495,11 @@ trait DirectPaymentProductSelectorTrait
             return '';
         }
 
-        return in_array($method, ['jsapi', 'h5', 'jump', 'web', 'urlscheme', 'qrcode', 'html', 'page'], true)
-            ? $method
-            : '';
+        if (!in_array($method, PaymentMethodConstant::values(), true)) {
+            throw new PaymentDefinitiveException('不支持的支付调用方式', 40200, ['method' => $method]);
+        }
+
+        return $method;
     }
 
     /**
@@ -388,38 +532,7 @@ trait DirectPaymentProductSelectorTrait
      */
     private function directPaymentCanFallback(PaymentException $e): bool
     {
-        if ($e instanceof PaymentUncertainException) {
-            return false;
-        }
-
-        $data = method_exists($e, 'getData') ? $e->getData() : [];
-        $errorCode = strtoupper((string) ($data['channel_error_code'] ?? $data['sub_code'] ?? ''));
-        $message = strtoupper($e->getMessage());
-
-        foreach ([
-            'ACCESS_FORBIDDEN',
-            'INSUFFICIENT',
-            'NO_PERMISSION',
-            'NOT_OPEN',
-            'PRODUCT_NOT_OPEN',
-            'INVALID_PRODUCT',
-            'TRADE_NOT_SUPPORT',
-            '权限不足',
-            '无权限',
-            '未开通',
-            '未签约',
-            '不支持',
-            '产品不可用',
-            '接口未开通',
-            '缺少用户标识',
-        ] as $keyword) {
-            $upperKeyword = strtoupper($keyword);
-            if (str_contains($errorCode, $upperKeyword) || str_contains($message, $upperKeyword)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $e instanceof PaymentProductUnavailableException;
     }
 
     /**

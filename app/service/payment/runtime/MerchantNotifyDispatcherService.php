@@ -19,6 +19,7 @@ use app\repository\merchant\credential\MerchantApiCredentialRepository;
 use app\repository\payment\notify\NotifyTaskRepository;
 use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
+use app\repository\payment\trade\RefundOrderRepository;
 use app\service\payment\config\PaymentTypeService;
 use app\service\payment\epay\EpaySignerManager;
 use app\service\payment\order\PayOrderRiskControlService;
@@ -46,7 +47,9 @@ class MerchantNotifyDispatcherService extends BaseService
         protected PaymentTypeService $paymentTypeService,
         protected EpaySignerManager $signerManager,
         protected PaymentQueueService $paymentQueueService,
-        protected PayOrderRiskControlService $payOrderRiskControlService
+        protected PayOrderRiskControlService $payOrderRiskControlService,
+        protected PaymentExceptionService $paymentExceptionService,
+        protected RefundOrderRepository $refundOrderRepository
     ) {
         $this->httpClient = new Client([
             'timeout' => 10,
@@ -96,10 +99,10 @@ class MerchantNotifyDispatcherService extends BaseService
     }
 
     /**
-     * 后台手动重新创建支付成功通知任务。
+     * 后台手动重新投递支付成功通知任务。
      *
-     * 与自动通知不同，手动重新通知不复用历史 notify_task，避免成功过的任务被
-     * dispatchTask 幂等返回，导致后台点击后没有真正再次通知商户。
+     * 同一支付成功事件复用唯一 notify_task，并重置投递状态和通知载荷，
+     * 避免重复插入触发数据库唯一键冲突。
      *
      * @param PayOrder $payOrder 支付单
      * @param BizOrder|null $bizOrder 业务单
@@ -121,7 +124,7 @@ class MerchantNotifyDispatcherService extends BaseService
             return null;
         }
 
-        return $this->notifyService->enqueueMerchantNotify([
+        return $this->notifyService->requeueMerchantNotify([
             'merchant_id' => (int) $payOrder->merchant_id,
             'merchant_group_id' => (int) $payOrder->merchant_group_id,
             'event_type' => NotifyConstant::EVENT_PAY_SUCCESS,
@@ -131,7 +134,7 @@ class MerchantNotifyDispatcherService extends BaseService
             'notify_url' => $notifyUrl,
             'notify_data' => $this->buildPaySuccessPayload($payOrder, $bizOrder),
             'status' => NotifyConstant::TASK_STATUS_PENDING,
-        ], false);
+        ]);
     }
 
     /**
@@ -173,12 +176,19 @@ class MerchantNotifyDispatcherService extends BaseService
     /**
      * 为退款成功创建通知任务。
      *
+     * 异常重复支付返还不发送普通 REFUND_SUCCESS；即使异常已经解决仍保持隔离。
+     * 成功领域事件本身保留，其他消费者继续统计真实渠道退款。
+     *
      * @param RefundOrder $refundOrder 退款单
      * @return NotifyTask|null 通知任务；没有 notify_url 时返回 null
      */
     public function enqueueRefundSuccess(RefundOrder $refundOrder): ?NotifyTask
     {
         if (!$this->merchantNotifyEnabled()) {
+            return null;
+        }
+
+        if ($this->paymentExceptionService->isLateDuplicatePayment((string) $refundOrder->pay_no)) {
             return null;
         }
 
@@ -295,7 +305,6 @@ class MerchantNotifyDispatcherService extends BaseService
             return $task->refresh();
         }
 
-        $eventName = EventConstant::MERCHANT_NOTIFY_FAILED;
         $failureMessage = '';
         try {
             $timeout = $this->intConfig('pay_notify_request_timeout_seconds', 10, 1, 60);
@@ -311,7 +320,6 @@ class MerchantNotifyDispatcherService extends BaseService
                     'last_notify_at' => $this->now(),
                     'last_response' => $this->truncateResponse($body),
                 ]);
-                $eventName = EventConstant::MERCHANT_NOTIFY_SUCCEEDED;
             } else {
                 $failureMessage = $body !== '' ? $body : '商户未返回 success';
                 $task = $this->notifyService->markTaskFailed((string) $task->notify_no, [
@@ -321,20 +329,18 @@ class MerchantNotifyDispatcherService extends BaseService
             }
         } catch (Throwable $e) {
             $failureMessage = $e->getMessage();
-            Log::warning(sprintf(
-                '[MerchantNotify] 派发失败 notify_no=%s pay_no=%s error=%s',
-                (string) $task->notify_no,
-                (string) $task->pay_no,
-                $e->getMessage()
-            ));
-
             $task = $this->notifyService->markTaskFailed((string) $task->notify_no, [
                 'last_notify_at' => $this->now(),
                 'last_response' => $this->truncateResponse($e->getMessage()),
             ]);
         }
 
-        $this->dispatchNotifyTaskEvent($eventName, $task);
+        $this->dispatchNotifyTaskEvent(
+            (int) $task->status === NotifyConstant::TASK_STATUS_SUCCESS
+                ? EventConstant::MERCHANT_NOTIFY_SUCCEEDED
+                : EventConstant::MERCHANT_NOTIFY_FAILED,
+            $task
+        );
         if ($throwOnFailure && (int) $task->status !== NotifyConstant::TASK_STATUS_SUCCESS) {
             throw new RuntimeException($failureMessage !== '' ? $failureMessage : '商户通知失败');
         }
@@ -343,13 +349,13 @@ class MerchantNotifyDispatcherService extends BaseService
     }
 
     /**
-     * 批量投递到期重试任务。
+     * 批量投递到期通知任务。
      *
      * 到期任务只重新入队，不在维护进程里同步请求商户，避免定时进程被
      * 商户 notify_url 的网络耗时拖住。
      *
      * @param int $limit 最大处理数量
-     * @return int 实际投递数量
+     * @return int 成功入队数量；队列返回 false 或抛异常时不计入
      */
     public function dispatchRetryableTasks(int $limit = 100): int
     {
@@ -357,17 +363,16 @@ class MerchantNotifyDispatcherService extends BaseService
             return 0;
         }
 
-        $limit = max(1, $limit);
         $count = 0;
+        $rejected = 0;
 
-        foreach ($this->notifyService->listRetryableTasks() as $task) {
-            if ($count >= $limit) {
-                break;
-            }
-
+        foreach ($this->notifyService->listRetryableTasks(max(1, $limit)) as $task) {
             try {
-                $this->paymentQueueService->sendMerchantNotify((string) $task->notify_no);
-                $count++;
+                if ($this->paymentQueueService->sendMerchantNotify((string) $task->notify_no)) {
+                    $count++;
+                } else {
+                    $rejected++;
+                }
             } catch (Throwable $e) {
                 Log::warning(sprintf(
                     '[MerchantNotify] 重试任务投递队列失败 notify_no=%s error=%s',
@@ -375,6 +380,10 @@ class MerchantNotifyDispatcherService extends BaseService
                     $e->getMessage()
                 ));
             }
+        }
+
+        if ($rejected > 0) {
+            Log::warning(sprintf('[MerchantNotify] %d 个到期通知任务投递队列失败', $rejected));
         }
 
         return $count;
@@ -422,7 +431,9 @@ class MerchantNotifyDispatcherService extends BaseService
         $payload['refund_no'] = (string) $refundOrder->refund_no;
         $payload['out_refund_no'] = (string) $refundOrder->merchant_refund_no;
         $payload['refundmoney'] = FormatHelper::amount((int) $refundOrder->refund_amount);
-        $payload['reducemoney'] = FormatHelper::amount((int) ($bizOrder?->refund_amount ?? $refundOrder->refund_amount));
+        $payload['reducemoney'] = FormatHelper::amount(
+            $this->refundOrderRepository->sumSuccessfulAmountByPayNo((string) $refundOrder->pay_no)
+        );
         $payload['endtime'] = FormatHelper::dateTime($refundOrder->succeeded_at ?: $this->now());
 
         return $this->signEventPayload($payload, $this->resolveProtocolVersion($payOrder, $bizOrder), (int) $refundOrder->merchant_id);
@@ -634,7 +645,7 @@ class MerchantNotifyDispatcherService extends BaseService
     }
 
     /**
-     * 解析通知任务。
+     * 读取当前通知任务，避免使用入队时的旧模型状态和载荷。
      *
      * @param NotifyTask|string $task 通知任务模型或通知号
      * @return NotifyTask
@@ -642,13 +653,10 @@ class MerchantNotifyDispatcherService extends BaseService
      */
     private function resolveTask(NotifyTask|string $task): NotifyTask
     {
-        if ($task instanceof NotifyTask) {
-            return $task;
-        }
-
-        $taskModel = $this->notifyTaskRepository->findByNotifyNo($task);
+        $notifyNo = $task instanceof NotifyTask ? (string) $task->notify_no : $task;
+        $taskModel = $this->notifyTaskRepository->findByNotifyNo($notifyNo);
         if (!$taskModel) {
-            throw new ResourceNotFoundException('通知任务不存在', ['notify_no' => $task]);
+            throw new ResourceNotFoundException('通知任务不存在', ['notify_no' => $notifyNo]);
         }
 
         return $taskModel;

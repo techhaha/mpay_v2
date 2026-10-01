@@ -3,6 +3,7 @@
 namespace app\repository\payment\trade;
 
 use app\common\base\BaseRepository;
+use app\common\constant\TradeConstant;
 use app\model\payment\RefundOrder;
 
 /**
@@ -109,6 +110,41 @@ class RefundOrderRepository extends BaseRepository
             ->where('pay_no', $payNo)
             ->orderByDesc('id')
             ->first($columns);
+    }
+
+    /**
+     * 汇总一笔支付单的已成功退款金额。
+     *
+     * 包含异常重复收款的真实返还，只统计 SUCCESS，不混入同业务单其他支付的退款。
+     * 此金额用于查单和展示，不代替创建退款时包含待处理、失败单的锁内额度计算。
+     *
+     * @param string $payNo MPAY 支付单号，由调用方完成归属校验
+     * @return int 已成功退款金额，单位分；无成功退款时为 0
+     */
+    public function sumSuccessfulAmountByPayNo(string $payNo): int
+    {
+        return (int) $this->query()->where('pay_no', $payNo)
+            ->where('status', TradeConstant::REFUND_STATUS_SUCCESS)
+            ->sum('refund_amount');
+    }
+
+    /**
+     * 一次聚合支付单列表的已成功退款金额，避免逐行查库。
+     *
+     * @param list<string> $payNos 已完成可见范围筛选的支付单号
+     * @return array<string, int> pay_no 到整数分金额的映射；无成功退款的单号不出现在映射中
+     */
+    public function sumSuccessfulAmountsByPayNos(array $payNos): array
+    {
+        if ($payNos === []) {
+            return [];
+        }
+
+        return $this->query()->whereIn('pay_no', $payNos)
+            ->where('status', TradeConstant::REFUND_STATUS_SUCCESS)
+            ->select('pay_no')->selectRaw('SUM(refund_amount) AS refunded_amount')
+            ->groupBy('pay_no')->pluck('refunded_amount', 'pay_no')
+            ->map(static fn ($amount): int => (int) $amount)->all();
     }
 
     /**

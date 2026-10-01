@@ -19,6 +19,7 @@ use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use app\model\payment\PayOrder;
@@ -214,6 +215,7 @@ class SandpayApiPayment extends BasePayment implements
             return [
                 'provider' => 'alipay',
                 'product' => self::PRODUCT_ALIPAY_JSAPI,
+                'channel_product' => self::PRODUCT_ALIPAY_JSAPI,
                 'auth_type' => 'alipay_oauth',
                 'identity_field' => 'buyer_id',
                 'app_id' => $this->configText('alipay_oauth_app_id'),
@@ -236,7 +238,7 @@ class SandpayApiPayment extends BasePayment implements
         $mini = $this->isMiniIntent($payment);
         if ($mini) {
             if (!in_array(self::PRODUCT_WXPAY_MINI, $this->enabledProducts(), true)) {
-                throw new PaymentException('当前杉德通道未开启微信小程序产品', 40200);
+                throw new PaymentProductUnavailableException('当前杉德通道未开启微信小程序产品', 40200);
             }
             $this->assertPaymentAppScope($payment, $this->configText('wechat_mini_app_id'), '微信小程序');
             if ($this->firstText($payment['mini_openid'] ?? '') !== '') {
@@ -246,7 +248,7 @@ class SandpayApiPayment extends BasePayment implements
             return [
                 'provider' => 'wxpay',
                 'product' => 'mini',
-                'pay_product' => self::PRODUCT_WXPAY_MINI,
+                'channel_product' => self::PRODUCT_WXPAY_MINI,
                 'auth_type' => 'mini_program',
                 'identity_field' => 'mini_openid',
                 'app_id' => $this->configText('wechat_mini_app_id'),
@@ -269,6 +271,7 @@ class SandpayApiPayment extends BasePayment implements
         return [
             'provider' => 'wxpay',
             'product' => self::PRODUCT_WXPAY_MP,
+            'channel_product' => self::PRODUCT_WXPAY_MP,
             'auth_type' => 'wechat_oauth',
             'identity_field' => 'openid',
             'app_id' => $this->configText('wechat_mp_app_id'),
@@ -294,9 +297,10 @@ class SandpayApiPayment extends BasePayment implements
         }
         $payType = $this->payTypeCode($order);
         $wxProduct = $this->isMiniIntent($payment) ? self::PRODUCT_WXPAY_MINI : self::PRODUCT_WXPAY_MP;
+        $jsapiHandler = $wxProduct === self::PRODUCT_WXPAY_MINI ? 'mini' : 'jsapi';
 
         return $this->executeDirectPaymentProduct($order, [
-            'jsapi' => [
+            $jsapiHandler => [
                 'products' => ['alipay' => self::PRODUCT_ALIPAY_JSAPI, 'wxpay' => $wxProduct],
                 'handler' => fn (): array => $this->jsapiPay($order, $payType, $wxProduct),
             ],
@@ -1232,7 +1236,7 @@ class SandpayApiPayment extends BasePayment implements
     private function ensureProduct(string $product): void
     {
         if (!in_array($product, $this->enabledProducts(), true)) {
-            throw new PaymentException('当前杉德通道未开启该支付产品', 40200, ['product' => $product]);
+            throw new PaymentProductUnavailableException('当前杉德通道未开启该支付产品', 40200, ['product' => $product]);
         }
     }
 
@@ -1273,6 +1277,11 @@ class SandpayApiPayment extends BasePayment implements
      */
     private function isMiniIntent(array $payment): bool
     {
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
+
         return $this->firstText($payment['mini_openid'] ?? '') !== ''
             || filter_var($payment['is_mini'] ?? false, FILTER_VALIDATE_BOOL);
     }

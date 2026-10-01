@@ -27,6 +27,15 @@ final class EpayProtocolConstant
      */
     public const SUBMIT_TYPE_API = 'api';
 
+    /** V2 退款失败或关闭。 */
+    public const V2_REFUND_STATUS_FAILED = 0;
+
+    /** V2 退款已完成。 */
+    public const V2_REFUND_STATUS_SUCCESS = 1;
+
+    /** V2 退款待派发或处理中，不代表资金已退回。 */
+    public const V2_REFUND_STATUS_PENDING = 2;
+
     /**
      * 电脑浏览器。
      */

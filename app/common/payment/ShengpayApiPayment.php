@@ -8,11 +8,15 @@ use app\common\base\BasePayment;
 use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
+use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\shengpay\ShengpayClient;
 use app\common\sdk\shengpay\ShengpaySdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
+use app\common\trait\DirectPaymentIdentityTrait;
 use app\exception\PaymentException;
+use app\exception\PaymentDefinitiveException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
@@ -23,9 +27,10 @@ use support\Response;
  *
  * 负责微信、支付宝与银联直连产品的下单、退款和异步通知适配；当前协议未接入主动查单与关单能力。
  */
-class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
+class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
 {
     use DirectPaymentProductSelectorTrait;
+    use DirectPaymentIdentityTrait;
 
     private const PRODUCT_WX_JSAPI = 'wx_jsapi';
     private const PRODUCT_ALIPAY_JSAPI = 'alipay_jsapi';
@@ -35,6 +40,7 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
     private const PRODUCT_WX_NATIVE = 'wx_native';
     private const PRODUCT_ALIPAY_QR = 'alipay_qr';
     private const PRODUCT_UPACP_QR = 'upacp_qr';
+    private const PRODUCT_WX_LITE = 'wx_lite';
 
     private ?ShengpayClient $client = null;
 
@@ -64,12 +70,14 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
     {
         return [
             ['type' => 'input', 'field' => 'mch_id', 'title' => '商户号', 'value' => '', 'validate' => [['required' => true, 'message' => '商户号不能为空']]],
+            ['type' => 'input', 'field' => 'sdp_app_id', 'title' => '盛付通应用 ID', 'value' => '', 'validate' => [['required' => true, 'message' => '盛付通应用 ID 不能为空']]],
             ['type' => 'textarea', 'field' => 'merchant_private_key', 'title' => '商户私钥', 'value' => '', 'validate' => [['required' => true, 'message' => '商户私钥不能为空']]],
             ['type' => 'textarea', 'field' => 'platform_public_key', 'title' => '盛付通公钥', 'value' => '', 'validate' => [['required' => true, 'message' => '盛付通公钥不能为空']]],
             ['type' => 'select', 'field' => 'interface_type', 'title' => '收单接口类型', 'value' => 'online', 'options' => [['label' => '线上', 'value' => 'online'], ['label' => '线下', 'value' => 'offline']]],
             ['type' => 'input', 'field' => 'sub_mch_id', 'title' => '子商户号', 'value' => ''],
             $this->directPaymentEnabledProductsField([
                 self::PRODUCT_WX_JSAPI => '微信 JSAPI',
+                self::PRODUCT_WX_LITE => '微信小程序',
                 self::PRODUCT_ALIPAY_JSAPI => '支付宝 JSAPI',
                 self::PRODUCT_WX_WAP => '微信 H5',
                 self::PRODUCT_ALIPAY_WAP => '支付宝 H5',
@@ -78,6 +86,7 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
                 self::PRODUCT_ALIPAY_QR => '支付宝扫码',
                 self::PRODUCT_UPACP_QR => '银联扫码',
             ]),
+            ...$this->directPaymentIdentityConfigFields(['wechat_oauth', 'mini_program', 'alipay_oauth']),
         ];
     }
 
@@ -90,9 +99,38 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
      */
     public function pay(array $order): array
     {
+        return $this->executeDirectPaymentProduct($order, $this->paymentProducts($order), '盛付通');
+    }
+
+    /**
+     * 按与下单一致的产品声明预检身份；公众号、小程序和支付宝 UID 不互相替代。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>|null 当前产品的身份需求
+     */
+    public function identityRequirement(array $order): ?array
+    {
+        $product = $this->directPaymentSelection($order, $this->paymentProducts($order))['product'];
+
+        return match ($product) {
+            self::PRODUCT_WX_JSAPI => $this->directPaymentIdentityRequirement($order, $product, 'wechat_oauth'),
+            self::PRODUCT_WX_LITE => $this->directPaymentIdentityRequirement($order, $product, 'mini_program'),
+            self::PRODUCT_ALIPAY_JSAPI => $this->directPaymentIdentityRequirement($order, $product, 'alipay_oauth'),
+            default => null,
+        };
+    }
+
+    /**
+     * 声明已实现的产品；选择器在任何请求前过滤未开通产品及不合理环境。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, array<string, mixed>> 产品与处理器声明
+     */
+    private function paymentProducts(array $order): array
+    {
         $payType = (string) $order['pay_type_code'];
 
-        return $this->executeDirectPaymentProduct($order, [
+        return [
 
             'jsapi' => [
                 'products' => [
@@ -100,6 +138,10 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
                     'wxpay' => self::PRODUCT_WX_JSAPI,
                 ],
                 'handler' => fn (): array => $this->jsapiPay($order),
+            ],
+            'mini' => [
+                'products' => ['wxpay' => self::PRODUCT_WX_LITE],
+                'handler' => fn (): array => $this->jsapiPay($order, true),
             ],
             'h5' => [
                 'products' => [
@@ -109,7 +151,7 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
                 'handler' => fn (): array => match ($payType) {
                     'wxpay' => $this->tradePay($order, 'wx_wap'),
                     'alipay' => $this->tradePay($order, 'alipay_wap'),
-                    default => throw new PaymentException('盛付通当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                    default => throw new PaymentProductUnavailableException('盛付通当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
                 },
             ],
 
@@ -121,7 +163,7 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
                 'handler' => fn (): array => match ($payType) {
                     'wxpay' => $this->tradePay($order, 'wx_wap'),
                     'alipay' => $this->tradePay($order, 'alipay_wap'),
-                    default => throw new PaymentException('盛付通当前支付方式不支持跳转产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                    default => throw new PaymentProductUnavailableException('盛付通当前支付方式不支持跳转产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
                 },
             ],
 
@@ -131,7 +173,7 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
                 ],
                 'handler' => fn (): array => $payType === 'alipay'
                 ? $this->tradePay($order, 'alipay_pc')
-                : throw new PaymentException('盛付通当前支付方式不支持网页产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                : throw new PaymentProductUnavailableException('盛付通当前支付方式不支持网页产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
             ],
 
             'qrcode' => [
@@ -146,7 +188,7 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
                     default => 'alipay_qr',
                 }),
             ],
-        ], '盛付通');
+        ];
     }
 
     /**
@@ -175,7 +217,7 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
         $page = str_contains($tradeType, '_wap') || str_contains($tradeType, '_pc') ? 'jump' : 'qrcode';
         $params = $page === 'jump' ? ['url' => $payInfo, 'raw' => $data] : ['qrcode' => $payInfo, 'raw' => $data];
 
-        return $this->payResult($page, $payType, $tradeType, 'unifiedorder', $params, $data, $order);
+        return $this->payResult($page, (string) $order['pay_type_code'], $tradeType, 'unifiedorder', $params, $data, $order);
     }
 
     /**
@@ -293,23 +335,27 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
      * 根据支付方式补充用户与应用标识并发起 JSAPI 下单。
      *
      * @param array<string, mixed> $order 标准插件下单参数
+     * @param bool $mini 是否调用已选定的小程序产品
      *
      * @return array<string, mixed> 标准 JSAPI 待支付结果
      */
-    private function jsapiPay(array $order): array
+    private function jsapiPay(array $order, bool $mini = false): array
     {
         $payType = (string) $order['pay_type_code'];
-        $payment = (array) ($order['extra']['payment'] ?? []);
-        $tradeType = $payType === 'wxpay' ? 'wx_jsapi' : 'alipay_jsapi';
+        $identity = $this->directPaymentIdentityData($order, $payType === 'alipay' ? 'alipay_oauth' : ($mini ? 'mini_program' : 'wechat_oauth'));
+        if ($identity['identity'] === '') {
+            throw new PaymentDefinitiveException('盛付通必须先取得当前产品的用户身份', 40200);
+        }
+        $tradeType = $payType === 'alipay' ? self::PRODUCT_ALIPAY_JSAPI : ($mini ? self::PRODUCT_WX_LITE : self::PRODUCT_WX_JSAPI);
         $extra = $payType === 'wxpay'
-            ? ['openId' => (string) ($payment['sub_openid'] ?? ''), 'appId' => (string) ($payment['sub_appid'] ?? '')]
-            : ['openId' => (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? '')];
+            ? ['openId' => $identity['identity'], 'appId' => $identity['app_id']]
+            : ['openId' => $identity['identity']];
 
+        $payload = $this->basePayload($order);
+        $payload['tradeType'] = $tradeType;
+        $payload['extra'] = json_encode($extra, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         try {
-            $data = $this->client()->execute($this->orderPath(), $this->basePayload($order) + [
-                'tradeType' => $tradeType,
-                'extra' => json_encode($extra, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            ]);
+            $data = $this->client()->execute($this->orderPath(), $payload);
         } catch (ShengpaySdkException $e) {
             throw new PaymentException('盛付通JSAPI下单失败：' . $e->getMessage(), 40200);
         }
@@ -320,7 +366,11 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
             $payInfo = is_array($decoded) ? $decoded : ['tradeNO' => $payInfo];
         }
 
-        return $this->payResult('jsapi', $payType, $tradeType, 'unifiedorder', ((array) $payInfo) + ['raw' => $data], $data, $order);
+        $params = $mini
+            ? ['_page' => 'wechatMini', 'request_payment' => (array) $payInfo, 'raw' => $data]
+            : ((array) $payInfo) + ['raw' => $data];
+
+        return $this->payResult($mini ? 'page' : 'jsapi', $payType, $tradeType, 'unifiedorder', $params, $data, $order);
     }
 
     /**
@@ -333,12 +383,15 @@ class ShengpayApiPayment extends BasePayment implements PaymentInterface, PayPlu
     private function basePayload(array $order): array
     {
         $payload = [
+            'sdpAppId' => $this->configText('sdp_app_id'),
             'outTradeNo' => (string) $order['pay_no'],
+            'timeExpire' => date('YmdHis', time() + 900),
             'totalFee' => (int) $order['amount'],
             'currency' => 'CNY',
             'notifyUrl' => (string) $order['callback_url'],
             'pageUrl' => (string) $order['return_url'],
-            'body' => mb_strcut((string) $order['subject'], 0, 127, 'UTF-8'),
+            'body' => mb_strcut((string) $order['subject'], 0, 64, 'UTF-8'),
+            'extra' => '{}',
             'clientIp' => (string) $order['client_ip'],
         ];
         if ($this->configText('sub_mch_id') !== '') {

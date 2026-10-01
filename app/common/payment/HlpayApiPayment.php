@@ -7,13 +7,16 @@ namespace app\common\payment;
 use app\common\base\BasePayment;
 use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
+use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\hlpay\HlpayClient;
 use app\common\sdk\hlpay\HlpaySdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
+use app\common\trait\DirectPaymentIdentityTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
+use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
@@ -22,16 +25,17 @@ use support\Response;
 /**
  * 汇联支付 API 插件。
  *
- * 提供支付宝、微信和银联的 JSAPI、扫码、支付通知与退款能力，并将平台场景映射为
- * 汇联 payType/paySubType。当前适配协议没有可确认的主动查单和关单接口。
+ * 提供支付宝/微信公众号 JSAPI、三种方式扫码、支付通知与退款能力，按产品声明
+ * 用户身份并映射汇联 payType/paySubType；不声明未核验的银联 JSAPI。
+ * 当前适配协议没有可确认的主动查单和关单接口。
  */
-class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
+class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
 {
     use DirectPaymentProductSelectorTrait;
+    use DirectPaymentIdentityTrait;
 
     private const PRODUCT_ALIPAY_JSAPI = 'ALIPAY_JSAPI';
     private const PRODUCT_WECHAT_JSAPI = 'WECHAT_JSAPI';
-    private const PRODUCT_UNION_PAY_JSAPI = 'UNION_PAY_JSAPI';
     private const PRODUCT_ALIPAY_NATIVE = 'ALIPAY_NATIVE';
     private const PRODUCT_WECHAT_NATIVE = 'WECHAT_NATIVE';
     private const PRODUCT_UNION_PAY_NATIVE = 'UNION_PAY_NATIVE';
@@ -72,11 +76,11 @@ class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             $this->directPaymentEnabledProductsField([
                 self::PRODUCT_ALIPAY_JSAPI => '支付宝 JSAPI',
                 self::PRODUCT_WECHAT_JSAPI => '微信 JSAPI',
-                self::PRODUCT_UNION_PAY_JSAPI => '银联 JSAPI',
                 self::PRODUCT_ALIPAY_NATIVE => '支付宝扫码',
                 self::PRODUCT_WECHAT_NATIVE => '微信扫码',
                 self::PRODUCT_UNION_PAY_NATIVE => '银联扫码',
             ]),
+            ...$this->directPaymentIdentityConfigFields(['wechat_oauth', 'alipay_oauth']),
         ];
     }
 
@@ -88,13 +92,41 @@ class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
      */
     public function pay(array $order): array
     {
-        return $this->executeDirectPaymentProduct($order, [
+        return $this->executeDirectPaymentProduct($order, $this->paymentProducts($order), '汇联支付');
+    }
 
+    /**
+     * 为已选微信/支付宝 JSAPI 产品声明身份；扫码由上游支付页面处理。
+     *
+     * 旧插件银联只实现 NATIVE；当前不声明未核验的银联 JSAPI 或 MINI_APP。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>|null 身份需求
+     */
+    public function identityRequirement(array $order): ?array
+    {
+        $product = $this->directPaymentSelection($order, $this->paymentProducts($order))['product'];
+
+        return match ($product) {
+            self::PRODUCT_WECHAT_JSAPI => $this->directPaymentIdentityRequirement($order, $product, 'wechat_oauth'),
+            self::PRODUCT_ALIPAY_JSAPI => $this->directPaymentIdentityRequirement($order, $product, 'alipay_oauth'),
+            default => null,
+        };
+    }
+
+    /**
+     * 声明插件支持的产品，由身份预检和真实下单共同消费。
+     *
+     * @param array<string, mixed> $order 处理器消费的标准下单参数
+     * @return array<string, array<string, mixed>> 产品与请求处理器，不执行上游请求
+     */
+    private function paymentProducts(array $order): array
+    {
+        return [
             'jsapi' => [
                 'products' => [
                     'alipay' => self::PRODUCT_ALIPAY_JSAPI,
                     'wxpay' => self::PRODUCT_WECHAT_JSAPI,
-                    'bank' => self::PRODUCT_UNION_PAY_JSAPI,
                 ],
                 'handler' => fn (): array => $this->jsapiPay($order),
             ],
@@ -107,7 +139,7 @@ class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
                 ],
                 'handler' => fn (): array => $this->scanPay($order),
             ],
-        ], '汇联支付');
+        ];
     }
 
     /**
@@ -265,11 +297,14 @@ class HlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     private function jsapiPay(array $order): array
     {
         $payType = (string) $order['pay_type_code'];
-        $payment = (array) ($order['extra']['payment'] ?? []);
-        $product = $payType === 'wxpay' ? 'WECHAT' : ($payType === 'bank' ? 'UNION_PAY' : 'ALIPAY');
-        $extra = ['userId' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? $payment['buyer_id'] ?? '')];
-        if ((string) ($payment['sub_appid'] ?? '') !== '') {
-            $extra['subAppid'] = (string) $payment['sub_appid'];
+        $identity = $this->directPaymentIdentityData($order, $payType === 'wxpay' ? 'wechat_oauth' : 'alipay_oauth');
+        if ($identity['identity'] === '') {
+            throw new PaymentDefinitiveException('汇联 JSAPI 支付缺少 ' . $identity['identity_field'] . '，请先完成身份授权', 40200);
+        }
+        $product = $payType === 'wxpay' ? 'WECHAT' : 'ALIPAY';
+        $extra = ['userId' => $identity['identity']];
+        if ($payType === 'wxpay') {
+            $extra['subAppid'] = $identity['app_id'];
         }
 
         try {

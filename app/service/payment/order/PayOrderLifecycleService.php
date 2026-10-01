@@ -54,9 +54,10 @@ class PayOrderLifecycleService extends BaseService
      * 标记支付成功。
      *
      * 用于支付回调或主动查单成功后的状态推进；自收通道在这里完成平台服务费正式扣减。
+     * 锁内先核对渠道事实，再判断状态；重复成功只补缺失事实，不重复扣费、累计金额或发事件。
      *
      * @param string $payNo 支付单号
-     * @param array $input 状态数据
+     * @param array<string, mixed> $input 已校验的渠道引用、时间及可选 payment_context
      * @return PayOrder 支付订单模型
      */
     public function markPaySuccess(string $payNo, array $input = []): PayOrder
@@ -87,14 +88,20 @@ class PayOrderLifecycleService extends BaseService
      */
     public function markPaySuccessInCurrentTransaction(string $payNo, array $input = [], bool &$shouldNotifyMerchant = false): PayOrder
     {
+        $shouldNotifyMerchant = false;
         $payOrder = $this->payOrderRepository->findForUpdateByPayNo($payNo);
         if (!$payOrder) {
             throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
         }
 
+        // 锁内先接纳渠道事实，再判断幂等；重复成功可以补流水，但不能重复处理资金。
+        $this->applyChannelFacts($payOrder, $input);
         $currentStatus = (int) $payOrder->status;
         if ($currentStatus === TradeConstant::ORDER_STATUS_SUCCESS) {
-            return $payOrder;
+            if ($payOrder->isDirty()) {
+                $payOrder->save();
+            }
+            return $payOrder->refresh();
         }
 
         if (TradeConstant::isOrderTerminalStatus($currentStatus)) {
@@ -113,27 +120,19 @@ class PayOrderLifecycleService extends BaseService
         $traceNo = (string) ($payOrder->trace_no ?: $payOrder->biz_no);
 
         // 成功后正式结算平台服务费，避免自收通道只冻结不扣减。
-        $this->payOrderFeeService->settleSuccessFee($payOrder, $serviceFee, $payNo, $traceNo);
+        $feeStatus = $this->payOrderFeeService->settleSuccessFee($payOrder, $serviceFee, $payNo, $traceNo);
 
         $payOrder->status = TradeConstant::ORDER_STATUS_SUCCESS;
         $payOrder->paid_at = $input['paid_at'] ?? $this->now();
         // 平台代收和自收通道的服务费、清算状态规则不同，这里统一收口。
-        $payOrder->service_fee_status = (int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_SELF && $serviceFee > 0
-            ? TradeConstant::SERVICE_FEE_STATUS_DEDUCTED
-            : TradeConstant::SERVICE_FEE_STATUS_NONE;
+        $payOrder->service_fee_status = $feeStatus;
         $payOrder->settlement_status = (int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_COLLECT
             ? TradeConstant::SETTLEMENT_STATUS_PENDING
             : TradeConstant::SETTLEMENT_STATUS_NONE;
         $payOrder->callback_status = NotifyConstant::PROCESS_STATUS_SUCCESS;
-        $payOrder->channel_trade_no = (string) ($input['channel_trade_no'] ?? $payOrder->channel_trade_no ?? '');
-        $payOrder->channel_order_no = (string) ($input['channel_order_no'] ?? $payOrder->channel_order_no ?? '');
         $payOrder->channel_error_code = '';
         $payOrder->channel_error_msg = '';
         $payOrder->callback_times = (int) $payOrder->callback_times + 1;
-        $payOrder->ext_json = $this->keepSupportedExtJson(
-            array_replace_recursive((array) $payOrder->ext_json, $input['ext_json'] ?? [])
-        );
-
         // 业务单状态也要一起收口，保证支付单和业务单一致。
         $shouldNotifyMerchant = $this->syncBizOrderAfterSuccess($payOrder, $traceNo);
         if ((int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_COLLECT && !$shouldNotifyMerchant) {
@@ -171,23 +170,15 @@ class PayOrderLifecycleService extends BaseService
         $serviceFee = (int) $payOrder->service_fee_amount;
         $traceNo = (string) ($payOrder->trace_no ?: $payOrder->biz_no);
 
-        $this->payOrderFeeService->settleSuccessFee($payOrder, $serviceFee, $payNo, $traceNo);
+        $feeStatus = $this->payOrderFeeService->settleSuccessFee($payOrder, $serviceFee, $payNo, $traceNo);
 
         $payOrder->status = TradeConstant::ORDER_STATUS_SUCCESS;
         $payOrder->paid_at = $input['paid_at'] ?? $this->now();
-        $payOrder->service_fee_status = (int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_SELF && $serviceFee > 0
-            ? TradeConstant::SERVICE_FEE_STATUS_DEDUCTED
-            : TradeConstant::SERVICE_FEE_STATUS_NONE;
+        $payOrder->service_fee_status = $feeStatus;
         $payOrder->callback_status = NotifyConstant::PROCESS_STATUS_SUCCESS;
-        $payOrder->channel_trade_no = (string) ($input['channel_trade_no'] ?? $payOrder->channel_trade_no ?? '');
-        $payOrder->channel_order_no = (string) ($input['channel_order_no'] ?? $payOrder->channel_order_no ?? '');
         $payOrder->channel_error_code = '';
         $payOrder->channel_error_msg = '';
         $payOrder->callback_times = (int) $payOrder->callback_times + 1;
-        $payOrder->ext_json = $this->keepSupportedExtJson(
-            array_replace_recursive((array) $payOrder->ext_json, $input['ext_json'] ?? [])
-        );
-
         $shouldNotifyMerchant = $this->syncBizOrderAfterSuccess($payOrder, $traceNo);
         $payOrder->settlement_status = (int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_COLLECT && $shouldNotifyMerchant
             ? TradeConstant::SETTLEMENT_STATUS_PENDING
@@ -282,6 +273,8 @@ class PayOrderLifecycleService extends BaseService
     /**
      * 标记支付失败。
      *
+     * 锁内拒绝冲突流水，空引用保留原值；已终态只补缺失事实，不再次释放费用或回退状态。
+     *
      * @param string $payNo 支付单号
      * @param array $input 状态数据
      * @return PayOrder 支付订单模型
@@ -312,18 +305,19 @@ class PayOrderLifecycleService extends BaseService
      */
     public function markPayFailedInCurrentTransaction(string $payNo, array $input = [], bool &$shouldDispatchEvent = false): PayOrder
     {
+        $shouldDispatchEvent = false;
         $payOrder = $this->payOrderRepository->findForUpdateByPayNo($payNo);
         if (!$payOrder) {
             throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
         }
 
+        $this->applyChannelFacts($payOrder, $input);
         $currentStatus = (int) $payOrder->status;
-        if ($currentStatus === TradeConstant::ORDER_STATUS_FAILED) {
-            return $payOrder;
-        }
-
         if (TradeConstant::isOrderTerminalStatus($currentStatus)) {
-            return $payOrder;
+            if ($payOrder->isDirty()) {
+                $payOrder->save();
+            }
+            return $payOrder->refresh();
         }
 
         if (!in_array($currentStatus, TradeConstant::orderMutableStatuses(), true)) {
@@ -341,23 +335,16 @@ class PayOrderLifecycleService extends BaseService
         $rawChannelErrorMsg = (string) ($input['channel_error_msg'] ?? $payOrder->channel_error_msg ?? '支付失败');
         $channelErrorCode = $this->clipColumnValue($rawChannelErrorCode, 64);
         $channelErrorMsg = $this->clipColumnValue($rawChannelErrorMsg, 255);
-        $extJson = $this->keepSupportedExtJson(
-            array_replace_recursive((array) $payOrder->ext_json, $input['ext_json'] ?? [])
-        );
-
         $payOrder->status = TradeConstant::ORDER_STATUS_FAILED;
         $payOrder->service_fee_status = (int) $payOrder->channel_type === RouteConstant::CHANNEL_MODE_SELF && (int) $payOrder->service_fee_amount > 0
             ? TradeConstant::SERVICE_FEE_STATUS_RELEASED
             : TradeConstant::SERVICE_FEE_STATUS_NONE;
         $payOrder->settlement_status = TradeConstant::SETTLEMENT_STATUS_NONE;
         $payOrder->callback_status = NotifyConstant::PROCESS_STATUS_FAILED;
-        $payOrder->channel_trade_no = (string) ($input['channel_trade_no'] ?? $payOrder->channel_trade_no ?? '');
-        $payOrder->channel_order_no = (string) ($input['channel_order_no'] ?? $payOrder->channel_order_no ?? '');
         $payOrder->channel_error_code = $channelErrorCode;
         $payOrder->channel_error_msg = $channelErrorMsg;
         $payOrder->failed_at = $input['failed_at'] ?? $this->now();
         $payOrder->callback_times = (int) $payOrder->callback_times + 1;
-        $payOrder->ext_json = $extJson;
         $payOrder->save();
 
         // 支付单进入终态后，同步回业务单，避免上游只能依赖支付单判断结果。
@@ -369,6 +356,9 @@ class PayOrderLifecycleService extends BaseService
 
     /**
      * 关闭支付单。
+     *
+     * 渠道关单入口已确认 closed；这里锁定最新订单核对引用。并发成功优先保留成功状态，
+     * 不因迟到关单再次释放费用；本方法不发起第三方网络请求。
      *
      * @param string $payNo 支付单号
      * @param array $input 状态数据
@@ -400,18 +390,19 @@ class PayOrderLifecycleService extends BaseService
      */
     public function closePayOrderInCurrentTransaction(string $payNo, array $input = [], bool &$shouldDispatchEvent = false): PayOrder
     {
+        $shouldDispatchEvent = false;
         $payOrder = $this->payOrderRepository->findForUpdateByPayNo($payNo);
         if (!$payOrder) {
             throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
         }
 
+        $this->applyChannelFacts($payOrder, $input);
         $currentStatus = (int) $payOrder->status;
-        if ($currentStatus === TradeConstant::ORDER_STATUS_CLOSED) {
-            return $payOrder;
-        }
-
         if (TradeConstant::isOrderTerminalStatus($currentStatus)) {
-            return $payOrder;
+            if ($payOrder->isDirty()) {
+                $payOrder->save();
+            }
+            return $payOrder->refresh();
         }
 
         if (!in_array($currentStatus, TradeConstant::orderMutableStatuses(), true)) {
@@ -431,9 +422,6 @@ class PayOrderLifecycleService extends BaseService
             : TradeConstant::SERVICE_FEE_STATUS_NONE;
         $payOrder->settlement_status = TradeConstant::SETTLEMENT_STATUS_NONE;
         $payOrder->closed_at = $input['closed_at'] ?? $this->now();
-        $payOrder->ext_json = $this->keepSupportedExtJson(
-            array_replace_recursive((array) $payOrder->ext_json, $input['ext_json'] ?? [])
-        );
         $payOrder->save();
 
         // 关闭态也要同步给业务单，避免后续继续拉起支付。
@@ -441,6 +429,103 @@ class PayOrderLifecycleService extends BaseService
         $shouldDispatchEvent = true;
 
         return $payOrder->refresh();
+    }
+
+    /**
+     * 保存已校验的下单待支付事实。
+     *
+     * 事务内锁定最新订单并核对渠道事实；终态只允许补缺失事实，不回退状态、
+     * 不重写 presentation，也不产生资金动作、通知或清算副作用。
+     *
+     * @param string $payNo 支付单号
+     * @param array<string, mixed> $input 标准渠道引用及 payment_context/presentation 分区
+     * @return PayOrder 最新支付单
+     * @throws ResourceNotFoundException 支付单不存在
+     * @throws BusinessStateException 渠道引用或支付产品与锁内事实冲突
+     */
+    public function recordPayProgress(string $payNo, array $input): PayOrder
+    {
+        return $this->transactionRetry(function () use ($payNo, $input) {
+            $payOrder = $this->payOrderRepository->findForUpdateByPayNo($payNo);
+            if (!$payOrder) {
+                throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
+            }
+
+            $this->applyChannelFacts($payOrder, $input);
+            if (!TradeConstant::isOrderTerminalStatus((int) $payOrder->status)) {
+                $extJson = (array) $payOrder->ext_json;
+                $extJson['presentation'] = $input['ext_json']['presentation'];
+                $payOrder->ext_json = $extJson;
+            }
+            if ($payOrder->isDirty()) {
+                $payOrder->save();
+            }
+
+            return $payOrder->refresh();
+        });
+    }
+
+    /**
+     * 接纳当前事务中已锁定支付单的可信渠道事实。
+     *
+     * 调用方已完成插件结果校验。空引用不擦除已存值，非空冲突在资金动作前拒绝；
+     * 完整上下文升级暂存分区，确认分区只补缺失项。channel_context 整体保留或替换，
+     * 不猜测内部字段。这里只修改模型，保存与状态、资金操作由调用方在同一事务完成。
+     *
+     * @param PayOrder $payOrder 当前事务中已加行锁的最新支付单
+     * @param array<string, mixed> $input 标准渠道事实，非插件原始响应
+     * @throws BusinessStateException 非空渠道引用、支付方式或产品冲突
+     */
+    private function applyChannelFacts(PayOrder $payOrder, array $input): void
+    {
+        $references = [];
+        foreach (['channel_order_no', 'channel_trade_no'] as $field) {
+            $stored = (string) $payOrder->$field;
+            $actual = (string) ($input[$field] ?? '');
+            if ($stored !== '' && $actual !== '' && !hash_equals($stored, $actual)) {
+                throw new BusinessStateException('支付单渠道流水与已保存事实不一致', [
+                    'pay_no' => (string) $payOrder->pay_no, 'field' => $field,
+                ]);
+            }
+            $references[$field] = $actual !== '' ? $actual : $payOrder->$field;
+        }
+
+        $extJson = (array) $payOrder->ext_json;
+        $inputExt = (array) ($input['ext_json'] ?? []);
+        $incoming = (array) ($inputExt['payment_context'] ?? []);
+        $existing = (array) ($extJson['payment_context'] ?? []);
+        if ($incoming !== []) {
+            foreach (['pay_type', 'pay_product'] as $field) {
+                $stored = (string) ($existing[$field] ?? '');
+                $actual = (string) $incoming[$field];
+                if ($stored !== '' && $actual !== '' && !hash_equals($stored, $actual)) {
+                    throw new BusinessStateException('支付单产品与已保存上下文不一致', [
+                        'pay_no' => (string) $payOrder->pay_no, 'field' => $field,
+                    ]);
+                }
+            }
+
+            // 暂存态从完整标准分区升级；确认态只补空项，保留原数组避免重复写入。
+            $confirmed = $existing !== [] && empty($existing['_provisional']);
+            $context = $confirmed ? $existing : $incoming;
+            foreach (['pay_type', 'pay_product', 'pay_action', 'channel_context'] as $field) {
+                $stored = $existing[$field] ?? ($field === 'channel_context' ? [] : '');
+                if ($stored !== '' && $stored !== []
+                    && ($confirmed || $incoming[$field] === '' || $incoming[$field] === [])) {
+                    $context[$field] = $stored;
+                } else {
+                    $context[$field] = $incoming[$field];
+                }
+            }
+            $extJson['payment_context'] = $context;
+        }
+
+        // 展示由待支付入口单独按最新状态写入，两个不透明分区不能递归合并。
+        unset($inputExt['payment_context'], $inputExt['presentation']);
+        $payOrder->ext_json = array_replace_recursive($extJson, $inputExt);
+        foreach ($references as $field => $value) {
+            $payOrder->$field = $value;
+        }
     }
 
     /**

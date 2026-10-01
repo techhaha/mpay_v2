@@ -16,6 +16,7 @@ use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use JsonException;
@@ -122,13 +123,7 @@ class ZhangyishouApiPayment extends BasePayment implements PaymentInterface, Pay
      */
     public function pay(array $order): array
     {
-        return $this->executeDirectPaymentProduct($order, [
-            'urlscheme' => [
-                'products' => [
-                    'wxpay' => self::PRODUCT_WXPAY_MOBILE,
-                ],
-                'handler' => fn (): array => $this->createMobileWxpay($order),
-            ],
+        $handlers = [
             'qrcode' => [
                 'products' => [
                     'alipay' => self::PRODUCT_DEFAULT_CHANNEL,
@@ -138,7 +133,23 @@ class ZhangyishouApiPayment extends BasePayment implements PaymentInterface, Pay
                 ],
                 'handler' => fn (): array => $this->createDefaultPay($order),
             ],
-        ], '掌易收');
+        ];
+        if ((string) ($order['pay_type_code'] ?? '') === 'wxpay'
+            && in_array($this->paymentEnv($order), [
+                EpayProtocolConstant::DEVICE_MOBILE,
+                EpayProtocolConstant::DEVICE_QQ,
+                EpayProtocolConstant::DEVICE_ALIPAY,
+            ], true)
+            && $this->configText('wxpay_mobile_channel_id') !== '') {
+            $handlers['urlscheme'] = [
+                'products' => [
+                    'wxpay' => self::PRODUCT_WXPAY_MOBILE,
+                ],
+                'handler' => fn (): array => $this->createMobileWxpay($order),
+            ];
+        }
+
+        return $this->executeDirectPaymentProduct($order, $handlers, '掌易收');
     }
 
     /**
@@ -172,14 +183,14 @@ class ZhangyishouApiPayment extends BasePayment implements PaymentInterface, Pay
             EpayProtocolConstant::DEVICE_QQ,
             EpayProtocolConstant::DEVICE_ALIPAY,
         ], true)) {
-            throw new PaymentException('掌易收微信移动端产品不适用于当前环境', 40200, [
+            throw new PaymentProductUnavailableException('掌易收微信移动端产品不适用于当前环境', 40200, [
                 'channel_error_code' => 'PRODUCT_NOT_OPEN',
             ]);
         }
 
         $channelId = $this->configuredChannelId('wxpay_mobile_channel_id');
         if ($channelId === '') {
-            throw new PaymentException('掌易收微信普通移动端产品未配置', 40200, [
+            throw new PaymentProductUnavailableException('掌易收微信普通移动端产品未配置', 40200, [
                 'channel_error_code' => 'PRODUCT_NOT_OPEN',
             ]);
         }

@@ -9,6 +9,7 @@ use app\common\constant\RouteConstant;
 use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\sdk\alipay\AlipayClient;
 use app\common\sdk\alipay\AlipaySdkException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\ValidationException;
 use app\model\merchant\Merchant;
 use app\model\payment\PaymentChannel;
@@ -79,8 +80,8 @@ class PaymentIdentityService extends BaseService
     /**
      * 检查当前支付尝试是否需要先获取第三方用户身份。
      *
-     * 只有收银台等明确开启 identity_flow 的入口才会进入该逻辑，避免接口直连
-     * 场景因为无法交互授权而改变原有行为。
+     * 缺身份且入口开启 identity_flow 时，返回授权承接地址；没有交互标记则明确拒绝，
+     * 不携带空身份继续下单。商户已提交当前产品身份时无需授权。
      *
      * @param array<string, mixed> $input 支付发起参数
      * @param Merchant $merchant 商户模型
@@ -90,10 +91,6 @@ class PaymentIdentityService extends BaseService
      */
     public function inspect(array $input, Merchant $merchant, PaymentChannel $channel, array $route): ?array
     {
-        if (empty($input['identity_flow'])) {
-            return null;
-        }
-
         $plugin = $this->paymentPluginManager->createByChannel($channel, (int) $input['pay_type_id']);
         if (!$plugin instanceof PaymentIdentityRequirementInterface) {
             return null;
@@ -104,6 +101,13 @@ class PaymentIdentityService extends BaseService
         );
         if ($requirement === null) {
             return null;
+        }
+        if (empty($input['identity_flow'])) {
+            throw new PaymentProductUnavailableException('当前支付产品需要先完成用户身份授权', 40200, [
+                'channel_id' => (int) $channel->id,
+                'provider' => (string) ($requirement['provider'] ?? ''),
+                'product' => (string) ($requirement['channel_product'] ?? $requirement['product'] ?? ''),
+            ]);
         }
 
         return $this->remember($input, $channel, $route, $this->validateRequirement($requirement));
@@ -242,35 +246,13 @@ LUA;
      */
     public function identityFromInput(array $input, array $context = []): array
     {
-        $fields = [
-            'openid',
-            'sub_openid',
-            'wx_openid',
-            'mini_openid',
-            'buyer_id',
-            'buyer_open_id',
-            'sub_appid',
-            'op_app_id',
-            'unionpay_user_id',
-            'unionpay_auth_code',
-        ];
-        $identity = [];
-
-        foreach ($fields as $field) {
-            $value = trim((string) ($input[$field] ?? ''));
-            if ($value !== '') {
-                $identity[$field] = $value;
-            }
+        if ($context === []) {
+            throw new ValidationException('身份恢复缺少支付上下文');
         }
 
-        if ($context !== []) {
-            $identity = [
-                ...$identity,
-                ...$this->identityFromPlatformCode($context, $input, $identity),
-            ];
-        }
-
-        return $identity;
+        // 公共恢复入口只接受平台一次性授权码。商户已有的 openid/userid
+        // 必须通过最初的签名支付请求提交，不能由浏览器直接声明最终身份。
+        return $this->identityFromPlatformCode($context, $input, []);
     }
 
     /**
@@ -302,6 +284,21 @@ LUA;
             $input['ext_json'] = (array) ($input['ext_json'] ?? []);
             $payment = (array) ($input['ext_json']['payment'] ?? []);
             $payment[$identityField] = $identityValue;
+            $payment['selected_product'] = (string) $requirement['channel_product'];
+            // 回填授权时的 AppID，配置在授权后变化时由插件作用域检查拒绝，不能换应用支付。
+            $appField = match ($requirement['provider']) {
+                'wxpay' => 'sub_appid',
+                'alipay' => 'op_app_id',
+                default => null,
+            };
+            $appId = (string) ($requirement['app_id'] ?? '');
+            if ($appField !== null && $appId !== '') {
+                $requestAppId = (string) ($payment[$appField] ?? '');
+                if ($requestAppId !== '' && !hash_equals($appId, $requestAppId)) {
+                    throw new ValidationException('原支付请求的用户身份应用与授权应用不一致');
+                }
+                $payment[$appField] = $appId;
+            }
             $input['ext_json']['payment'] = $payment;
         }
 
@@ -552,6 +549,8 @@ LUA;
     {
         $token = bin2hex(random_bytes(16));
         $publicRequirement = $this->publicRequirement($requirement);
+        // 授权开始即固定产品，回调重新加载配置时不能被新开通的更优产品替换。
+        $input['ext_json']['payment']['selected_product'] = (string) $requirement['channel_product'];
         $context = [
             'token' => $token,
             'input' => $input,
@@ -999,7 +998,7 @@ LUA;
      */
     private function validateRequirement(array $requirement): array
     {
-        foreach (['provider', 'product', 'auth_type', 'identity_field', 'app_id', 'scope', 'message'] as $field) {
+        foreach (['provider', 'product', 'channel_product', 'auth_type', 'identity_field', 'app_id', 'scope', 'message'] as $field) {
             if (array_key_exists($field, $requirement)) {
                 $requirement[$field] = trim((string) $requirement[$field]);
             }
@@ -1011,6 +1010,13 @@ LUA;
             throw new ValidationException('支付插件声明了不支持的身份授权类型', [
                 'provider' => (string) ($requirement['provider'] ?? ''),
                 'auth_type' => $authType,
+            ]);
+        }
+
+        if ((string) ($requirement['channel_product'] ?? '') === '') {
+            throw new ValidationException('支付插件身份需求缺少 channel_product', [
+                'provider' => (string) ($requirement['provider'] ?? ''),
+                'product' => (string) ($requirement['product'] ?? ''),
             ]);
         }
 

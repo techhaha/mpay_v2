@@ -7,11 +7,13 @@ use app\common\constant\AuthConstant;
 use app\common\constant\CommonConstant;
 use app\common\constant\EpayProtocolConstant;
 use app\common\constant\PaymentIdentityConstant;
+use app\common\constant\PaymentPluginStatusConstant;
 use app\common\constant\TradeConstant;
 use app\common\util\FormatHelper;
 use app\exception\ResourceNotFoundException;
 use app\exception\ValidationException;
 use app\exception\PaymentException;
+use app\exception\UnsupportedPaymentOperationException;
 use app\model\merchant\Merchant;
 use app\model\payment\BizOrder;
 use app\model\payment\PayOrder;
@@ -22,13 +24,12 @@ use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\repository\payment\trade\RefundOrderRepository;
 use app\service\merchant\MerchantService;
+use app\service\payment\order\PayOrderCloseService;
 use app\service\payment\order\PayOrderQueryService;
 use app\service\payment\order\PayOrderService;
-use app\service\payment\order\PaymentPluginCloseResultValidator;
 use app\service\payment\order\RefundDispatchService;
 use app\service\payment\order\RefundService;
 use app\service\payment\transfer\TransferService;
-use app\service\payment\runtime\PaymentPluginManager;
 use app\service\payment\config\PaymentTypeService;
 use support\Request;
 use support\Response;
@@ -57,7 +58,7 @@ class EpayV2ProtocolService extends BaseService
      * @param BizOrderRepository $bizOrderRepository 业务单仓库
      * @param RefundOrderRepository $refundOrderRepository 退款单仓库
      * @param MerchantAccountRepository $merchantAccountRepository 商户账户仓库
-     * @param PaymentPluginManager $paymentPluginManager 支付插件管理器
+     * @param PayOrderCloseService $payOrderCloseService 支付订单关单服务
      * @param TransferService $transferService 转账服务
      * @param EpaySignerManager $signerManager ePay 签名管理器
      * @param EpaySubmitPayloadAssembler $submitPayloadAssembler 提交入参组装器
@@ -75,7 +76,7 @@ class EpayV2ProtocolService extends BaseService
         protected BizOrderRepository $bizOrderRepository,
         protected RefundOrderRepository $refundOrderRepository,
         protected MerchantAccountRepository $merchantAccountRepository,
-        protected PaymentPluginManager $paymentPluginManager,
+        protected PayOrderCloseService $payOrderCloseService,
         protected TransferService $transferService,
         protected EpaySignerManager $signerManager,
         protected EpaySubmitPayloadAssembler $submitPayloadAssembler,
@@ -141,6 +142,22 @@ class EpayV2ProtocolService extends BaseService
     }
 
     /**
+     * 构建签名后的 V2 API 失败响应。
+     *
+     * 控制器参数校验和服务内业务异常共用同一协议格式。
+     *
+     * @param Throwable $e 请求异常
+     * @return array<string, mixed> 签名后的 V2 失败响应
+     */
+    public function failureResponse(Throwable $e): array
+    {
+        return $this->signResponse([
+            'code' => self::FAILURE_CODE,
+            'msg' => $e->getMessage() ?: '请求失败',
+        ]);
+    }
+
+    /**
      * 处理 V2 API 支付下单入口。
      *
      * @param array<string, mixed> $payload 请求载荷
@@ -162,14 +179,10 @@ class EpayV2ProtocolService extends BaseService
             /** @var PayOrder $payOrder */
             $payOrder = $attempt['pay_order'];
             $paymentResult = (array) ($attempt['payment_result'] ?? []);
-            $payParams = (array) ($attempt['pay_params'] ?? []);
 
-            return $this->signResponse($this->buildCreateResponse($payOrder, $paymentResult, $payParams));
+            return $this->signResponse($this->buildCreateResponse($payOrder, $paymentResult));
         } catch (Throwable $e) {
-            return $this->signResponse([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->failureResponse($e);
         }
     }
 
@@ -190,10 +203,7 @@ class EpayV2ProtocolService extends BaseService
 
             return $this->signResponse($this->buildOrderResponse($context['pay_order'], $context['biz_order']));
         } catch (Throwable $e) {
-            return $this->signResponse([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->failureResponse($e);
         }
     }
 
@@ -223,17 +233,17 @@ class EpayV2ProtocolService extends BaseService
             ]);
 
             $refundOrder = $this->refundDispatchService->dispatch($refundOrder);
+            if ((int) $refundOrder->status === TradeConstant::REFUND_STATUS_CREATED && (string) $refundOrder->last_error !== '') {
+                throw new PaymentException((string) $refundOrder->last_error, 40200);
+            }
             if ((int) $refundOrder->status === TradeConstant::REFUND_STATUS_FAILED) {
                 throw new ValidationException((string) ($refundOrder->last_error ?: '退款失败'));
             }
 
             $bizOrder = $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
-            return $this->signResponse($this->buildRefundResponse($refundOrder->refresh(), $payOrder->refresh(), $bizOrder));
+            return $this->signResponse($this->buildRefundResponse($refundOrder->refresh(), $bizOrder));
         } catch (Throwable $e) {
-            return $this->signResponse([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->failureResponse($e);
         }
     }
 
@@ -248,16 +258,17 @@ class EpayV2ProtocolService extends BaseService
         try {
             $merchant = $this->authorizeMerchant($payload);
             $refundOrder = $this->resolveRefundOrder((int) $merchant->id, $payload);
-            $refundOrder = $this->refundDispatchService->queryStatus($refundOrder);
-            $payOrder = $this->payOrderRepository->findByPayNo((string) $refundOrder->pay_no);
+            try {
+                $refundOrder = $this->refundDispatchService->queryStatus($refundOrder);
+            } catch (UnsupportedPaymentOperationException $e) {
+                // 协议查询返回平台已知事实；插件没有主动查询能力不等于退款失败。
+                $refundOrder = $this->refundOrderRepository->findByRefundNo((string) $refundOrder->refund_no);
+            }
             $bizOrder = $this->bizOrderRepository->findByBizNo((string) $refundOrder->biz_no);
 
-            return $this->signResponse($this->buildRefundResponse($refundOrder, $payOrder, $bizOrder));
+            return $this->signResponse($this->buildRefundResponse($refundOrder, $bizOrder));
         } catch (Throwable $e) {
-            return $this->signResponse([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->failureResponse($e);
         }
     }
 
@@ -278,67 +289,19 @@ class EpayV2ProtocolService extends BaseService
 
             /** @var PayOrder $payOrder */
             $payOrder = $context['pay_order'];
-            $currentStatus = (int) $payOrder->status;
-            if ($currentStatus === TradeConstant::ORDER_STATUS_CLOSED) {
-                return $this->signResponse([
-                    'code' => self::SUCCESS_CODE,
-                    'msg' => 'success',
-                ]);
+            $payOrder = $this->payOrderCloseService->close($payOrder);
+            if ((int) $payOrder->status !== TradeConstant::ORDER_STATUS_CLOSED) {
+                throw new ValidationException((int) $payOrder->status === TradeConstant::ORDER_STATUS_SUCCESS
+                    ? '订单已支付成功，不能关闭'
+                    : '订单未关闭，当前状态不允许关闭');
             }
-
-            if ($currentStatus === TradeConstant::ORDER_STATUS_SUCCESS) {
-                throw new ValidationException('订单已支付成功，不能关闭');
-            }
-
-            if (TradeConstant::isOrderTerminalStatus($currentStatus)) {
-                throw new ValidationException('订单已结束，不能关闭');
-            }
-
-            $plugin = $this->paymentPluginManager->createByPayOrder($payOrder, true);
-            $pluginResult = $plugin->close([
-                'pay_no' => (string) $payOrder->pay_no,
-                'biz_no' => (string) $payOrder->biz_no,
-                'chan_order_no' => (string) $payOrder->channel_order_no,
-                'chan_trade_no' => (string) $payOrder->channel_trade_no,
-                'amount' => (int) $payOrder->pay_amount,
-                'pay_created_at' => (string) ($payOrder->created_at ?? ''),
-                'client_ip' => (string) ($payOrder->client_ip ?? ''),
-                '_env' => (string) (($payOrder->device ?? '') ?: 'pc'),
-                'pay_type_id' => (int) $payOrder->pay_type_id,
-            ] + $this->paymentContext($payOrder));
-            $pluginResult = PaymentPluginCloseResultValidator::make($pluginResult)
-                ->withScene('close_result')
-                ->withException(PaymentException::class)
-                ->validate();
-            if (!hash_equals((string) $payOrder->pay_no, (string) $pluginResult['pay_no'])) {
-                throw new ValidationException('插件关单返回的支付单号不匹配');
-            }
-            foreach (['chan_order_no' => 'channel_order_no', 'chan_trade_no' => 'channel_trade_no'] as $field => $modelField) {
-                $stored = trim((string) ($payOrder->{$modelField} ?? ''));
-                $actual = trim((string) ($pluginResult[$field] ?? ''));
-                if ($stored !== '' && $actual !== '' && !hash_equals($stored, $actual)) {
-                    throw new ValidationException('插件关单返回的渠道流水与支付单不匹配');
-                }
-            }
-            if ((string) $pluginResult['status'] !== 'closed') {
-                throw new ValidationException((string) ($pluginResult['message'] ?? '渠道关单结果尚未确认'));
-            }
-
-            $closeReason = (string) ($pluginResult['message'] ?? 'ePay V2 手动关闭');
-            $this->payOrderService->closePayOrder((string) $payOrder->pay_no, [
-                'closed_at' => $this->now(),
-                'reason' => $closeReason,
-            ]);
 
             return $this->signResponse([
                 'code' => self::SUCCESS_CODE,
                 'msg' => 'success',
             ]);
         } catch (Throwable $e) {
-            return $this->signResponse([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->failureResponse($e);
         }
     }
 
@@ -382,10 +345,7 @@ class EpayV2ProtocolService extends BaseService
                 'order_money_lastday' => $this->formatAmount($yesterdayMoney),
             ]);
         } catch (Throwable $e) {
-            return $this->signResponse([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->failureResponse($e);
         }
     }
 
@@ -415,10 +375,7 @@ class EpayV2ProtocolService extends BaseService
                 'data' => $result['list'] ?? [],
             ]);
         } catch (Throwable $e) {
-            return $this->signResponse([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->failureResponse($e);
         }
     }
 
@@ -445,10 +402,7 @@ class EpayV2ProtocolService extends BaseService
                 'cost_money' => (string) ($data['cost_money'] ?? ''),
             ]);
         } catch (Throwable $e) {
-            return $this->signResponse([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->failureResponse($e);
         }
     }
 
@@ -469,10 +423,7 @@ class EpayV2ProtocolService extends BaseService
                 'msg' => 'success',
             ] + $data);
         } catch (Throwable $e) {
-            return $this->signResponse([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->failureResponse($e);
         }
     }
 
@@ -493,10 +444,7 @@ class EpayV2ProtocolService extends BaseService
                 'msg' => 'success',
             ] + $data);
         } catch (Throwable $e) {
-            return $this->signResponse([
-                'code' => self::FAILURE_CODE,
-                'msg' => $e->getMessage() ?: '请求失败',
-            ]);
+            return $this->failureResponse($e);
         }
     }
 
@@ -559,7 +507,6 @@ class EpayV2ProtocolService extends BaseService
         return [
             'pay_order' => $payOrder,
             'payment_result' => $attempt['payment_result'] ?? [],
-            'pay_params' => $attempt['pay_params'] ?? [],
             'payment_page_url' => $this->buildPaymentPageUrl((string) $payOrder->pay_no),
         ];
     }
@@ -637,66 +584,91 @@ class EpayV2ProtocolService extends BaseService
     }
 
     /**
-     * V2 API 返回协议字段，不能暴露承接页内部的 `page/_page` 结构。
-     *
-     * @param string $payPage 承接页类型
-     * @param array<string, mixed> $payParams 插件支付参数
-     * @return mixed V2 pay_info
-     */
-    private function buildCreatePayInfo(string $payPage, array $payParams): mixed
-    {
-        $payInfo = match ($payPage) {
-            'qrcode' => (string) ($payParams['qrcode'] ?? ''),
-            'html' => (string) ($payParams['html'] ?? ''),
-            'jump' => (string) ($payParams['url'] ?? ''),
-            'urlscheme' => (string) ($payParams['urlscheme'] ?? ''),
-            'jsapi' => $payParams,
-            'page' => $payParams['params'] ?? array_diff_key($payParams, ['_page' => true]),
-            default => $payParams,
-        };
-
-        return is_array($payInfo) ? $this->publicPayInfo($payInfo) : $payInfo;
-    }
-
-    /**
-     * 移除协议响应中仅供服务端诊断的原始渠道数据。
-     *
-     * @param array<string, mixed> $payInfo 支付参数
-     * @return array<string, mixed> 可公开给协议调用方的支付参数
-     */
-    private function publicPayInfo(array $payInfo): array
-    {
-        unset($payInfo['raw']);
-        foreach ($payInfo as $key => $value) {
-            if (is_array($value)) {
-                $payInfo[$key] = $this->publicPayInfo($value);
-            }
-        }
-
-        return $payInfo;
-    }
-
-    /**
      * 将标准支付结果映射为 V2 创建订单响应。
      *
+     * 公开类型描述返回内容，不使用插件动作名。付款码输出可信状态摘要，APP 消费约定的
+     * page.params；其余自定义组件和无展示快照的已成功单返回平台承接地址。
+     * POST 跳转包装成自动提交 HTML，保留字段原值；只删除公开参数第一层 raw。
+     * 本方法不推进订单、选择产品或根据 code=0 推断资金成功。
+     *
      * @param PayOrder $payOrder 支付订单
-     * @param array<string, mixed> $paymentResult 标准支付结果
-     * @param array<string, mixed> $payParams 支付承接参数
+     * @param array<string, mixed> $paymentResult 已校验的标准支付结果，presentation 是唯一展示来源
      * @return array<string, mixed> 未签名的 V2 响应
      */
-    private function buildCreateResponse(PayOrder $payOrder, array $paymentResult, array $payParams): array
+    private function buildCreateResponse(PayOrder $payOrder, array $paymentResult): array
     {
         $presentation = (array) ($paymentResult['presentation'] ?? []);
-        $payPage = strtolower(trim((string) ($presentation['pay_page'] ?? '')));
-        $payAction = strtolower(trim((string) ($paymentResult['pay_action'] ?? $payPage)));
+        $payPage = (string) ($presentation['pay_page'] ?? '');
+        $payParams = (array) ($presentation['pay_params'] ?? []);
+        $payment = (array) ($payOrder->ext_json['payment'] ?? []);
+
+        if (($payment['method'] ?? '') === 'auth_code' || (string) ($payment['auth_code'] ?? '') !== '') {
+            $payType = 'scan';
+            $payInfo = [
+                'status' => $paymentResult['status'],
+                'paid_amount' => $paymentResult['status'] === PaymentPluginStatusConstant::SUCCESS
+                    ? $paymentResult['paid_amount'] : null,
+                'api_trade_no' => (string) ($paymentResult['chan_trade_no'] ?? ''),
+            ];
+        } elseif ($payPage === 'page' && ($payment['method'] ?? '') === 'app') {
+            $payType = 'app';
+            $payInfo = $payParams['params'];
+        } else {
+            [$payType, $payInfo] = match ($payPage) {
+                'qrcode' => ['qrcode', (string) ($payParams['qrcode'] ?? '')],
+                'html' => ['html', (string) ($payParams['html'] ?? '')],
+                'jump' => ($payParams['method'] ?? '') === 'post'
+                    ? ['html', $this->buildPostPaymentHtml($payParams)]
+                    : ['jump', (string) ($payParams['url'] ?? '')],
+                'urlscheme' => ['urlscheme', (string) ($payParams['urlscheme'] ?? '')],
+                'jsapi' => ['jsapi', $payParams],
+                'page' => ['jump', $this->buildPaymentPageUrl((string) $payOrder->pay_no)],
+                '' => $paymentResult['status'] === PaymentPluginStatusConstant::SUCCESS
+                    ? ['jump', $this->buildPaymentPageUrl((string) $payOrder->pay_no)]
+                    : throw new PaymentException('支付结果缺少承接信息', 40200),
+                default => throw new PaymentException('支付结果没有对应的 V2 返回类型', 40200),
+            };
+        }
+        if (is_array($payInfo)) {
+            unset($payInfo['raw']);
+        }
 
         return [
             'code' => self::SUCCESS_CODE,
             'msg' => 'success',
             'trade_no' => (string) $payOrder->pay_no,
-            'pay_type' => $payAction,
-            'pay_info' => $this->buildCreatePayInfo($payPage, $payParams),
+            'pay_type' => $payType,
+            'pay_info' => $payInfo,
         ];
+    }
+
+    /**
+     * 将 POST 承接参数包装为 V2 支持的 HTML 自动提交表单。
+     *
+     * 只做 HTML 属性编码，不改字段文本或展开嵌套结构。布尔转为 true/false 与收银台一致，
+     * 空串和零值保留；原生原型提交避免名为 submit 的字段遮蔽方法。没有外部请求或订单写入。
+     *
+     * @param array{action:string,payload:array<string,mixed>} $payParams 标准 POST 承接字段
+     */
+    private function buildPostPaymentHtml(array $payParams): string
+    {
+        $action = htmlspecialchars($payParams['action'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $fields = '';
+        foreach ($payParams['payload'] as $name => $value) {
+            if (!is_scalar($value)) {
+                continue;
+            }
+            $name = htmlspecialchars((string) $name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $value = htmlspecialchars(is_bool($value) ? ($value ? 'true' : 'false') : (string) $value,
+                ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $fields .= '<input type="hidden" name="' . $name . '" value="' . $value . '">';
+        }
+
+        return '<!doctype html><html><head><meta charset="utf-8"></head><body>'
+            . '<form id="epay-pay-form" method="post" accept-charset="UTF-8" action="' . $action . '">'
+            . $fields . '<noscript><button type="submit">继续支付</button></noscript></form>'
+            . '<script>HTMLFormElement.prototype.submit.call(document.getElementById("epay-pay-form"));</script>'
+            . '</body></html>';
     }
 
     /**
@@ -803,7 +775,8 @@ class EpayV2ProtocolService extends BaseService
         $bizOrder ??= $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
         $bizExtJson = (array) (($bizOrder?->ext_json) ?? []);
         $merchantExt = (array) ($bizExtJson['merchant'] ?? []);
-        $refundAmount = (int) ($bizOrder?->refund_amount ?? 0);
+        // trade_no 是一笔支付尝试，不能借用整个业务单的退款累计。
+        $refundAmount = $this->refundOrderRepository->sumSuccessfulAmountByPayNo((string) $payOrder->pay_no);
 
         return [
             'code' => self::SUCCESS_CODE,
@@ -829,13 +802,11 @@ class EpayV2ProtocolService extends BaseService
      * 构建退款响应。
      *
      * @param RefundOrder $refundOrder 退款单
-     * @param PayOrder|null $payOrder 支付单
      * @param BizOrder|null $bizOrder 业务单
      * @return array<string, mixed>
      */
-    private function buildRefundResponse(RefundOrder $refundOrder, ?PayOrder $payOrder = null, ?BizOrder $bizOrder = null): array
+    private function buildRefundResponse(RefundOrder $refundOrder, ?BizOrder $bizOrder = null): array
     {
-        $payOrder ??= $this->payOrderRepository->findByPayNo((string) $refundOrder->pay_no);
         $bizOrder ??= $this->bizOrderRepository->findByBizNo((string) $refundOrder->biz_no);
 
         return [
@@ -846,8 +817,14 @@ class EpayV2ProtocolService extends BaseService
             'trade_no' => (string) $refundOrder->pay_no,
             'out_trade_no' => (string) ($bizOrder?->merchant_order_no ?? ''),
             'money' => FormatHelper::amount((int) $refundOrder->refund_amount),
-            'reducemoney' => FormatHelper::amount((int) ($bizOrder?->refund_amount ?? 0)),
-            'status' => (int) $refundOrder->status === TradeConstant::REFUND_STATUS_SUCCESS ? 1 : 0,
+            'reducemoney' => FormatHelper::amount(
+                $this->refundOrderRepository->sumSuccessfulAmountByPayNo((string) $refundOrder->pay_no)
+            ),
+            'status' => match ((int) $refundOrder->status) {
+                TradeConstant::REFUND_STATUS_SUCCESS => EpayProtocolConstant::V2_REFUND_STATUS_SUCCESS,
+                TradeConstant::REFUND_STATUS_FAILED, TradeConstant::REFUND_STATUS_CLOSED => EpayProtocolConstant::V2_REFUND_STATUS_FAILED,
+                default => EpayProtocolConstant::V2_REFUND_STATUS_PENDING,
+            },
             'addtime' => FormatHelper::dateTime($refundOrder->created_at),
         ];
     }

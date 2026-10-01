@@ -8,7 +8,7 @@ use app\model\admin\PayCallbackLog;
 /**
  * 支付回调日志仓库。
  *
- * 封装按支付单号查询回调日志列表。
+ * 封装支付域渠道回调日志查询。
  */
 class PayCallbackLogRepository extends BaseRepository
 {

@@ -5,24 +5,28 @@ declare(strict_types=1);
 namespace app\common\payment;
 
 use app\common\base\BasePayment;
-use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\EpayProtocolConstant;
 use app\common\constant\FileConstant;
+use app\common\constant\PaymentMethodConstant;
+use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
+use app\common\interface\RefundQueryInterface;
 use app\common\sdk\alipay\AlipayClient;
 use app\common\sdk\alipay\AlipayResponse;
 use app\common\sdk\alipay\AlipaySdkException;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\model\payment\PayOrder;
 use app\repository\payment\trade\PayOrderRepository;
 use support\Request;
 use support\Response;
+use Throwable;
 
 /**
  * 支付宝官方 API 支付插件。
@@ -30,7 +34,7 @@ use support\Response;
  * 该插件用于 MPAY 通过支付宝 OpenAPI 发起官方支付产品请求，底层调用
  * app/common/sdk/alipay 目录下的轻量 SDK。
  */
-class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
+class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface, RefundQueryInterface
 {
     private const PRODUCT_WEB = 'web';
     private const PRODUCT_H5 = 'h5';
@@ -281,6 +285,7 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         return [
             'provider' => 'alipay',
             'product' => self::PRODUCT_MINI,
+            'channel_product' => self::PRODUCT_MINI,
             'auth_type' => 'alipay_mini',
             'identity_field' => 'buyer_id',
             'identity_aliases' => ['buyer_open_id'],
@@ -503,10 +508,23 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     private function resolveProduct(array $order): string
     {
         $enabledProducts = $this->enabledProducts();
+        $payment = $this->paymentPayload($order);
+        $selectedProduct = trim((string) ($payment['selected_product'] ?? ''));
+        if ($selectedProduct !== '') {
+            if (!in_array($selectedProduct, $enabledProducts, true)) {
+                throw new PaymentProductUnavailableException('身份授权产品未在当前支付宝通道开通', 40200, [
+                    'selected_product' => $selectedProduct,
+                    'enabled_products' => $enabledProducts,
+                ]);
+            }
+
+            return $selectedProduct;
+        }
+
         $explicit = $this->explicitProduct($order);
         if ($explicit !== '') {
             if (!in_array($explicit, $enabledProducts, true)) {
-                throw new PaymentException('当前支付宝通道未开通指定支付产品', 40200, [
+                throw new PaymentProductUnavailableException('当前支付宝通道未开通指定支付产品', 40200, [
                     'pay_product' => $explicit,
                 ]);
             }
@@ -520,7 +538,7 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             }
         }
 
-        throw new PaymentException('当前支付宝通道没有开通适合该支付环境的产品', 40200, [
+        throw new PaymentProductUnavailableException('当前支付宝通道没有开通适合该支付环境的产品', 40200, [
             'env' => $this->paymentEnv($order),
             'candidate_products' => $this->productCandidates($order),
             'enabled_products' => $enabledProducts,
@@ -535,11 +553,7 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     private function resolveIdentityProduct(array $order): string
     {
-        try {
-            return $this->resolveProduct($order);
-        } catch (PaymentException) {
-            return '';
-        }
+        return $this->resolveProduct($order);
     }
 
     /**
@@ -571,7 +585,7 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     }
 
     /**
-     * 将 V2 标准 method 或支付宝产品名解析成唯一产品。
+     * 将标准支付调用方式解析成唯一支付宝产品。
      *
      * @param array<string, mixed> $order 标准插件下单参数
      * @return string 支付宝产品标识；未显式指定时返回空字符串
@@ -584,16 +598,51 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             return '';
         }
 
-        return match ($method) {
-            self::PRODUCT_WEB => self::PRODUCT_WEB,
-            self::PRODUCT_H5, 'jump' => $method === 'jump' && $this->paymentEnv($order) === EpayProtocolConstant::DEVICE_PC
+        $product = match ($method) {
+            PaymentMethodConstant::WEB => self::PRODUCT_WEB,
+            PaymentMethodConstant::H5 => self::PRODUCT_H5,
+            PaymentMethodConstant::JUMP => $this->paymentEnv($order) === EpayProtocolConstant::DEVICE_PC
                 ? self::PRODUCT_WEB
                 : self::PRODUCT_H5,
-            self::PRODUCT_APP => self::PRODUCT_APP,
-            self::PRODUCT_MINI, 'jsapi', 'applet' => self::PRODUCT_MINI,
-            self::PRODUCT_POS => self::PRODUCT_POS,
-            self::PRODUCT_SCAN => self::PRODUCT_SCAN,
-            default => throw new PaymentException('不支持的支付宝支付方法：' . $method, 40200),
+            PaymentMethodConstant::APP => self::PRODUCT_APP,
+            PaymentMethodConstant::JSAPI,
+            PaymentMethodConstant::MINI,
+            PaymentMethodConstant::URL_SCHEME => self::PRODUCT_MINI,
+            PaymentMethodConstant::AUTH_CODE => self::PRODUCT_POS,
+            PaymentMethodConstant::QRCODE => self::PRODUCT_SCAN,
+            default => throw new PaymentException('不支持的支付宝支付调用方式', 40200, ['method' => $method]),
+        };
+
+        if (!$this->methodAllowed($method, $this->paymentEnv($order))) {
+            throw new PaymentException('指定支付宝支付方式与当前支付环境不匹配', 40200, [
+                'method' => $method,
+                'env' => $this->paymentEnv($order),
+            ]);
+        }
+
+        return $product;
+    }
+
+    /**
+     * 校验显式调用方式是否适合当前终端环境。
+     */
+    private function methodAllowed(string $method, string $env): bool
+    {
+        return match ($method) {
+            PaymentMethodConstant::WEB => $env === EpayProtocolConstant::DEVICE_PC,
+            PaymentMethodConstant::H5 => !in_array($env, [
+                EpayProtocolConstant::DEVICE_PC,
+                EpayProtocolConstant::DEVICE_ALIPAY,
+            ], true),
+            PaymentMethodConstant::JSAPI => $env === EpayProtocolConstant::DEVICE_ALIPAY,
+            PaymentMethodConstant::MINI,
+            PaymentMethodConstant::URL_SCHEME => in_array($env, [
+                EpayProtocolConstant::DEVICE_MOBILE,
+                EpayProtocolConstant::DEVICE_QQ,
+                EpayProtocolConstant::DEVICE_WECHAT,
+                EpayProtocolConstant::DEVICE_ALIPAY,
+            ], true),
+            default => true,
         };
     }
 
@@ -724,7 +773,26 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     public function pay(array $order): array
     {
-        return $this->pendingPaymentResult($order, $this->payByProduct($this->resolveProduct($order), $order));
+        $product = $this->resolveProduct($order);
+        $this->preparePayProduct($product);
+
+        try {
+            return $this->pendingPaymentResult($order, $this->payByProduct($product, $order));
+        } catch (PaymentException $e) {
+            // 产品来自本地选择，不允许 SDK 诊断字段覆盖；保留原异常的确定性分类。
+            $exception = $e::class;
+            throw new $exception($e->getMessage(), (int) ($e->getCode() ?: 40200), array_replace($e->getData(), [
+                'pay_type' => 'alipay',
+                'pay_product' => $product,
+            ]));
+        } catch (Throwable $e) {
+            throw new PaymentUncertainException($e->getMessage(), 40200, [
+                'pay_type' => 'alipay',
+                'pay_product' => $product,
+                'channel_error_code' => 'PLUGIN_CREATE_ORDER_ERROR',
+                'exception_class' => $e::class,
+            ]);
+        }
     }
 
     /**
@@ -1049,7 +1117,8 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             return ['trade_no' => $tradeNo];
         }
 
-        $outTradeNo = trim((string) ($order['chan_order_no'] ?? $order['pay_no'] ?? ''));
+        // 下单异常尚未回写渠道单号时，用实际下单发送的 pay_no 查询原订单。
+        $outTradeNo = trim((string) ($order['chan_order_no'] ?? '')) ?: (string) $order['pay_no'];
         if ($outTradeNo === '') {
             throw new PaymentException('支付宝交易标识不能为空', 40200);
         }
@@ -1223,6 +1292,9 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     /**
      * 发起支付宝退款。
      *
+     * 申请返回的 refund_fee 是累计金额，单次退款统一用原 out_request_no 查询核实。
+     * 查询过早或无可信结果时保持未确认，不在请求内等待或重新申请退款。
+     *
      * @param array<string, mixed> $order 标准插件退款参数
      * @return array<string, mixed>
      */
@@ -1231,10 +1303,7 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         $payload = $this->tradeIdentity($order);
         $payload['refund_amount'] = FormatHelper::amount((int) $order['refund_amount']);
 
-        $requestNo = trim((string) ($order['refund_no'] ?? ''));
-        if ($requestNo === '') {
-            throw new PaymentException('支付宝退款必须提供唯一 out_request_no', 40200);
-        }
+        $requestNo = (string) $order['refund_no'];
         $payload['out_request_no'] = $requestNo;
 
         $reason = trim((string) ($order['refund_reason'] ?? ''));
@@ -1244,26 +1313,94 @@ class AlipayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
 
         $response = $this->callAlipay(fn () => $this->client()->refund($payload));
         if (!$response->success()) {
+            // 官方明确系统错误可能已退款，不能按普通业务拒绝释放退款责任。
+            if ($response->subCode() === 'ACQ.SYSTEM_ERROR' || in_array($response->code(), ['20000', '20001'], true)) {
+                throw new PaymentUncertainException('支付宝退款结果未确认：' . ($response->subMsg() !== '' ? $response->subMsg() : $response->msg()), 40200, [
+                    'refund_no' => $requestNo,
+                    'channel_error_code' => $response->subCode() ?: $response->code(),
+                ]);
+            }
             $this->throwAlipayFailure($response, '支付宝退款失败');
         }
 
-        $fundChange = strtoupper(trim((string) ($response->data()['fund_change'] ?? '')));
-        $success = $fundChange === 'Y';
-        if (!$success) {
-            $queryPayload = $this->tradeIdentity($order);
-            $queryPayload['out_request_no'] = $requestNo;
-            $query = $this->callAlipay(fn () => $this->client()->refundQuery($queryPayload));
-            $refundStatus = strtoupper(trim((string) ($query->data()['refund_status'] ?? '')));
-            $success = $query->success() && $refundStatus === 'REFUND_SUCCESS';
+        $data = $response->data();
+        if ((string) ($data['out_trade_no'] ?? '') !== (string) $order['pay_no']
+            || (string) ($data['trade_no'] ?? '') === ''
+            || ((string) $order['chan_trade_no'] !== '' && (string) $data['trade_no'] !== (string) $order['chan_trade_no'])) {
+            throw new PaymentUncertainException('支付宝退款申请返回原交易标识不匹配', 40200, ['refund_no' => $requestNo]);
+        }
+
+        return $this->queryRefund($order);
+    }
+
+    /**
+     * 查询支付宝退款状态。
+     *
+     * 仅 REFUND_SUCCESS 及匹配的请求号、原交易和本次金额能确认成功。
+     * 官方未定义其他明确终态；未返回状态可能是尚未收到请求，不推断退款失败。
+     */
+    public function queryRefund(array $refund): array
+    {
+        $refundNo = (string) $refund['refund_no'];
+
+        $payload = $this->tradeIdentity($refund);
+        $payload['out_request_no'] = $refundNo;
+        $response = $this->callAlipay(fn () => $this->client()->refundQuery($payload));
+        if (!$response->success()) {
+            throw new PaymentUncertainException(
+                $response->subMsg() !== '' ? $response->subMsg() : $response->msg(),
+                40200,
+                [
+                    'refund_no' => $refundNo,
+                    'channel_error_code' => $response->subCode() !== '' ? $response->subCode() : $response->code(),
+                    'request_id' => $response->requestId(),
+                ]
+            );
+        }
+
+        $data = $response->data();
+        $payNo = (string) $refund['pay_no'];
+        $channelStatus = (string) ($data['refund_status'] ?? '');
+        $success = $channelStatus === 'REFUND_SUCCESS';
+        foreach (['out_trade_no' => $payNo, 'out_request_no' => $refundNo, 'trade_no' => (string) $refund['chan_trade_no']] as $field => $expected) {
+            $actual = (string) ($data[$field] ?? '');
+            if (($success && $expected !== '' && $actual === '')
+                || ($actual !== '' && $expected !== '' && !hash_equals($expected, $actual))) {
+                throw new PaymentUncertainException('支付宝退款查询返回交易或退款标识不匹配', 40200, [
+                    'refund_no' => $refundNo, 'field' => $field,
+                ]);
+            }
+        }
+
+        $refundAmount = (int) $refund['refund_amount'];
+        if ($success && !array_key_exists('refund_amount', $data)) {
+            throw new PaymentUncertainException('支付宝退款成功查询缺少退款金额', 40200, [
+                'refund_no' => $refundNo,
+            ]);
+        }
+        if (array_key_exists('refund_amount', $data)) {
+            $actualAmount = $this->amountToCents((string) $data['refund_amount']);
+            if ($actualAmount !== $refundAmount) {
+                throw new PaymentUncertainException('支付宝退款查询返回金额不匹配', 40200, [
+                    'refund_no' => $refundNo,
+                ]);
+            }
+        }
+        if (array_key_exists('total_amount', $data)
+            && $this->amountToCents((string) $data['total_amount']) !== (int) $refund['amount']) {
+            throw new PaymentUncertainException('支付宝退款查询返回原订单金额不匹配', 40200, ['refund_no' => $refundNo]);
         }
 
         return [
-            'status' => $success ? PaymentPluginStatusConstant::SUCCESS : PaymentPluginStatusConstant::PENDING,
-            'refund_no' => $requestNo,
-            'pay_no' => trim((string) ($order['pay_no'] ?? '')),
-            'refund_amount' => (int) $order['refund_amount'],
-            'chan_refund_no' => $requestNo,
-            'message' => $success ? 'success' : '支付宝退款结果尚未确认',
+            'status' => $success
+                ? PaymentPluginStatusConstant::SUCCESS
+                : PaymentPluginStatusConstant::UNKNOWN,
+            'refund_no' => $refundNo,
+            'pay_no' => $payNo,
+            'refund_amount' => $refundAmount,
+            'chan_refund_no' => (string) ($data['out_request_no'] ?? ''),
+            'channel_status' => $channelStatus,
+            'message' => $success ? '支付宝退款成功' : '支付宝退款状态尚未确认',
         ];
     }
 

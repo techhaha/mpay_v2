@@ -14,6 +14,9 @@ use app\common\constant\TradeConstant;
  */
 class RefundReportService extends BaseService
 {
+    /** 首次退款派发超过该时间仍未开始时，交由后台人工处理。 */
+    private const DISPATCH_ABNORMAL_SECONDS = 60;
+
     /**
      * 格式化退款订单行，统一输出前端展示字段。
      *
@@ -32,7 +35,13 @@ class RefundReportService extends BaseService
         $row['pay_type_name'] = trim((string) ($row['pay_type_name'] ?? '')) ?: '未知方式';
         $row['channel_name'] = trim((string) ($row['channel_name'] ?? '')) ?: '未知通道';
 
+        $createdAt = strtotime((string) ($row['created_at'] ?? ''));
+        $row['dispatch_abnormal'] = $source !== 'manual_refund'
+            && (int) ($row['status'] ?? -1) === TradeConstant::REFUND_STATUS_CREATED
+            && $createdAt !== false
+            && $createdAt <= time() - self::DISPATCH_ABNORMAL_SECONDS;
         $row['status_text'] = $this->textFromMap((int) ($row['status'] ?? -1), TradeConstant::refundStatusMap());
+        $row['dispatch_warning_text'] = $row['dispatch_abnormal'] ? '首次派发超时' : '';
         $row['pay_status_text'] = $this->textFromMap((int) ($row['pay_status'] ?? -1), TradeConstant::orderStatusMap());
         $row['channel_type_text'] = $this->textFromMap((int) ($row['channel_type'] ?? -1), RouteConstant::channelTypeMap());
         $row['channel_mode_text'] = $this->textFromMap((int) ($row['channel_mode'] ?? -1), RouteConstant::channelModeMap());
@@ -144,6 +153,9 @@ class RefundReportService extends BaseService
     private function upstreamStatusText(array $row): string
     {
         $source = (string) ($row['refund_source'] ?? '');
+        if (!empty($row['dispatch_abnormal'])) {
+            return '首次派发超时，等待人工处理';
+        }
         if ($source === 'manual_refund') {
             return '后台手动登记，无上游退款请求';
         }

@@ -66,7 +66,7 @@ class RefundOrderController extends BaseController
     }
 
     /**
-     * 重试当前商户的退款单。
+     * 重新派发当前商户的待处理退款，或重试失败退款。
      *
      * @param Request $request 请求对象
      * @param string $refundNo 退款单号

@@ -16,6 +16,7 @@ use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use support\Request;
 use support\Response;
@@ -215,7 +216,7 @@ class YeepayApiPayment extends BasePayment implements
             return [
                 'provider' => 'alipay',
                 'product' => self::PRODUCT_ALIPAY_JSAPI,
-                'pay_product' => self::PRODUCT_ALIPAY_JSAPI,
+                'channel_product' => self::PRODUCT_ALIPAY_JSAPI,
                 'auth_type' => 'alipay_oauth',
                 'identity_field' => 'buyer_id',
                 'app_id' => $this->configText('alipay_oauth_app_id'),
@@ -238,7 +239,7 @@ class YeepayApiPayment extends BasePayment implements
         if ($this->isMiniIntent($order)) {
             $this->ensureProduct(self::PRODUCT_WXPAY_MINI);
             if (!$this->configBool('bindwxa')) {
-                throw new PaymentException('易宝通道未开启 bindwxa，不能使用微信小程序产品', 40200);
+                throw new PaymentProductUnavailableException('易宝通道未开启 bindwxa，不能使用微信小程序产品', 40200);
             }
             $this->assertAppScope($payment, $this->configText('wechat_mini_app_id'), ['sub_appid']);
             if ($this->firstText($payment['mini_openid'] ?? '') !== '') {
@@ -248,7 +249,7 @@ class YeepayApiPayment extends BasePayment implements
             return [
                 'provider' => 'wxpay',
                 'product' => 'mini',
-                'pay_product' => self::PRODUCT_WXPAY_MINI,
+                'channel_product' => self::PRODUCT_WXPAY_MINI,
                 'auth_type' => 'mini_program',
                 'identity_field' => 'mini_openid',
                 'app_id' => $this->configText('wechat_mini_app_id'),
@@ -271,7 +272,7 @@ class YeepayApiPayment extends BasePayment implements
         return [
             'provider' => 'wxpay',
             'product' => 'mp',
-            'pay_product' => self::PRODUCT_WXPAY_MP,
+            'channel_product' => self::PRODUCT_WXPAY_MP,
             'auth_type' => 'wechat_oauth',
             'identity_field' => 'openid',
             'app_id' => $this->configText('wechat_mp_app_id'),
@@ -297,11 +298,11 @@ class YeepayApiPayment extends BasePayment implements
         $method = strtolower($this->firstText($payment['method'] ?? ''));
         $env = strtolower($this->firstText($order['_env'] ?? 'pc'));
 
-        if (in_array($method, ['app', 'urlscheme', 'page'], true)) {
+        if (in_array($method, ['app', 'urlscheme'], true)) {
             return match ($payType) {
                 'alipay' => $this->tutelageAlipayAppPay($order),
                 'wxpay' => $this->tutelageWechatAppPay($order),
-                default => throw new PaymentException('易宝云闪付不支持托管 APP 产品', 40200),
+                default => throw new PaymentProductUnavailableException('易宝云闪付不支持托管 APP 产品', 40200),
             };
         }
         if (in_array($method, ['h5', 'jump'], true)) {
@@ -317,7 +318,7 @@ class YeepayApiPayment extends BasePayment implements
             return match ($payType) {
                 'alipay' => $this->alipayJsapiPay($order),
                 'wxpay' => $this->isMiniIntent($order) ? $this->wechatMiniPay($order) : $this->wechatMpPay($order),
-                default => throw new PaymentException('易宝云闪付不支持 JSAPI 产品', 40200),
+                default => throw new PaymentProductUnavailableException('易宝云闪付不支持 JSAPI 产品', 40200),
             };
         }
         if ($payType === 'wxpay' && $this->isMiniIntent($order)) {
@@ -359,10 +360,6 @@ class YeepayApiPayment extends BasePayment implements
                 'handler' => fn (): array => $payType === 'alipay'
                     ? $this->tutelageAlipayAppPay($order)
                     : $this->tutelageWechatAppPay($order),
-            ],
-            'page' => [
-                'products' => ['wxpay' => self::PRODUCT_WXPAY_APP],
-                'handler' => fn (): array => $this->tutelageWechatAppPay($order),
             ],
             'qrcode' => [
                 'products' => [
@@ -693,7 +690,7 @@ class YeepayApiPayment extends BasePayment implements
     {
         $this->ensureProduct(self::PRODUCT_WXPAY_MINI);
         if (!$this->configBool('bindwxa')) {
-            throw new PaymentException('易宝通道未开启 bindwxa，不能使用微信小程序产品', 40200);
+            throw new PaymentProductUnavailableException('易宝通道未开启 bindwxa，不能使用微信小程序产品', 40200);
         }
         $payment = $this->paymentPayload($order);
         $openid = $this->requiredText($payment['mini_openid'] ?? '', '易宝微信小程序支付缺少 mini_openid');
@@ -1089,7 +1086,7 @@ class YeepayApiPayment extends BasePayment implements
     private function ensureProduct(string $product): void
     {
         if (!in_array($product, $this->enabledProducts(), true)) {
-            throw new PaymentException('当前易宝通道未开通该支付产品', 40200, [
+            throw new PaymentProductUnavailableException('当前易宝通道未开通该支付产品', 40200, [
                 'channel_error_code' => 'PRODUCT_NOT_OPEN',
                 'product' => $product,
             ]);
@@ -1129,11 +1126,11 @@ class YeepayApiPayment extends BasePayment implements
             return false;
         }
         $payment = $this->paymentPayload($order);
-        if ($this->firstText($payment['mini_openid'] ?? '', $payment['mini_code'] ?? '', $payment['wx_login_code'] ?? '') !== '') {
-            return true;
-        }
         $method = strtolower($this->firstText($payment['method'] ?? ''));
-        if (in_array($method, ['mini', 'applet'], true)) {
+        if ($method !== '') {
+            return $method === 'mini';
+        }
+        if ($this->firstText($payment['mini_openid'] ?? '', $payment['mini_code'] ?? '', $payment['wx_login_code'] ?? '') !== '') {
             return true;
         }
 

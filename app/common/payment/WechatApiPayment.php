@@ -8,21 +8,24 @@ use app\common\base\BasePayment;
 use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\EpayProtocolConstant;
 use app\common\constant\FileConstant;
+use app\common\constant\PaymentMethodConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
+use app\common\interface\RefundQueryInterface;
 use app\common\sdk\wxpay\WxpayClient;
 use app\common\sdk\wxpay\WxpayResponse;
 use app\common\sdk\wxpay\WxpaySdkException;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\model\payment\PayOrder;
 use app\repository\payment\trade\PayOrderRepository;
-use support\Log;
 use support\Request;
 use support\Response;
+use Throwable;
 
 /**
  * 微信支付官方 API 支付插件。
@@ -30,7 +33,7 @@ use support\Response;
  * 负责 V2/V3、普通商户/服务商模式下的 JSAPI、H5、APP、小程序和 Native 支付适配，
  * 并完成查单、关单、退款以及通知验签后的订单归属、产品、商户身份和金额校验。
  */
-class WechatApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
+class WechatApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface, RefundQueryInterface
 {
     private const PRODUCT_MP = 'mp';
     private const PRODUCT_H5 = 'h5';
@@ -367,7 +370,7 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         $env = $this->paymentEnv($order);
         $payment = $this->paymentPayload($order);
         $openid = $product === self::PRODUCT_MINI
-            ? $this->firstText($payment['mini_openid'] ?? '', $this->openidFromPayload($payment))
+            ? $this->firstText($payment['mini_openid'] ?? '')
             : $this->openidFromPayload($payment);
         if ($openid !== '') {
             return null;
@@ -376,6 +379,7 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         return [
             'provider' => 'wxpay',
             'product' => $product,
+            'channel_product' => $product,
             'auth_type' => $product === self::PRODUCT_MP ? 'wechat_oauth' : 'mini_program',
             'identity_field' => $product === self::PRODUCT_MP ? 'openid' : 'mini_openid',
             'app_id' => $this->productAppId($product),
@@ -395,7 +399,8 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     /**
      * 发起微信支付。
      *
-     * 候选产品按当前环境排序，只在产品权限或配置类确定失败时尝试下一产品；结果不确定时立即停止兜底。
+     * 候选产品按当前环境排序；经核心预写产品的真实支付不跨产品重试。
+     * 执行异常携带实际选中产品；结果不确定或未知异常立即停止兜底。
      *
      * @param array<string, mixed> $order 标准插件下单参数
      *
@@ -407,6 +412,7 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         $attempts = [];
 
         foreach ($products as $index => $product) {
+            $this->preparePayProduct($product);
             try {
                 return $this->pendingPaymentResult($order, $this->payByProduct($product, $order));
             } catch (PaymentException $e) {
@@ -415,12 +421,27 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                     'message' => $e->getMessage(),
                     'channel_error_code' => (string) (($this->exceptionData($e))['channel_error_code'] ?? ''),
                 ];
-                if ($index === count($products) - 1 || !$this->shouldFallbackProduct($e)) {
+                if ($this->hasPayProductPreflight() || $index === count($products) - 1 || !$this->shouldFallbackProduct($e)) {
                     $data = $this->exceptionData($e);
+                    $data['pay_type'] = 'wxpay';
+                    $data['pay_product'] = $product;
                     $data['product_attempts'] = $attempts;
                     $exception = $e::class;
                     throw new $exception($e->getMessage(), (int) $e->getCode() ?: 40200, $data);
                 }
+            } catch (Throwable $e) {
+                // 已进入具体产品执行，未知异常不能证明上游未建单，禁止继续下一个产品。
+                throw new PaymentUncertainException($e->getMessage(), 40200, [
+                    'pay_type' => 'wxpay',
+                    'pay_product' => $product,
+                    'channel_error_code' => 'PLUGIN_CREATE_ORDER_ERROR',
+                    'exception_class' => $e::class,
+                    'product_attempts' => array_merge($attempts, [[
+                        'product' => $product,
+                        'message' => $e->getMessage(),
+                        'channel_error_code' => 'PLUGIN_CREATE_ORDER_ERROR',
+                    ]]),
+                ]);
             }
         }
 
@@ -612,10 +633,10 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         $response = $this->callWxpay(function () use ($order): WxpayResponse {
             $transactionId = $this->transactionId($order);
             if ($transactionId !== '') {
-                return $this->client($this->queryProduct())->queryByTransactionId($transactionId);
+                return $this->client($this->operationProduct($order))->queryByTransactionId($transactionId);
             }
 
-            return $this->client($this->queryProduct())->queryByOutTradeNo($this->outTradeNo($order));
+            return $this->client($this->operationProduct($order))->queryByOutTradeNo($this->outTradeNo($order));
         });
 
         if (!$response->success()) {
@@ -673,7 +694,7 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     public function close(array $order): array
     {
-        $response = $this->callWxpay(fn () => $this->client($this->queryProduct())->close($this->outTradeNo($order)));
+        $response = $this->callWxpay(fn () => $this->client($this->operationProduct($order))->close($this->outTradeNo($order)));
         if (!$response->success()) {
             $this->throwWxpayFailure($response, '微信支付关单失败');
         }
@@ -699,7 +720,7 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     public function refund(array $order): array
     {
         $payload = $this->refundPayload($order);
-        $response = $this->callWxpay(fn () => $this->client($this->queryProduct())->refund($payload));
+        $response = $this->callWxpay(fn () => $this->client($this->operationProduct($order))->refund($payload));
         if (!$response->success()) {
             $this->throwWxpayFailure($response, '微信支付退款失败');
         }
@@ -718,7 +739,8 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
 
         $channelStatus = strtoupper(trim((string) ($data['status'] ?? '')));
         if ($this->apiVersion() === WxpayClient::API_VERSION_V2 && $channelStatus === '') {
-            $channelStatus = 'SUCCESS';
+            // V2 result_code=SUCCESS 仅确认退款申请已受理，最终结果由 refundquery 给出。
+            $channelStatus = 'PROCESSING';
         }
         if (!in_array($channelStatus, ['SUCCESS', 'PROCESSING'], true)) {
             throw new PaymentUncertainException('微信支付退款返回状态无法确认', 40200, [
@@ -737,6 +759,88 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             'chan_refund_no' => trim((string) ($data['refund_id'] ?? '')),
             'channel_status' => $channelStatus,
             'message' => 'success',
+        ];
+    }
+
+    /**
+     * 查询微信退款状态。
+     */
+    public function queryRefund(array $refund): array
+    {
+        $refundNo = (string) $refund['refund_no'];
+
+        $response = $this->callWxpay(
+            fn () => $this->client($this->operationProduct($refund))->queryRefund($refundNo)
+        );
+        if (!$response->success()) {
+            throw new PaymentUncertainException($response->message(), 40200, [
+                'refund_no' => $refundNo,
+                'channel_error_code' => $response->code(),
+            ]);
+        }
+
+        $data = $response->data();
+        if ($this->apiVersion() === WxpayClient::API_VERSION_V3) {
+            $responseRefundNo = trim((string) ($data['out_refund_no'] ?? ''));
+            $responsePayNo = trim((string) ($data['out_trade_no'] ?? ''));
+            $channelRefundNo = trim((string) ($data['refund_id'] ?? ''));
+            $channelStatus = strtoupper(trim((string) ($data['status'] ?? '')));
+            $amount = $data['amount'] ?? null;
+            $actualAmount = is_array($amount) && is_int($amount['refund'] ?? null)
+                ? $amount['refund']
+                : null;
+            $currency = is_array($amount) ? (string) ($amount['currency'] ?? '') : '';
+        } else {
+            $responseRefundNo = trim((string) ($data['out_refund_no_0'] ?? ''));
+            $responsePayNo = trim((string) ($data['out_trade_no'] ?? ''));
+            $channelRefundNo = trim((string) ($data['refund_id_0'] ?? ''));
+            $channelStatus = strtoupper(trim((string) ($data['refund_status_0'] ?? '')));
+            $value = $data['refund_fee_0'] ?? null;
+            $actualAmount = (is_int($value) || (is_string($value) && ctype_digit($value))) ? (int) $value : null;
+            $currency = (string) ($data['fee_type'] ?? 'CNY');
+        }
+
+        $payNo = (string) $refund['pay_no'];
+        $refundAmount = (int) $refund['refund_amount'];
+        if ($responseRefundNo === '' || !hash_equals($refundNo, $responseRefundNo)) {
+            throw new PaymentUncertainException('微信退款查询返回退款单号不匹配', 40200, ['refund_no' => $refundNo]);
+        }
+        if ($channelRefundNo === '') {
+            throw new PaymentUncertainException('微信退款查询缺少微信退款单号', 40200, ['refund_no' => $refundNo]);
+        }
+        if ($responsePayNo === '' || !hash_equals($payNo, $responsePayNo)) {
+            throw new PaymentUncertainException('微信退款查询返回原支付单号不匹配', 40200, ['refund_no' => $refundNo]);
+        }
+        if ($actualAmount === null || $actualAmount !== $refundAmount) {
+            throw new PaymentUncertainException('微信退款查询返回金额不匹配', 40200, ['refund_no' => $refundNo]);
+        }
+        if ($currency !== 'CNY') {
+            throw new PaymentUncertainException('微信退款查询返回币种不受支持', 40200, ['refund_no' => $refundNo]);
+        }
+
+        $status = match ($channelStatus) {
+            'SUCCESS' => PaymentPluginStatusConstant::SUCCESS,
+            'CLOSED', 'REFUNDCLOSE' => PaymentPluginStatusConstant::FAILED,
+            'PROCESSING' => PaymentPluginStatusConstant::PENDING,
+            // 异常退款需到微信商户平台处理，不能当作已确认失败释放业务责任。
+            'ABNORMAL', 'CHANGE' => PaymentPluginStatusConstant::UNKNOWN,
+            default => PaymentPluginStatusConstant::UNKNOWN,
+        };
+
+        return [
+            'status' => $status,
+            'refund_no' => $refundNo,
+            'pay_no' => $payNo,
+            'refund_amount' => $refundAmount,
+            'chan_refund_no' => $channelRefundNo,
+            'channel_status' => $channelStatus,
+            'message' => match ($channelStatus) {
+                'SUCCESS' => '微信退款成功',
+                'PROCESSING' => '微信退款处理中',
+                'CLOSED', 'REFUNDCLOSE' => '微信退款已关闭',
+                'ABNORMAL', 'CHANGE' => '微信退款异常，请到微信商户平台核实处理',
+                default => '微信退款状态尚未确认：' . $channelStatus,
+            },
         ];
     }
 
@@ -797,8 +901,40 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     private function resolveProducts(array $order): array
     {
-        $candidates = $this->productCandidates($order);
         $enabledProducts = $this->enabledProducts();
+        $payment = $this->paymentPayload($order);
+        $selectedProduct = trim((string) ($payment['selected_product'] ?? ''));
+        if ($selectedProduct !== '') {
+            if (!in_array($selectedProduct, $enabledProducts, true)) {
+                throw new PaymentProductUnavailableException('身份授权产品未在当前微信支付通道开通', 40200, [
+                    'selected_product' => $selectedProduct,
+                    'enabled_products' => $enabledProducts,
+                ]);
+            }
+
+            return [$selectedProduct];
+        }
+
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            $product = $this->explicitProduct($method);
+            if (!$this->productAllowed($product, $this->paymentEnv($order))) {
+                throw new PaymentException('指定微信支付方式与当前支付环境不匹配', 40200, [
+                    'method' => $method,
+                    'env' => $this->paymentEnv($order),
+                ]);
+            }
+            if (!in_array($product, $enabledProducts, true)) {
+                throw new PaymentProductUnavailableException('当前微信支付通道未开通指定支付产品', 40200, [
+                    'method' => $method,
+                    'pay_product' => $product,
+                ]);
+            }
+
+            return [$product];
+        }
+
+        $candidates = $this->productCandidates($order);
         $products = array_values(array_filter(
             $candidates,
             static fn (string $product): bool => in_array($product, $enabledProducts, true)
@@ -808,7 +944,7 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             return $products;
         }
 
-        throw new PaymentException('当前微信支付通道没有开通适合该支付环境的产品', 40200, [
+        throw new PaymentProductUnavailableException('当前微信支付通道没有开通适合该支付环境的产品', 40200, [
             'env' => $this->paymentEnv($order),
             'candidate_products' => $candidates,
             'enabled_products' => $enabledProducts,
@@ -826,45 +962,7 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     private function resolveIdentityProduct(array $order): string
     {
-        $enabledProducts = $this->enabledProducts();
-        foreach ($this->identityProductCandidates($order) as $product) {
-            if (in_array($product, $enabledProducts, true)) {
-                return $product;
-            }
-        }
-
-        return '';
-    }
-
-    /**
-     * 根据环境生成身份流程候选产品。
-     *
-     * @param array<string, mixed> $order 标准插件下单参数
-     * @return array<int, string> 产品标识列表
-     */
-    private function identityProductCandidates(array $order): array
-    {
-        $payment = $this->paymentPayload($order);
-        $env = $this->paymentEnv($order);
-
-        if ($this->hasMiniPayload($payment) || $this->firstText($payment['is_mini'] ?? '', $payment['mini_app_id'] ?? '') !== '') {
-            return [self::PRODUCT_MINI, self::PRODUCT_MP, self::PRODUCT_SCAN];
-        }
-
-        if ($env === EpayProtocolConstant::DEVICE_WECHAT) {
-            return [self::PRODUCT_MP, self::PRODUCT_MINI, self::PRODUCT_SCAN];
-        }
-
-        if (in_array($env, [
-            EpayProtocolConstant::DEVICE_MOBILE,
-            EpayProtocolConstant::DEVICE_QQ,
-            EpayProtocolConstant::DEVICE_ALIPAY,
-            EpayProtocolConstant::DEVICE_JUMP,
-        ], true)) {
-            return [self::PRODUCT_H5, self::PRODUCT_MINI, self::PRODUCT_SCAN];
-        }
-
-        return $this->productCandidates($order);
+        return $this->resolveProducts($order)[0] ?? '';
     }
 
     /**
@@ -896,6 +994,40 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             EpayProtocolConstant::DEVICE_ALIPAY => [self::PRODUCT_H5, self::PRODUCT_MINI, self::PRODUCT_SCAN],
             EpayProtocolConstant::DEVICE_JUMP => [self::PRODUCT_H5, self::PRODUCT_MINI, self::PRODUCT_SCAN],
             default => [self::PRODUCT_SCAN, self::PRODUCT_H5],
+        };
+    }
+
+    /**
+     * 将开放接口调用方式映射为唯一微信支付产品。
+     */
+    private function explicitProduct(string $method): string
+    {
+        return match ($method) {
+            PaymentMethodConstant::WEB,
+            PaymentMethodConstant::QRCODE => self::PRODUCT_SCAN,
+            PaymentMethodConstant::H5,
+            PaymentMethodConstant::JUMP => self::PRODUCT_H5,
+            PaymentMethodConstant::JSAPI => self::PRODUCT_MP,
+            PaymentMethodConstant::APP => self::PRODUCT_APP,
+            PaymentMethodConstant::MINI,
+            PaymentMethodConstant::URL_SCHEME => self::PRODUCT_MINI,
+            PaymentMethodConstant::AUTH_CODE => throw new PaymentException('微信官方插件未实现付款码支付产品', 40200),
+            default => throw new PaymentException('不支持的微信支付调用方式', 40200, ['method' => $method]),
+        };
+    }
+
+    /**
+     * 校验显式产品是否适合当前终端环境。
+     */
+    private function productAllowed(string $product, string $env): bool
+    {
+        return match ($product) {
+            self::PRODUCT_MP => $env === EpayProtocolConstant::DEVICE_WECHAT,
+            self::PRODUCT_H5 => !in_array($env, [
+                EpayProtocolConstant::DEVICE_PC,
+                EpayProtocolConstant::DEVICE_WECHAT,
+            ], true),
+            default => true,
         };
     }
 
@@ -1034,7 +1166,7 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     private function payerPayload(string $product, array $payment): array
     {
         $openid = $product === self::PRODUCT_MINI
-            ? $this->firstText($payment['mini_openid'] ?? '', $this->openidFromPayload($payment))
+            ? $this->firstText($payment['mini_openid'] ?? '')
             : $this->openidFromPayload($payment);
         if ($openid === '') {
             throw new PaymentException('微信 JSAPI/小程序支付必须传入 openid', 40200);
@@ -1060,7 +1192,7 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     private function appendV2Openid(array &$payload, string $product, array $payment): void
     {
         $openid = $product === self::PRODUCT_MINI
-            ? $this->firstText($payment['mini_openid'] ?? '', $this->openidFromPayload($payment))
+            ? $this->firstText($payment['mini_openid'] ?? '')
             : $this->openidFromPayload($payment);
         if ($openid === '') {
             throw new PaymentException('微信 JSAPI/小程序支付必须传入 openid', 40200);
@@ -1085,7 +1217,6 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         return $this->firstText(
             $payment['openid'] ?? '',
             $payment['sub_openid'] ?? '',
-            $payment['buyer_open_id'] ?? '',
             $payment['wx_openid'] ?? ''
         );
     }
@@ -1185,34 +1316,14 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     /**
      * 判断当前错误是否允许继续尝试下一个产品。
      *
-     * 只对产品权限或商户未开通类错误做兜底。
+     * 只认专用产品不可用异常，不根据第三方错误文案推断。
      *
      * @param PaymentException $e 支付异常
      * @return bool 是否允许兜底
      */
     private function shouldFallbackProduct(PaymentException $e): bool
     {
-        if ($e instanceof PaymentUncertainException) {
-            return false;
-        }
-
-        $data = $this->exceptionData($e);
-        $errorCode = strtoupper((string) ($data['channel_error_code'] ?? ''));
-        $message = strtoupper($e->getMessage());
-
-        foreach (['NO_AUTH', 'NOT_PERMITTED', 'MCH_NOT_EXISTS', 'PARAM_ERROR'] as $code) {
-            if (str_contains($errorCode, $code)) {
-                return true;
-            }
-        }
-
-        foreach (['权限', '未开通', '未配置', '商户号不存在', 'APPID_MCHID_NOT_MATCH'] as $keyword) {
-            if (str_contains($message, strtoupper($keyword))) {
-                return true;
-            }
-        }
-
-        return false;
+        return $e instanceof PaymentProductUnavailableException;
     }
 
     /**
@@ -1396,7 +1507,8 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     /**
      * 解析 V3 支付通知。
      *
-     * 原始请求体和微信签名头交由 SDK 验签、解密，失败日志只记录通道、请求 ID 和错误信息。
+     * 原始请求体和微信签名头交由 SDK 验签、解密，解析失败转为支付异常，
+     * 由统一回调链记录验签和处理结果。
      *
      * @param Request $request 回调请求
      *
@@ -1414,12 +1526,6 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         try {
             $data = $this->client($this->queryProduct())->parseV3Notify($headers, $body);
         } catch (WxpaySdkException $e) {
-            Log::warning(sprintf(
-                '[WechatApiPayment] V3 通知解析失败 channel_id=%d request_id=%s error=%s',
-                (int) $this->getConfig('channel_id', 0),
-                (string) $request->header('request-id', ''),
-                $e->getMessage()
-            ));
             throw new PaymentException($e->getMessage(), 40200);
         }
 
@@ -1446,7 +1552,8 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     /**
      * 解析 V2 支付通知。
      *
-     * 原始 XML 交由 SDK 验签解析，失败日志不包含通知正文或密钥材料。
+     * 原始 XML 交由 SDK 验签解析，解析失败转为支付异常，
+     * 由统一回调链记录验签和处理结果。
      *
      * @param Request $request 回调请求
      *
@@ -1457,12 +1564,6 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
         try {
             $data = $this->client($this->queryProduct())->parseV2Notify($request->rawBody());
         } catch (WxpaySdkException $e) {
-            Log::warning(sprintf(
-                '[WechatApiPayment] V2 通知解析失败 channel_id=%d request_id=%s error=%s',
-                (int) $this->getConfig('channel_id', 0),
-                (string) $request->header('request-id', ''),
-                $e->getMessage()
-            ));
             throw new PaymentException($e->getMessage(), 40200);
         }
 
@@ -1810,6 +1911,31 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     }
 
     /**
+     * 读取原支付实际使用的微信产品。
+     *
+     * 查单、关单和退款必须沿用支付单 payment_context.pay_product，不能使用当前
+     * enabled_products 的第一项代替，否则多产品通道可能选到错误 AppID。
+     */
+    private function operationProduct(array $order): string
+    {
+        $product = trim((string) ($order['pay_product'] ?? ''));
+        if (!in_array($product, [
+            self::PRODUCT_MP,
+            self::PRODUCT_H5,
+            self::PRODUCT_APP,
+            self::PRODUCT_MINI,
+            self::PRODUCT_SCAN,
+        ], true)) {
+            throw new PaymentException('微信支付订单缺少有效支付产品上下文', 40200, [
+                'pay_no' => (string) ($order['pay_no'] ?? ''),
+                'pay_product' => $product,
+            ]);
+        }
+
+        return $product;
+    }
+
+    /**
      * 获取商户订单号。
      *
      * @param array<string, mixed> $order 标准插件订单参数
@@ -1817,7 +1943,8 @@ class WechatApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     private function outTradeNo(array $order): string
     {
-        $outTradeNo = trim((string) ($order['chan_order_no'] ?? $order['pay_no'] ?? ''));
+        // 下单异常尚未回写渠道单号时，用实际下单发送的 pay_no 查询原订单。
+        $outTradeNo = trim((string) ($order['chan_order_no'] ?? '')) ?: (string) $order['pay_no'];
         if ($outTradeNo === '') {
             throw new PaymentException('微信支付商户订单号不能为空', 40200);
         }

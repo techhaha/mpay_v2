@@ -272,6 +272,12 @@ class HaipayApiPayment extends BasePayment implements
                 ],
                 'handler' => fn (): array => $this->jsapiPay($order),
             ],
+            'mini' => [
+                'products' => [
+                    'wxpay' => self::PRODUCT_WX_JSAPI,
+                ],
+                'handler' => fn (): array => $this->jsapiPay($order),
+            ],
             'qrcode' => [
                 'products' => [
                     'alipay' => self::PRODUCT_ALI,
@@ -913,14 +919,17 @@ class HaipayApiPayment extends BasePayment implements
      */
     private function isMiniIntent(array $payment): bool
     {
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
+
         return $this->firstText(
             $payment['mini_openid'] ?? '',
             $payment['mini_code'] ?? '',
             $payment['wx_login_code'] ?? '',
             $payment['mini_app_id'] ?? ''
-        ) !== ''
-            || strtolower($this->firstText($payment['method'] ?? '')) === 'mini'
-            || filter_var($payment['is_mini'] ?? false, FILTER_VALIDATE_BOOL);
+        ) !== '' || filter_var($payment['is_mini'] ?? false, FILTER_VALIDATE_BOOL);
     }
 
     /**

@@ -7,13 +7,16 @@ namespace app\common\payment;
 use app\common\base\BasePayment;
 use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
+use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\dinpay\DinpayClient;
 use app\common\sdk\dinpay\DinpaySdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
+use app\common\trait\DirectPaymentIdentityTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
+use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
@@ -25,9 +28,10 @@ use support\Response;
  * 对接 PUBLIC、WAP 和 SCAN 三类支付产品，负责报文转换、回调验签和退款结果归一化。
  * 当前适配协议没有可确认的主动查单与关单接口，因此这两项能力明确返回不支持。
  */
-class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
+class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
 {
     use DirectPaymentProductSelectorTrait;
+    use DirectPaymentIdentityTrait;
 
     private const PRODUCT_PUBLIC = 'PUBLIC';
     private const PRODUCT_WAP = 'WAP';
@@ -71,6 +75,7 @@ class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                 self::PRODUCT_WAP => 'H5/跳转支付',
                 self::PRODUCT_SCAN => '扫码支付',
             ]),
+            ...$this->directPaymentIdentityConfigFields(['wechat_oauth', 'alipay_oauth']),
         ];
     }
 
@@ -82,13 +87,39 @@ class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     public function pay(array $order): array
     {
-        return $this->executeDirectPaymentProduct($order, [
+        return $this->executeDirectPaymentProduct($order, $this->paymentProducts($order), '智付');
+    }
 
+    /**
+     * 仅为本次选中的 PUBLIC 产品声明身份，不为 WAP/SCAN 发起授权。
+     *
+     * PUBLIC 微信消费公众号身份；支付宝消费 UID。当前插件未实现 APPLET。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>|null 身份需求
+     */
+    public function identityRequirement(array $order): ?array
+    {
+        $product = $this->directPaymentSelection($order, $this->paymentProducts($order))['product'];
+
+        return $product === self::PRODUCT_PUBLIC
+            ? $this->directPaymentIdentityRequirement($order, $product, $order['pay_type_code'] === 'wxpay' ? 'wechat_oauth' : 'alipay_oauth')
+            : null;
+    }
+
+    /**
+     * 声明插件支持的产品，由身份预检和真实下单共同消费。
+     *
+     * @param array<string, mixed> $order 处理器消费的标准下单参数
+     * @return array<string, array<string, mixed>> 产品与请求处理器，不执行上游请求
+     */
+    private function paymentProducts(array $order): array
+    {
+        return [
             'jsapi' => [
                 'products' => [
                     'alipay' => self::PRODUCT_PUBLIC,
                     'wxpay' => self::PRODUCT_PUBLIC,
-                    'bank' => self::PRODUCT_PUBLIC,
                 ],
                 'handler' => fn (): array => $this->jsapiPay($order),
             ],
@@ -118,7 +149,7 @@ class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
                 ],
                 'handler' => fn (): array => $this->scanPay($order),
             ],
-        ], '智付');
+        ];
     }
 
     /**
@@ -295,14 +326,19 @@ class DinpayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     private function jsapiPay(array $order): array
     {
-        $payment = (array) ($order['extra']['payment'] ?? []);
+        $wechat = $order['pay_type_code'] === 'wxpay';
+        $identity = $this->directPaymentIdentityData($order, $wechat ? 'wechat_oauth' : 'alipay_oauth');
+        if ($identity['identity'] === '') {
+            throw new PaymentDefinitiveException('智付 PUBLIC 支付缺少 ' . $identity['identity_field'] . '，请先完成身份授权', 40200);
+        }
         try {
             $data = $this->client()->execute('/api/appPay/payPublic', $this->basePayload($order) + [
                 'interfaceName' => 'AppPayPublic',
                 'paymentType' => $this->channelPayType((string) $order['pay_type_code']),
                 'paymentMethods' => 'PUBLIC',
-                'appid' => (string) ($payment['sub_appid'] ?? '1'),
-                'openid' => (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? $payment['buyer_id'] ?? ''),
+                // 彩虹支付宝 PUBLIC 固定传 1；微信必须使用取得公众号 openid 的真实 AppID。
+                'appid' => $wechat ? $identity['app_id'] : '1',
+                'openid' => $identity['identity'],
                 'isNative' => '1',
                 'successToUrl' => (string) $order['return_url'],
             ]);

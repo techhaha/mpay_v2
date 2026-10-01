@@ -15,6 +15,7 @@ use app\common\sdk\unionpay\UnionpaySdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use app\model\payment\PayOrder;
@@ -940,6 +941,10 @@ class UnionpayApiPayment extends BasePayment implements
             return false;
         }
         $payment = $this->paymentPayload($order);
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
 
         return $this->firstText(
             $payment['mini_openid'] ?? '',
@@ -976,7 +981,7 @@ class UnionpayApiPayment extends BasePayment implements
     private function ensureProduct(string $product): void
     {
         if (!in_array($product, $this->enabledProducts(), true)) {
-            throw new PaymentDefinitiveException('银联前置产品未在当前通道开通', 40200, [
+            throw new PaymentProductUnavailableException('银联前置产品未在当前通道开通', 40200, [
                 'channel_error_code' => 'PRODUCT_NOT_OPEN',
                 'product' => $product,
             ]);

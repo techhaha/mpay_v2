@@ -279,6 +279,7 @@ Route::group('/adminapi', function () {
             Route::post('/{payNo}/api-refund', [PayOrderController::class, 'apiRefund'])->name('adminApiPayOrdersApiRefund')->setParams(['real_name' => '支付订单 API 退款']);
             Route::post('/{payNo}/manual-refund', [PayOrderController::class, 'manualRefund'])->name('adminApiPayOrdersManualRefund')->setParams(['real_name' => '支付订单手动退款']);
             Route::post('/{payNo}/manual-success', [PayOrderController::class, 'manualSuccess'])->name('adminApiPayOrdersManualSuccess')->setParams(['real_name' => '支付订单手动补单']);
+            Route::post('/{payNo}/collect-service-fee', [PayOrderController::class, 'collectServiceFee'])->name('adminApiPayOrdersCollectServiceFee')->setParams(['real_name' => '支付订单补扣服务费']);
             Route::post('/{payNo}/freeze', [PayOrderController::class, 'freeze'])->name('adminApiPayOrdersFreeze')->setParams(['real_name' => '支付订单冻结']);
             Route::post('/{payNo}/unfreeze', [PayOrderController::class, 'unfreeze'])->name('adminApiPayOrdersUnfreeze')->setParams(['real_name' => '支付订单解冻']);
             Route::get('/{payNo}', [PayOrderController::class, 'show'])->name('adminApiPayOrdersShow')->setParams(['real_name' => '支付订单详情']);
@@ -286,6 +287,9 @@ Route::group('/adminapi', function () {
 
         Route::group('/refund-orders', function () {
             Route::get('', [RefundOrderController::class, 'index'])->name('adminApiRefundOrdersIndex')->setParams(['real_name' => '退款订单列表']);
+            Route::post('/{refundNo}/query', [RefundOrderController::class, 'query'])->name('adminApiRefundOrdersQuery')->setParams(['real_name' => '退款订单主动查询']);
+            Route::post('/{refundNo}/confirm-success', [RefundOrderController::class, 'confirmSuccess'])->name('adminApiRefundOrdersConfirmSuccess')->setParams(['real_name' => '退款人工确认成功']);
+            Route::post('/{refundNo}/cancel', [RefundOrderController::class, 'cancel'])->name('adminApiRefundOrdersCancel')->setParams(['real_name' => '取消未派发退款']);
             Route::get('/{refundNo}', [RefundOrderController::class, 'show'])->name('adminApiRefundOrdersShow')->setParams(['real_name' => '退款订单详情']);
             Route::post('/{refundNo}/retry', [RefundOrderController::class, 'retry'])->name('adminApiRefundOrdersRetry')->setParams(['real_name' => '退款重试']);
         });

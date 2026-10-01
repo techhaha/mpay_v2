@@ -16,6 +16,7 @@ use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use JsonException;
@@ -277,6 +278,7 @@ class HuifuApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             return [
                 'provider' => 'alipay',
                 'product' => self::PRODUCT_ALIPAY_JSAPI,
+                'channel_product' => self::PRODUCT_ALIPAY_JSAPI,
                 'auth_type' => $this->configText('alipay_mini_launch_path') !== '' ? 'alipay_mini' : 'alipay_oauth',
                 'identity_field' => 'buyer_id',
                 'app_id' => $this->configText('alipay_app_id'),
@@ -316,6 +318,7 @@ class HuifuApiPayment extends BasePayment implements PaymentInterface, PayPlugin
         return [
             'provider' => 'wxpay',
             'product' => $product,
+            'channel_product' => $product,
             'auth_type' => $mini ? 'mini_program' : 'wechat_oauth',
             'identity_field' => $identityField,
             'identity_aliases' => $mini ? [] : ['openid'],
@@ -340,9 +343,11 @@ class HuifuApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     public function pay(array $order): array
     {
         $payType = strtolower(trim((string) ($order['pay_type_code'] ?? '')));
-        $wxProduct = $this->isMiniIntent($this->paymentPayload($order))
+        $mini = $this->isMiniIntent($this->paymentPayload($order));
+        $wxProduct = $mini
             ? self::PRODUCT_WXPAY_MINI
             : self::PRODUCT_WXPAY_JSAPI;
+        $jsapiHandler = $mini ? 'mini' : 'jsapi';
 
         return $this->executeDirectPaymentProduct($order, [
             'auth_code' => [
@@ -354,7 +359,7 @@ class HuifuApiPayment extends BasePayment implements PaymentInterface, PayPlugin
                 ],
                 'handler' => fn (): array => $this->barcodePay($order, (string) ($this->paymentPayload($order)['auth_code'] ?? '')),
             ],
-            'jsapi' => [
+            $jsapiHandler => [
                 'products' => ['alipay' => self::PRODUCT_ALIPAY_JSAPI, 'wxpay' => $wxProduct],
                 'handler' => function () use ($order, $payType, $wxProduct): array {
                     return match ($payType) {
@@ -1197,6 +1202,11 @@ class HuifuApiPayment extends BasePayment implements PaymentInterface, PayPlugin
      */
     private function isMiniIntent(array $payment): bool
     {
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
+
         if ($this->firstText(
             $payment['mini_openid'] ?? '',
             $payment['mini_code'] ?? '',
@@ -1354,7 +1364,7 @@ class HuifuApiPayment extends BasePayment implements PaymentInterface, PayPlugin
     private function ensureProduct(string $product): void
     {
         if (!in_array($product, $this->enabledProducts(), true)) {
-            throw new PaymentException('当前汇付通道未开启该支付产品', 40200, ['product' => $product]);
+            throw new PaymentProductUnavailableException('当前汇付通道未开启该支付产品', 40200, ['product' => $product]);
         }
     }
 

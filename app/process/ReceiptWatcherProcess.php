@@ -31,20 +31,6 @@ class ReceiptWatcherProcess
     private array $running = [];
 
     /**
-     * 上次日志摘要。
-     *
-     * @var array<string, string>
-     */
-    private array $lastSummary = [];
-
-    /**
-     * 上次摘要日志时间。
-     *
-     * @var array<string, int>
-     */
-    private array $lastSummaryLoggedAt = [];
-
-    /**
      * 构造方法。
      *
      * @param array<string, mixed> $options 进程选项
@@ -166,29 +152,10 @@ class ReceiptWatcherProcess
     }
 
     /**
-     * 判断任务摘要中是否包含有效工作量。
-     *
-     * @param array<string, int> $summary 任务摘要
-     * @return bool 是否有实际工作量
-     */
-    private function hasWork(array $summary): bool
-    {
-        foreach ($summary as $key => $value) {
-            if (in_array((string) $key, ['due', 'locked', 'deduped'], true)) {
-                continue;
-            }
-            if ((int) $value > 0) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
      * 判断是否需要记录执行摘要。
      *
-     * 有实际工作量时立即记录；没有工作量时按摘要变化或固定间隔记录，方便排查空转原因。
+     * 账号缓存刷新、到期扫描、锁竞争和重复投递都是正常调度，不写文件日志。
+     * 只有同步到待支付订单、成功投递任务或清理失效任务时才记录摘要。
      *
      * @param string $key 任务键
      * @param array<string, int> $summary 任务摘要
@@ -196,18 +163,12 @@ class ReceiptWatcherProcess
      */
     private function shouldLogSummary(string $key, array $summary): bool
     {
-        $text = $this->summaryText($summary);
-        $now = time();
-        $changed = ($this->lastSummary[$key] ?? '') !== $text;
-        $elapsed = $now - (int) ($this->lastSummaryLoggedAt[$key] ?? 0);
-
-        if ($this->hasWork($summary) || $changed || $elapsed >= 60) {
-            $this->lastSummary[$key] = $text;
-            $this->lastSummaryLoggedAt[$key] = $now;
-            return true;
-        }
-
-        return false;
+        return match ($key) {
+            'sync_pending_orders' => (int) ($summary['orders'] ?? 0) > 0,
+            'dispatch_due_accounts', 'dispatch_due_prelogin_accounts' =>
+                (int) ($summary['queued'] ?? 0) > 0 || (int) ($summary['stale'] ?? 0) > 0,
+            default => false,
+        };
     }
 
     /**

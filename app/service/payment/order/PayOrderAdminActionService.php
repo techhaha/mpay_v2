@@ -4,6 +4,7 @@ namespace app\service\payment\order;
 
 use app\common\base\BaseService;
 use app\common\constant\TradeConstant;
+use app\common\constant\RouteConstant;
 use app\exception\BusinessStateException;
 use app\exception\ResourceNotFoundException;
 use app\exception\ValidationException;
@@ -13,6 +14,7 @@ use app\model\payment\RefundOrder;
 use app\repository\ops\log\PayOrderOperationLogRepository;
 use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
+use app\repository\payment\trade\RefundOrderRepository;
 use app\service\payment\runtime\MerchantNotifyDispatcherService;
 use app\service\payment\runtime\PaymentQueueService;
 use app\service\payment\runtime\PaymentRuntimeMaintenanceService;
@@ -35,9 +37,11 @@ class PayOrderAdminActionService extends BaseService
      * @param PaymentRuntimeMaintenanceService $runtimeMaintenanceService 支付运行维护服务
      * @param MerchantNotifyDispatcherService $merchantNotifyDispatcherService 商户通知派发服务
      * @param PayOrderLifecycleService $payOrderLifecycleService 支付单生命周期服务
+     * @param PayOrderFeeService $payOrderFeeService 自收服务费收取和待补扣处置
      * @param PayOrderRiskControlService $riskControlService 支付单风控服务
      * @param PayOrderActionResolverService $actionResolverService 支付单操作项服务
      * @param PayOrderOperationLogRepository $operationLogRepository 支付单后台操作日志仓库
+     * @param RefundOrderRepository $refundOrderRepository 当前支付单退款金额查询
      * @return void
      */
     public function __construct(
@@ -48,9 +52,11 @@ class PayOrderAdminActionService extends BaseService
         protected PaymentRuntimeMaintenanceService $runtimeMaintenanceService,
         protected MerchantNotifyDispatcherService $merchantNotifyDispatcherService,
         protected PayOrderLifecycleService $payOrderLifecycleService,
+        protected PayOrderFeeService $payOrderFeeService,
         protected PayOrderRiskControlService $riskControlService,
         protected PayOrderActionResolverService $actionResolverService,
-        protected PayOrderOperationLogRepository $operationLogRepository
+        protected PayOrderOperationLogRepository $operationLogRepository,
+        protected RefundOrderRepository $refundOrderRepository
     ) {
     }
 
@@ -63,7 +69,11 @@ class PayOrderAdminActionService extends BaseService
     public function actions(string $payNo): array
     {
         [$payOrder, $bizOrder] = $this->loadPayAndBizOrder($payNo);
-        $row = $this->actionResolverService->resolveForPayOrder($payOrder, $bizOrder);
+        $row = $this->actionResolverService->resolveForPayOrder(
+            $payOrder,
+            $bizOrder,
+            $this->refundOrderRepository->sumSuccessfulAmountByPayNo($payNo)
+        );
 
         return [
             'pay_no' => (string) $payOrder->pay_no,
@@ -78,7 +88,54 @@ class PayOrderAdminActionService extends BaseService
     }
 
     /**
-     * 重新创建并投递支付成功商户通知。
+     * 全额补扣已成功自收订单的待收服务费。
+     *
+     * pay_no 和必填原因已由管理员入口验证。事务内锁订单，按原金额和固定幂等键扣款，
+     * 同时保存费用状态、异常销项与审计日志；重复已扣请求不再移动资金或重复记操作。
+     * 余额仍不足及任何写入故障回滚本次事务，不改变原支付成功事实，不发送新的支付事件。
+     *
+     * @param array{reason:string} $input 经校验的管理员操作参数，不接受自定补扣金额
+     * @return array{pay_no:string,service_fee_status:int,service_fee_status_text:string,service_fee_amount:int}
+     * @throws \app\exception\BalanceInsufficientException 可用余额仍不足，保持原成功和待补扣状态
+     * @throws BusinessStateException 最新状态不允许补扣、订单风控冻结或账本不匹配
+     * @throws ResourceNotFoundException 原支付单不存在
+     */
+    public function collectServiceFee(string $payNo, array $input, int $adminId): array
+    {
+        return $this->transactionRetry(function () use ($payNo, $input, $adminId): array {
+            $payOrder = $this->payOrderRepository->findForUpdateByPayNo($payNo);
+            if (!$payOrder) {
+                throw new ResourceNotFoundException('支付单不存在', ['pay_no' => $payNo]);
+            }
+            $this->riskControlService->assertNotFrozen($payOrder, '补扣服务费');
+            if ((int) $payOrder->status !== TradeConstant::ORDER_STATUS_SUCCESS
+                || (int) $payOrder->channel_type !== RouteConstant::CHANNEL_MODE_SELF
+                || (int) $payOrder->service_fee_amount <= 0
+                || !in_array((int) $payOrder->service_fee_status, [
+                    TradeConstant::SERVICE_FEE_STATUS_DUE, TradeConstant::SERVICE_FEE_STATUS_DEDUCTED,
+                ], true)) {
+                throw new BusinessStateException('只有已成功自收订单的待补扣服务费可以补扣', ['pay_no' => $payNo]);
+            }
+            $result = [
+                'pay_no' => $payNo,
+                'service_fee_status' => TradeConstant::SERVICE_FEE_STATUS_DEDUCTED,
+                'service_fee_status_text' => TradeConstant::serviceFeeStatusMap()[TradeConstant::SERVICE_FEE_STATUS_DEDUCTED],
+                'service_fee_amount' => (int) $payOrder->service_fee_amount,
+            ];
+            if ((int) $payOrder->service_fee_status === TradeConstant::SERVICE_FEE_STATUS_DEDUCTED) {
+                return $result;
+            }
+            $this->payOrderFeeService->collectDueFeeInCurrentTransaction($payOrder, $adminId);
+            $payOrder->service_fee_status = TradeConstant::SERVICE_FEE_STATUS_DEDUCTED;
+            $payOrder->save();
+            $this->recordOperation($payOrder, 'collect_service_fee', $adminId, trim($input['reason']),
+                'success', '自收通道服务费已全额补扣', $result);
+            return $result;
+        });
+    }
+
+    /**
+     * 重新投递支付成功商户通知。
      *
      * @param string $payNo 支付单号
      * @param array<string, mixed> $input 操作参数
@@ -107,13 +164,22 @@ class PayOrderAdminActionService extends BaseService
             throw new ValidationException('订单未配置 notify_url，无法重新通知');
         }
 
+        $queued = $this->paymentQueueService->sendMerchantNotify((string) $task->notify_no);
         $result = [
             'pay_no' => (string) $payOrder->pay_no,
             'notify_no' => (string) $task->notify_no,
-            'queued' => $this->paymentQueueService->sendMerchantNotify((string) $task->notify_no),
+            'queued' => $queued,
             'status' => (int) $task->status,
         ];
-        $this->recordOperation($payOrder, 'renotify', $adminId, trim((string) ($input['reason'] ?? '')), 'success', '已创建商户通知任务', $result);
+        $this->recordOperation(
+            $payOrder,
+            'renotify',
+            $adminId,
+            trim((string) ($input['reason'] ?? '')),
+            'success',
+            $queued ? '商户通知任务已入队' : '商户通知任务已重置，等待定时补投',
+            $result
+        );
 
         return $result;
     }
@@ -262,7 +328,11 @@ class PayOrderAdminActionService extends BaseService
         $payOrder = $this->riskControlService->freeze($payNo, $input, $adminId);
         $bizOrder = $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
 
-        $result = $this->actionResolverService->resolveForPayOrder($payOrder, $bizOrder);
+        $result = $this->actionResolverService->resolveForPayOrder(
+            $payOrder,
+            $bizOrder,
+            $this->refundOrderRepository->sumSuccessfulAmountByPayNo($payNo)
+        );
         $this->recordOperation($payOrder, 'freeze', $adminId, trim((string) ($input['reason'] ?? '')), 'success', '订单已冻结', $result);
 
         return $result;
@@ -281,7 +351,11 @@ class PayOrderAdminActionService extends BaseService
         $payOrder = $this->riskControlService->unfreeze($payNo, $input, $adminId);
         $bizOrder = $this->bizOrderRepository->findByBizNo((string) $payOrder->biz_no);
 
-        $result = $this->actionResolverService->resolveForPayOrder($payOrder, $bizOrder);
+        $result = $this->actionResolverService->resolveForPayOrder(
+            $payOrder,
+            $bizOrder,
+            $this->refundOrderRepository->sumSuccessfulAmountByPayNo($payNo)
+        );
         $this->recordOperation($payOrder, 'unfreeze', $adminId, trim((string) ($input['reason'] ?? '')), 'success', '订单已解冻', $result);
 
         return $result;

@@ -14,6 +14,7 @@ use app\common\sdk\ltzf\LtzfSdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
@@ -92,7 +93,7 @@ class LtzfApiPayment extends BasePayment implements PaymentInterface, PayPluginI
                 ],
                 'handler' => fn (): array => $payType === 'wxpay'
                 ? $this->productPay($order, '/api/wxpay/jsapi_convenient')
-                : throw new PaymentException('蓝兔支付当前支付方式不支持JSAPI产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
+                : throw new PaymentProductUnavailableException('蓝兔支付当前支付方式不支持JSAPI产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
             ],
             'h5' => [
                 'products' => [

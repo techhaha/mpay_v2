@@ -61,17 +61,18 @@ class RefundDispatchService extends BaseService
     {
         $refundOrder = $this->resolveRefundOrder($refund);
         $refundNo = (string) $refundOrder->refund_no;
-        $claim = $this->refundLifecycleService->claimRefundDispatch($refundNo, $isRetry);
-        $refundOrder = $claim['refund_order'];
-        if (!$claim['claimed']) {
-            return $refundOrder;
-        }
-
+        $claimed = false;
         $requestStarted = false;
         try {
             $payOrder = $this->requirePayOrder($refundOrder);
             $this->payOrderRiskControlService->assertNotFrozen($payOrder, '退款派发');
             $plugin = $this->paymentPluginManager->createByPayOrder($payOrder, true);
+            $claim = $this->refundLifecycleService->claimRefundDispatch($refundNo, $isRetry, $plugin instanceof RefundQueryInterface);
+            $refundOrder = $claim['refund_order'];
+            if (!$claim['claimed']) {
+                return $refundOrder;
+            }
+            $claimed = true;
             $payload = $this->buildPluginRefundPayload(
                 $payOrder,
                 $refundOrder,
@@ -90,39 +91,30 @@ class RefundDispatchService extends BaseService
             }
 
             return $this->refundLifecycleService->recordRefundProgress($refundNo, $channelRefundNo);
-        } catch (UnsupportedPaymentOperationException $e) {
-            $latest = $this->releaseClaim($refundNo, $isRetry, $e->getMessage());
-            if ($throwOnFailure) {
-                throw $e;
-            }
-
-            return $latest;
-        } catch (PaymentDefinitiveException $e) {
-            $latest = $this->refundLifecycleService->markRefundFailed($refundNo, [
-                'failed_at' => $this->now(),
-                'last_error' => $e->getMessage(),
-            ]);
-            if ($throwOnFailure) {
-                throw $e;
-            }
-
-            return $latest;
         } catch (Throwable $e) {
-            Log::warning(sprintf(
-                '[RefundDispatch] 退款请求结果未确认 refund_no=%s exception=%s error=%s',
-                $refundNo,
-                $e::class,
-                $e->getMessage()
-            ));
-
-            $latest = $requestStarted
-                ? $this->resolveRefundOrder($refundNo)
-                : $this->releaseClaim($refundNo, $isRetry, $e->getMessage());
+            if (!$claimed) {
+                $latest = $this->refundLifecycleService->recordRefundDispatchError($refundNo, $e->getMessage(), $isRetry);
+            } elseif ($e instanceof UnsupportedPaymentOperationException || !$requestStarted) {
+                $latest = $this->releaseClaim($refundNo, $isRetry, $e->getMessage());
+            } elseif ($e instanceof PaymentDefinitiveException) {
+                $latest = $this->refundLifecycleService->markRefundFailed($refundNo, [
+                    'failed_at' => $this->now(),
+                    'last_error' => $e->getMessage(),
+                ]);
+            } else {
+                // 上游可能已受理，只保留处理中事实；查询任务已在取得派发权时提交。
+                Log::warning(sprintf(
+                    '[RefundDispatch] 退款请求结果未确认 refund_no=%s exception=%s error=%s',
+                    $refundNo, $e::class, $e->getMessage()
+                ));
+                $latest = $this->refundLifecycleService->recordRefundQueryAttempt($refundNo, 'error', $e->getMessage());
+            }
             if ($throwOnFailure) {
                 if ($e instanceof PaymentException) {
                     throw $e;
                 }
-                throw new PaymentUncertainException('退款请求结果不确定', 40200, [
+                $exception = $requestStarted ? PaymentUncertainException::class : PaymentException::class;
+                throw new $exception($requestStarted ? '退款请求结果不确定' : '退款发起失败', 40200, [
                     'refund_no' => $refundNo,
                     'exception_class' => $e::class,
                 ]);
@@ -152,43 +144,31 @@ class RefundDispatchService extends BaseService
             $payOrder = $this->requirePayOrder($refundOrder);
             $plugin = $this->paymentPluginManager->createByPayOrder($payOrder, true);
             if (!$plugin instanceof RefundQueryInterface) {
-                return $this->refundLifecycleService->recordRefundQueryAttempt(
-                    (string) $refundOrder->refund_no,
-                    'unsupported',
-                    '当前插件不支持退款主动查询',
-                    900
-                );
+                throw new UnsupportedPaymentOperationException('当前插件不支持退款主动查询', 40200);
             }
 
             $result = $plugin->queryRefund($this->buildPluginRefundPayload($payOrder, $refundOrder, false));
             $result = $this->validateRefundResult($refundOrder, $payOrder, $result, 'refund_status_result');
-            $refundOrder = $this->refundLifecycleService->recordRefundProgress(
-                (string) $refundOrder->refund_no,
-                (string) ($result['chan_refund_no'] ?? '')
-            );
+            $refundNo = (string) $refundOrder->refund_no;
+            $channelRefundNo = (string) ($result['chan_refund_no'] ?? '');
+            // 终态与引用同事务接纳，不能先提交进度号再做可能回滚的资金冲正。
+            if ((string) $result['status'] === PaymentPluginStatusConstant::SUCCESS) {
+                return $this->refundLifecycleService->markRefundSuccess($refundNo, ['channel_refund_no' => $channelRefundNo]);
+            }
+            if ((string) $result['status'] === PaymentPluginStatusConstant::FAILED) {
+                return $this->refundLifecycleService->markRefundFailed($refundNo, [
+                    'channel_refund_no' => $channelRefundNo,
+                    'last_error' => (string) ($result['message'] ?? '渠道退款失败'),
+                ]);
+            }
 
-            return match ((string) $result['status']) {
-                PaymentPluginStatusConstant::SUCCESS => $this->refundLifecycleService->markRefundSuccess(
-                    (string) $refundOrder->refund_no,
-                    ['channel_refund_no' => (string) ($result['chan_refund_no'] ?? '')]
-                ),
-                PaymentPluginStatusConstant::FAILED => $this->refundLifecycleService->markRefundFailed(
-                    (string) $refundOrder->refund_no,
-                    ['last_error' => (string) ($result['message'] ?? '渠道退款失败')]
-                ),
-                default => $this->refundLifecycleService->recordRefundQueryAttempt(
-                    (string) $refundOrder->refund_no,
-                    'pending',
-                    '',
-                    120
-                ),
-            };
+            $this->refundLifecycleService->recordRefundProgress($refundNo, $channelRefundNo);
+            return $this->refundLifecycleService->recordRefundQueryAttempt($refundNo, 'pending', (string) ($result['message'] ?? ''));
         } catch (Throwable $e) {
             $this->refundLifecycleService->recordRefundQueryAttempt(
                 (string) $refundOrder->refund_no,
                 'error',
-                $e->getMessage(),
-                300
+                $e->getMessage()
             );
             throw $e;
         }

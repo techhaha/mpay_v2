@@ -10,6 +10,7 @@ use app\common\constant\PaymentPluginTypeConstant;
 use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
+use app\common\interface\RefundQueryInterface;
 use app\common\sdk\suixingpay\SuixingpayClient;
 use app\common\sdk\suixingpay\SuixingpaySdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
@@ -32,7 +33,8 @@ use Throwable;
 class SuixingpayApiPayment extends BasePayment implements
     PaymentInterface,
     PayPluginInterface,
-    PaymentIdentityRequirementInterface
+    PaymentIdentityRequirementInterface,
+    RefundQueryInterface
 {
     use DirectPaymentProductSelectorTrait;
 
@@ -233,11 +235,16 @@ class SuixingpayApiPayment extends BasePayment implements
      */
     public function identityRequirement(array $order): ?array
     {
-        if ($this->selectedHandler($this->selectionOrder($order)) !== 'jsapi') {
+        $order = $this->selectionOrder($order);
+        $payment = $this->paymentPayload($order);
+        $selectedHandler = $this->selectedHandler($order);
+        if ($selectedHandler === 'mini' && trim((string) ($payment['applet_source'] ?? '')) !== '') {
+            return null;
+        }
+        if (!in_array($selectedHandler, ['jsapi', 'mini'], true)) {
             return null;
         }
 
-        $payment = $this->paymentPayload($order);
         $payType = trim((string) ($order['pay_type_code'] ?? ''));
         if ($payType === 'alipay') {
             if ($this->firstText($payment['buyer_id'] ?? '') !== '') {
@@ -251,6 +258,7 @@ class SuixingpayApiPayment extends BasePayment implements
             return [
                 'provider' => 'alipay',
                 'product' => self::PRODUCT_ALIPAY_JSAPI,
+                'channel_product' => self::PRODUCT_ALIPAY_JSAPI,
                 'auth_type' => $this->isAlipayMiniIntent($payment) ? 'alipay_mini' : 'alipay_oauth',
                 'identity_field' => 'buyer_id',
                 'app_id' => $appId,
@@ -290,6 +298,7 @@ class SuixingpayApiPayment extends BasePayment implements
         return [
             'provider' => 'wxpay',
             'product' => $mini ? self::PRODUCT_WXPAY_MINI : self::PRODUCT_WXPAY_MP,
+            'channel_product' => $mini ? self::PRODUCT_WXPAY_MINI : self::PRODUCT_WXPAY_MP,
             'auth_type' => $mini ? 'mini_program' : 'wechat_oauth',
             'identity_field' => $mini ? 'mini_openid' : 'sub_openid',
             'identity_aliases' => $mini ? [] : ['openid'],
@@ -449,12 +458,9 @@ class SuixingpayApiPayment extends BasePayment implements
      */
     public function refund(array $order): array
     {
-        $payNo = $this->requiredText($order['pay_no'] ?? '', '随行付退款缺少原支付单号');
-        $refundNo = $this->requiredText($order['refund_no'] ?? '', '随行付退款缺少退款单号');
-        $refundAmount = (int) ($order['refund_amount'] ?? 0);
-        if ($refundAmount <= 0) {
-            throw new PaymentDefinitiveException('随行付退款金额必须为正整数分', 40200);
-        }
+        $payNo = (string) $order['pay_no'];
+        $refundNo = (string) $order['refund_no'];
+        $refundAmount = (int) $order['refund_amount'];
         $payload = [
             'mno' => $this->configText('suixingpay_merchant_no'),
             'ordNo' => $refundNo,
@@ -466,53 +472,57 @@ class SuixingpayApiPayment extends BasePayment implements
             $payload['refundReason'] = mb_strcut($refundReason, 0, 80, 'UTF-8');
         }
 
+        $requestError = '';
         try {
             $data = $this->client()->submit(SuixingpayClient::PATH_REFUND, $payload);
-            if ((string) ($data['bizCode'] ?? '0000') !== '0000') {
-                $data = $this->refundQueryForReconciliation($refundNo) ?? $data;
-            }
         } catch (SuixingpaySdkException $e) {
-            $data = $this->refundQueryForReconciliation($refundNo);
-            if ($data === null) {
-                throw new PaymentUncertainException('随行付退款失败：' . $e->getMessage(), 40200, ['refund_no' => $refundNo]);
+            $requestError = $e->getMessage();
+            $data = [];
+        }
+
+        if (($data['bizCode'] ?? '') !== '0000' || !in_array($data['tranSts'] ?? '', ['REFUNDSUC', 'REFUNDFAIL'], true)) {
+            // 原请求可能已受理，只查同一退款单一次；查询响应不交给申请响应的字段规则。
+            try {
+                $result = $this->queryRefund($order);
+            } catch (PaymentException $e) {
+                if ($requestError === '') {
+                    throw $e;
+                }
+                throw new PaymentUncertainException('随行付退款请求未确认：' . $requestError . '；查询未确认：' . $e->getMessage(), 40200,
+                    array_replace($e->getData(), ['refund_no' => $refundNo]));
             }
+        } else {
+            $result = $this->parseRefundResult($order, $data, false);
         }
 
-        if ($this->refundStatus((string) ($data['tranSts'] ?? $data['refundStatus'] ?? '')) === PaymentPluginStatusConstant::PENDING) {
-            $data = $this->refundQueryForReconciliation($refundNo) ?? $data;
+        if ($result['status'] === PaymentPluginStatusConstant::FAILED) {
+            throw new PaymentDefinitiveException($result['message'], 40200, ['refund_no' => $refundNo]);
         }
 
-        $this->assertBusinessSuccess($data, '退款');
-        $this->assertResponseOrder($data, $refundNo, '退款', ['ordNo']);
-        $this->assertResponseMerchant($data, '退款');
-        $this->assertResponseOrder($data, $payNo, '退款原交易', ['origOrderNo', 'origOrdNo']);
-        $responseAmount = array_key_exists('amt', $data) ? $data['amt'] : ($data['refundAmount'] ?? null);
-        if ($responseAmount !== null) {
-            $this->assertAmountMatches($responseAmount, $refundAmount, '随行付退款');
-        }
-        $status = $this->refundStatus((string) ($data['tranSts'] ?? $data['refundStatus'] ?? ''));
-        if ($status === PaymentPluginStatusConstant::FAILED) {
-            throw new PaymentDefinitiveException(
-                (string) ($data['bizMsg'] ?? '随行付退款失败'),
-                40200,
-                ['refund_no' => $refundNo]
-            );
+        return $result;
+    }
+
+    /**
+     * 查询随行付退款状态并核对本次退款的金额与标识。
+     *
+     * 本方法只读上游，不重发退款；failed 是可信查询终态，unknown 不推断失败。
+     */
+    public function queryRefund(array $refund): array
+    {
+        $refundNo = (string) $refund['refund_no'];
+
+        try {
+            $data = $this->client()->submit(SuixingpayClient::PATH_REFUND_QUERY, [
+                'mno' => $this->configText('suixingpay_merchant_no'),
+                'ordNo' => $refundNo,
+            ]);
+        } catch (SuixingpaySdkException $e) {
+            throw new PaymentUncertainException('随行付退款查询失败：' . $e->getMessage(), 40200, [
+                'refund_no' => $refundNo,
+            ]);
         }
 
-        return [
-            'status' => $status,
-            'refund_no' => $refundNo,
-            'pay_no' => $payNo,
-            'refund_amount' => $refundAmount,
-            'message' => (string) ($data['bizMsg'] ?? match ($status) {
-                PaymentPluginStatusConstant::SUCCESS => '退款成功',
-                PaymentPluginStatusConstant::FAILED => '退款失败',
-                default => '退款处理中',
-            }),
-            'chan_refund_no' => $this->firstText($data['uuid'] ?? '', $data['ordNo'] ?? '', $refundNo),
-            'channel_status' => strtoupper((string) ($data['tranSts'] ?? $data['refundStatus'] ?? '')),
-            'request_id' => $this->client()->lastRequestId(),
-        ];
+        return $this->parseRefundResult($refund, $data, true);
     }
 
     /**
@@ -618,11 +628,30 @@ class SuixingpayApiPayment extends BasePayment implements
     {
         $payType = trim((string) ($order['pay_type_code'] ?? ''));
         $payment = $this->paymentPayload($order);
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        $appletSource = trim((string) ($payment['applet_source'] ?? ''));
         $wxJsapiProduct = $this->isMiniIntent($payment) ? self::PRODUCT_WXPAY_MINI : self::PRODUCT_WXPAY_MP;
         $appletProduct = $this->appletProduct($payment);
+        $jsapiHandler = ($payType === 'wxpay' && $wxJsapiProduct === self::PRODUCT_WXPAY_MINI)
+            || ($payType === 'alipay' && $method === 'mini')
+            ? 'mini'
+            : 'jsapi';
+
+        if ($payType === 'wxpay' && $method === 'mini' && in_array($appletSource, ['00', '01'], true)) {
+            return [
+                'mini' => [
+                    'products' => ['wxpay' => $appletProduct],
+                    'handler' => fn (): array => $this->appletPay($order, $appletProduct),
+                ],
+                'qrcode' => [
+                    'products' => ['wxpay' => self::PRODUCT_WXPAY_SCAN],
+                    'handler' => fn (): array => $this->scanPayByType($order, $payType),
+                ],
+            ];
+        }
 
         return [
-            'jsapi' => [
+            $jsapiHandler => [
                 'products' => [
                     'alipay' => self::PRODUCT_ALIPAY_JSAPI,
                     'wxpay' => $wxJsapiProduct,
@@ -642,10 +671,6 @@ class SuixingpayApiPayment extends BasePayment implements
                     'alipay' => self::PRODUCT_ALIPAY_SCAN,
                 ],
                 'handler' => fn (): array => $this->scanPayByType($order, $payType),
-            ],
-            'page' => [
-                'products' => ['wxpay' => $appletProduct],
-                'handler' => fn (): array => $this->appletPay($order, $appletProduct),
             ],
         ];
     }
@@ -824,7 +849,7 @@ class SuixingpayApiPayment extends BasePayment implements
     /**
      * 发起随行付托管小程序支付。
      *
-     * 该处理器只接受显式 page/applet 意图，返回的 appId/path 或插件 key 必须由微信小程序容器消费。
+     * 该处理器只接受 `method=mini + applet_source`，返回的 appId/path 或插件 key 必须由微信小程序容器消费。
      *
      * @param array<string, mixed> $order 标准插件下单参数
      * @param string $product 托管小程序插件或半屏收银台产品代码
@@ -931,6 +956,11 @@ class SuixingpayApiPayment extends BasePayment implements
      */
     private function isMiniIntent(array $payment): bool
     {
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
+
         return $this->firstText($payment['mini_openid'] ?? '', $payment['mini_app_id'] ?? '') !== ''
             || in_array($payment['is_mini'] ?? false, [true, 1, '1', 'true', 'on'], true)
             || strtolower(trim((string) ($payment['wechat_scope'] ?? ''))) === 'mini';
@@ -943,6 +973,11 @@ class SuixingpayApiPayment extends BasePayment implements
      */
     private function isAlipayMiniIntent(array $payment): bool
     {
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
+
         return in_array($payment['is_mini'] ?? false, [true, 1, '1', 'true', 'on'], true)
             || strtolower(trim((string) ($payment['alipay_scope'] ?? ''))) === 'mini';
     }
@@ -962,8 +997,7 @@ class SuixingpayApiPayment extends BasePayment implements
     /**
      * 将协议层支付意图归一化为产品选择器可识别的订单上下文。
      *
-     * mapi 的 method=applet 映射为托管小程序页面；带明确小程序身份的微信移动端映射为直接小程序 JSAPI，
-     * 未携带小程序标记的普通移动端仍由公共候选规则选择扫码产品。
+     * `method=mini + applet_source` 选择托管小程序；普通 mini 意图选择直接小程序 JSAPI。
      *
      * @param array<string, mixed> $order 标准插件下单参数
      *
@@ -973,17 +1007,14 @@ class SuixingpayApiPayment extends BasePayment implements
     {
         $payment = $this->paymentPayload($order);
         $method = strtolower(trim((string) ($payment['method'] ?? '')));
-        if ($method === 'applet') {
-            $payment['method'] = 'page';
-        }
-        $env = strtolower(trim((string) ($order['_env'] ?? '')));
+        $hostedApplet = $method === 'mini'
+            && in_array(trim((string) ($payment['applet_source'] ?? '')), ['00', '01'], true);
         if ((string) ($order['pay_type_code'] ?? '') === 'wxpay'
+            && !$hostedApplet
             && $this->isMiniIntent($payment)
-            && in_array($env, ['mobile', 'qq'], true)
-            && in_array(strtolower(trim((string) ($payment['method'] ?? ''))), ['', 'jsapi'], true)
+            && $method === ''
         ) {
-            $order['_env'] = 'wechat';
-            $payment['method'] = 'jsapi';
+            $payment['method'] = 'mini';
         }
         $extra = (array) ($order['extra'] ?? []);
         $extra['payment'] = $payment;
@@ -1155,15 +1186,6 @@ class SuixingpayApiPayment extends BasePayment implements
         };
     }
 
-    private function refundStatus(string $status): string
-    {
-        return match (strtoupper(trim($status))) {
-            'REFUNDSUC', 'SUCCESS' => PaymentPluginStatusConstant::SUCCESS,
-            'REFUNDFAIL', 'FAIL', 'FAILED' => PaymentPluginStatusConstant::FAILED,
-            default => PaymentPluginStatusConstant::PENDING,
-        };
-    }
-
     /**
      * 查询支付对账状态。
      *
@@ -1183,22 +1205,75 @@ class SuixingpayApiPayment extends BasePayment implements
     }
 
     /**
-     * 查询退款对账状态。
+     * 按申请或查询的固定字段解析已验签退款响应。
      *
-     * @param string $refundNo 本地退款单号
+     * 申请的 amt/origOrderNo 与查询的 refundAmount/origOrdNo 是不同接口字段，不互相兜底。
+     * 申请成功必须有原交易、金额和 uuid；查询始终要求退款请求号、uuid、金额和原金额。
      *
-     * @return array<string, mixed>|null 渠道退款查询响应，查询失败时返回 null
+     * @param array<string, mixed> $refund 标准插件退款参数，金额单位分
+     * @param array<string, mixed> $data SDK 已验签并关联请求号的业务响应
+     * @param bool $isQuery 是否为退款查询响应
+     * @return array<string, mixed> 可信标准结果；未知状态不推断终态
+     * @throws PaymentUncertainException 响应缺少必需事实或与原退款不一致
      */
-    private function refundQueryForReconciliation(string $refundNo): ?array
+    private function parseRefundResult(array $refund, array $data, bool $isQuery): array
     {
+        $refundNo = (string) $refund['refund_no'];
+        $payNo = (string) $refund['pay_no'];
+        $refundAmount = (int) $refund['refund_amount'];
+        $channelStatus = (string) ($data['tranSts'] ?? '');
+        $status = match ($channelStatus) {
+            'REFUNDSUC' => PaymentPluginStatusConstant::SUCCESS,
+            'REFUNDFAIL' => PaymentPluginStatusConstant::FAILED,
+            'REFUNDING' => PaymentPluginStatusConstant::PENDING,
+            default => PaymentPluginStatusConstant::UNKNOWN,
+        };
+
         try {
-            return $this->client()->submit(SuixingpayClient::PATH_REFUND_QUERY, [
-                'mno' => $this->configText('suixingpay_merchant_no'),
-                'ordNo' => $refundNo,
-            ]);
-        } catch (SuixingpaySdkException) {
-            return null;
+            $this->assertBusinessSuccess($data, $isQuery ? '退款查询' : '退款');
+            $this->assertResponseMerchant($data, '退款');
+            $responseRefundNo = (string) ($data['ordNo'] ?? '');
+            if (($isQuery || $responseRefundNo !== '') && !hash_equals($refundNo, $responseRefundNo)) {
+                throw new PaymentException('随行付退款响应缺少或返回错误退款单号', 40200);
+            }
+            $originalField = $isQuery ? 'origOrdNo' : 'origOrderNo';
+            if ((!$isQuery && $status === PaymentPluginStatusConstant::SUCCESS) || (string) ($data[$originalField] ?? '') !== '') {
+                if (!hash_equals($payNo, (string) ($data[$originalField] ?? ''))) {
+                    throw new PaymentException('随行付退款响应原交易标识缺失或不匹配', 40200);
+                }
+            }
+            $amountField = $isQuery ? 'refundAmount' : 'amt';
+            if ($isQuery || $status === PaymentPluginStatusConstant::SUCCESS || array_key_exists($amountField, $data)) {
+                $this->assertAmountMatches($data[$amountField] ?? null, $refundAmount, '随行付退款');
+            }
+            if ($isQuery) {
+                $this->assertAmountMatches($data['totalAmount'] ?? null, (int) $refund['amount'], '随行付退款原订单');
+            }
+            $channelRefundNo = (string) ($data['uuid'] ?? '');
+            if (($isQuery || $status === PaymentPluginStatusConstant::SUCCESS) && $channelRefundNo === '') {
+                throw new PaymentException('随行付退款响应缺少 uuid', 40200);
+            }
+            $storedRefundNo = (string) $refund['chan_refund_no'];
+            if ($storedRefundNo !== '' && $channelRefundNo !== '' && !hash_equals($storedRefundNo, $channelRefundNo)) {
+                throw new PaymentException('随行付退款响应渠道号与原退款不匹配', 40200);
+            }
+        } catch (PaymentException $e) {
+            throw new PaymentUncertainException($e->getMessage(), 40200,
+                array_replace($e->getData(), ['refund_no' => $refundNo]));
         }
+
+        // 查询成功的 bizMsg 不是退款失败原因，查询失败原因只取官方 tradeMsg。
+        $failureReason = (string) ($data[$isQuery ? 'tradeMsg' : 'bizMsg'] ?? '');
+        return [
+            'status' => $status, 'refund_no' => $refundNo, 'pay_no' => $payNo, 'refund_amount' => $refundAmount,
+            'chan_refund_no' => $channelRefundNo, 'channel_status' => $channelStatus,
+            'message' => match ($status) {
+                PaymentPluginStatusConstant::SUCCESS => '随行付退款成功',
+                PaymentPluginStatusConstant::FAILED => '随行付退款失败' . ($failureReason !== '' ? '：' . $failureReason : ''),
+                PaymentPluginStatusConstant::PENDING => '随行付退款处理中',
+                default => '随行付退款状态尚未确认',
+            },
+        ];
     }
 
     /**

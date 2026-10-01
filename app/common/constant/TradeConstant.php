@@ -71,6 +71,11 @@ final class TradeConstant
     public const SERVICE_FEE_STATUS_RELEASED = 3;
 
     /**
+     * 支付已成功，但已释放的自收服务费因余额不足尚未补扣；等待管理员全额补扣。
+     */
+    public const SERVICE_FEE_STATUS_DUE = 4;
+
+    /**
      * 清算状态为空。
      */
     public const SETTLEMENT_STATUS_NONE = 0;
@@ -166,6 +171,7 @@ final class TradeConstant
             self::SERVICE_FEE_STATUS_FROZEN => '冻结',
             self::SERVICE_FEE_STATUS_DEDUCTED => '已扣',
             self::SERVICE_FEE_STATUS_RELEASED => '已释放',
+            self::SERVICE_FEE_STATUS_DUE => '待补扣',
         ];
     }
 

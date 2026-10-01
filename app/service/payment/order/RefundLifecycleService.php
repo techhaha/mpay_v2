@@ -9,6 +9,7 @@ use app\common\constant\RouteConstant;
 use app\common\constant\TradeConstant;
 use app\exception\BusinessStateException;
 use app\exception\ResourceNotFoundException;
+use app\exception\UnauthorizedException;
 use app\model\payment\RefundOrder;
 use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
@@ -23,7 +24,7 @@ use Webman\Event\Event;
 /**
  * 退款单生命周期服务。
  *
- * 负责退款单创建、处理中、成功、失败和重试等状态推进。
+ * 负责退款单处理中、成功、失败、取消及重试等状态推进。
  *
  * @property PayOrderRepository $payOrderRepository 支付单仓库
  * @property BizOrderRepository $bizOrderRepository 业务订单仓库
@@ -92,11 +93,12 @@ class RefundLifecycleService extends BaseService
      *
      * @param string $refundNo 退款单号
      * @param bool $isRetry 是否为失败单重试
+     * @param bool $supportsRefundQuery 原插件是否支持退款主动查询
      * @return array{refund_order: RefundOrder, claimed: bool}
      */
-    public function claimRefundDispatch(string $refundNo, bool $isRetry = false): array
+    public function claimRefundDispatch(string $refundNo, bool $isRetry = false, bool $supportsRefundQuery = false): array
     {
-        return $this->transactionRetry(function () use ($refundNo, $isRetry): array {
+        return $this->transactionRetry(function () use ($refundNo, $isRetry, $supportsRefundQuery): array {
             $refundOrder = $this->refundOrderRepository->findForUpdateByRefundNo($refundNo);
             if (!$refundOrder) {
                 throw new ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
@@ -115,7 +117,44 @@ class RefundLifecycleService extends BaseService
                 $isRetry
             );
 
+            // 在请求上游前提交查询责任；任务写入失败必须与派发权一起回滚。
+            if ($supportsRefundQuery) {
+                $this->recoveryTaskService->scheduleInCurrentTransaction(
+                    PaymentRecoveryTaskConstant::TYPE_REFUND_ACTIVE_QUERY,
+                    $refundNo,
+                    60,
+                    0,
+                    0,
+                    $isRetry
+                );
+            }
+
             return ['refund_order' => $refundOrder, 'claimed' => true];
+        });
+    }
+
+    /**
+     * 记录取得派发权之前的失败，不改写其他调用者正在处理或已经结束的退款。
+     *
+     * @param string $refundNo 退款单号
+     * @param string $reason 前置失败原因
+     * @param bool $isRetry 是否重试失败单
+     * @return RefundOrder 最新退款单
+     */
+    public function recordRefundDispatchError(string $refundNo, string $reason, bool $isRetry = false): RefundOrder
+    {
+        return $this->transactionRetry(function () use ($refundNo, $reason, $isRetry): RefundOrder {
+            $refundOrder = $this->refundOrderRepository->findForUpdateByRefundNo($refundNo);
+            if (!$refundOrder) {
+                throw new ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
+            }
+            $expected = $isRetry ? TradeConstant::REFUND_STATUS_FAILED : TradeConstant::REFUND_STATUS_CREATED;
+            if ((int) $refundOrder->status === $expected) {
+                $refundOrder->last_error = mb_strcut($reason, 0, 255, 'UTF-8');
+                $refundOrder->save();
+            }
+
+            return $refundOrder->refresh();
         });
     }
 
@@ -147,7 +186,7 @@ class RefundLifecycleService extends BaseService
             }
             $refundOrder->status = $restoreStatus;
             $refundOrder->processing_at = null;
-            $refundOrder->last_error = $reason;
+            $refundOrder->last_error = mb_strcut($reason, 0, 255, 'UTF-8');
             $refundOrder->save();
             $this->recoveryTaskService->completeInCurrentTransaction(
                 PaymentRecoveryTaskConstant::TYPE_REFUND_ACTIVE_QUERY,
@@ -161,9 +200,12 @@ class RefundLifecycleService extends BaseService
     /**
      * 保存退款处理过程中取得的渠道退款号。
      *
+     * 在事务内锁定最新退款单，空值不擦除引用，非空冲突不因订单已成功而忽略。
+     *
      * @param string $refundNo 退款单号
      * @param string $channelRefundNo 渠道退款号
      * @return RefundOrder 最新退款单
+     * @throws BusinessStateException 非空渠道退款号与已存引用不一致
      */
     public function recordRefundProgress(string $refundNo, string $channelRefundNo = ''): RefundOrder
     {
@@ -172,8 +214,8 @@ class RefundLifecycleService extends BaseService
             if (!$refundOrder) {
                 throw new ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
             }
-            if ((string) $refundOrder->channel_refund_no === '' && $channelRefundNo !== '') {
-                $refundOrder->channel_refund_no = $channelRefundNo;
+            $this->applyChannelRefundReference($refundOrder, $channelRefundNo);
+            if ($refundOrder->isDirty()) {
                 $refundOrder->save();
             }
 
@@ -228,7 +270,12 @@ class RefundLifecycleService extends BaseService
         if (empty($refundOrder->request_at)) {
             $refundOrder->request_at = $input['request_at'] ?? $refundOrder->processing_at;
         }
-        $refundOrder->last_error = (string) ($input['last_error'] ?? $refundOrder->last_error ?? '');
+        $refundOrder->last_error = mb_strcut(
+            (string) ($input['last_error'] ?? $refundOrder->last_error ?? ''),
+            0,
+            255,
+            'UTF-8'
+        );
         if ($isRetry) {
             // 重试时生成新的渠道请求号，避免和上一轮失败请求混在一起。
             $refundOrder->retry_count = (int) $refundOrder->retry_count + 1;
@@ -243,15 +290,6 @@ class RefundLifecycleService extends BaseService
         }
         $refundOrder->ext_json = array_merge($extJson, $input['ext_json'] ?? []);
         $refundOrder->save();
-        $this->recoveryTaskService->scheduleInCurrentTransaction(
-            PaymentRecoveryTaskConstant::TYPE_REFUND_ACTIVE_QUERY,
-            $refundNo,
-            60,
-            0,
-            0,
-            $isRetry
-        );
-
         return $refundOrder->refresh();
     }
 
@@ -259,6 +297,8 @@ class RefundLifecycleService extends BaseService
      * 退款成功。
      *
      * 成功后会推进退款单状态，并在平台代收场景下做余额冲减或结算逆向处理。
+     * 渠道引用与状态、资金同事务接纳；重复成功只补缺失退款号，不重复冲正、累计或发事件。
+     * 异常重复支付返还不累计正常业务退款，但仍发布退款成功事件供通道统计使用。
      *
      * @param string $refundNo 退款单号
      * @param array $input 输入参数
@@ -280,6 +320,124 @@ class RefundLifecycleService extends BaseService
     }
 
     /**
+     * 凭外部退款证据人工确认原退款单成功。
+     *
+     * 只接纳处理中的通道退款；资金冲正和操作证据在同一事务提交，成功事件在提交后发送。
+     *
+     * @param string $refundNo 原退款单号
+     * @param array{confirmed_amount:int,channel_refund_no:string,evidence:string,reason:string} $input 已核实金额（分）和渠道证据
+     * @param int $adminId 当前管理员ID
+     * @return RefundOrder 已确认的原退款单
+     * @throws UnauthorizedException 管理员身份缺失时抛出
+     * @throws ResourceNotFoundException 原退款单不存在时抛出
+     * @throws BusinessStateException 退款状态、来源或金额不符合人工确认条件时抛出
+     */
+    public function confirmRefundSuccessByAdmin(string $refundNo, array $input, int $adminId): RefundOrder
+    {
+        if ($adminId <= 0) {
+            throw new UnauthorizedException('管理员未授权');
+        }
+
+        $shouldDispatchEvent = false;
+        $refundOrder = $this->transactionRetry(function () use ($refundNo, $input, $adminId, &$shouldDispatchEvent): RefundOrder {
+            $refundOrder = $this->refundOrderRepository->findForUpdateByRefundNo($refundNo);
+            if (!$refundOrder) {
+                throw new ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
+            }
+            if ((int) $refundOrder->status !== TradeConstant::REFUND_STATUS_PROCESSING
+                || ($refundOrder->ext_json['admin_action']['type'] ?? '') === 'manual_refund') {
+                throw new BusinessStateException('只有处理中的通道退款可人工确认成功', ['refund_no' => $refundNo]);
+            }
+            $confirmedAmount = (int) $input['confirmed_amount'];
+            if ((int) $refundOrder->refund_amount !== $confirmedAmount) {
+                throw new BusinessStateException('核实金额与原退款单金额不一致', ['refund_no' => $refundNo]);
+            }
+
+            $refundOrder = $this->markRefundSuccessInCurrentTransaction(
+                $refundNo,
+                ['channel_refund_no' => $input['channel_refund_no']],
+                $shouldDispatchEvent
+            );
+            $this->operationLogRepository->create([
+                'pay_no' => (string) $refundOrder->pay_no,
+                'biz_no' => (string) $refundOrder->biz_no,
+                'action' => 'refund_manual_confirm',
+                'admin_id' => $adminId,
+                'reason' => $input['reason'],
+                'result_status' => 'success',
+                'result_message' => '原退款单已凭外部证据人工确认成功',
+                'result_payload' => [
+                    'refund_no' => $refundNo,
+                    'confirmed_amount' => $confirmedAmount,
+                    'channel_refund_no' => $input['channel_refund_no'],
+                    'evidence' => $input['evidence'],
+                ],
+                'created_at' => $this->now(),
+            ]);
+
+            return $refundOrder;
+        });
+
+        if ($shouldDispatchEvent) {
+            $this->dispatchRefundOrderEvent(EventConstant::REFUND_ORDER_SUCCEEDED, $refundOrder);
+        }
+
+        return $refundOrder;
+    }
+
+    /**
+     * 取消尚未取得派发权的原退款单。
+     *
+     * 行锁使取消与渠道派发互斥；CLOSED 不再计入后续退款可退额度的占用。
+     *
+     * @param string $refundNo 原退款单号
+     * @param string $reason 管理员取消原因
+     * @param int $adminId 当前管理员ID
+     * @return RefundOrder 已关闭的原退款单
+     * @throws UnauthorizedException 管理员身份缺失时抛出
+     * @throws ResourceNotFoundException 原退款单不存在时抛出
+     * @throws BusinessStateException 退款已经派发或状态不允许取消时抛出
+     */
+    public function cancelUnsentRefundByAdmin(string $refundNo, string $reason, int $adminId): RefundOrder
+    {
+        if ($adminId <= 0) {
+            throw new UnauthorizedException('管理员未授权');
+        }
+
+        return $this->transactionRetry(function () use ($refundNo, $reason, $adminId): RefundOrder {
+            $refundOrder = $this->refundOrderRepository->findForUpdateByRefundNo($refundNo);
+            if (!$refundOrder) {
+                throw new ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
+            }
+            if ((int) $refundOrder->status !== TradeConstant::REFUND_STATUS_CREATED
+                || (string) ($refundOrder->channel_refund_no ?? '') !== '') {
+                throw new BusinessStateException('只有尚未派发的退款单可以取消', ['refund_no' => $refundNo]);
+            }
+
+            $refundOrder->status = TradeConstant::REFUND_STATUS_CLOSED;
+            $refundOrder->last_error = '';
+            $refundOrder->save();
+            $this->recoveryTaskService->completeInCurrentTransaction(
+                PaymentRecoveryTaskConstant::TYPE_REFUND_ACTIVE_QUERY,
+                $refundNo
+            );
+            $this->operationLogRepository->create([
+                'pay_no' => (string) $refundOrder->pay_no,
+                'biz_no' => (string) $refundOrder->biz_no,
+                'action' => 'refund_cancel',
+                'admin_id' => $adminId,
+                'reason' => $reason,
+                'result_status' => 'success',
+                'result_message' => '未派发退款单已取消',
+                'result_payload' => ['refund_no' => $refundNo, 'refund_amount' => (int) $refundOrder->refund_amount],
+                'created_at' => $this->now(),
+            ]);
+
+            return $refundOrder->refresh();
+        });
+    }
+
+    /**
      * 在当前事务中标记退款成功。
      *
      * @param string $refundNo 退款单号
@@ -290,18 +448,20 @@ class RefundLifecycleService extends BaseService
      */
     public function markRefundSuccessInCurrentTransaction(string $refundNo, array $input = [], bool &$shouldDispatchEvent = false): RefundOrder
     {
+        $shouldDispatchEvent = false;
         $refundOrder = $this->refundOrderRepository->findForUpdateByRefundNo($refundNo);
         if (!$refundOrder) {
             throw new ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
         }
 
+        // 引用冲突必须先于幂等出口和资金冲正；重复成功仅可补缺失退款号。
+        $this->applyChannelRefundReference($refundOrder, (string) ($input['channel_refund_no'] ?? ''));
         $currentStatus = (int) $refundOrder->status;
-        if ($currentStatus === TradeConstant::REFUND_STATUS_SUCCESS) {
-            return $refundOrder;
-        }
-
         if (TradeConstant::isRefundTerminalStatus($currentStatus)) {
-            return $refundOrder;
+            if ($refundOrder->isDirty()) {
+                $refundOrder->save();
+            }
+            return $refundOrder->refresh();
         }
 
         // 先锁定原支付单，避免退款推进时原单状态被并发修改。
@@ -358,10 +518,9 @@ class RefundLifecycleService extends BaseService
             }
         }
 
-        // 退款成功后，退款单和业务单都要同步收口到成功态。
+        // 真实退款成功照常落单和处理资金，不因异常返还而丢失渠道退款事实。
         $refundOrder->status = TradeConstant::REFUND_STATUS_SUCCESS;
         $refundOrder->succeeded_at = $input['succeeded_at'] ?? $this->now();
-        $refundOrder->channel_refund_no = (string) ($input['channel_refund_no'] ?? $refundOrder->channel_refund_no ?? '');
         $refundOrder->last_error = '';
         $refundOrder->account_reverse_status = $accountReverseStatus;
         $refundOrder->account_reverse_required_amount = $accountReverseRequiredAmount;
@@ -388,7 +547,10 @@ class RefundLifecycleService extends BaseService
             );
         }
 
-        $bizOrder = $this->bizOrderRepository->findForUpdateByBizNo((string) $refundOrder->biz_no);
+        $isLateDuplicate = $this->paymentExceptionService->isLateDuplicatePayment((string) $payOrder->pay_no);
+        // 重复收款返还是异常处置，不代表正常履约支付被退款。
+        $bizOrder = $isLateDuplicate ? null
+            : $this->bizOrderRepository->findForUpdateByBizNo((string) $refundOrder->biz_no);
         if ($bizOrder) {
             $bizOrder->refund_amount = (int) $bizOrder->refund_amount + (int) $refundOrder->refund_amount;
             if ((int) $bizOrder->refund_amount > (int) $bizOrder->order_amount) {
@@ -406,7 +568,9 @@ class RefundLifecycleService extends BaseService
             $bizOrder->save();
         }
 
-        $this->resolveLateDuplicateAfterRefund($payOrder, $refundOrder);
+        if ($isLateDuplicate) {
+            $this->resolveLateDuplicateAfterRefund($payOrder, $refundOrder);
+        }
 
         $shouldDispatchEvent = true;
 
@@ -422,10 +586,7 @@ class RefundLifecycleService extends BaseService
      */
     private function resolveLateDuplicateAfterRefund(\app\model\payment\PayOrder $payOrder, RefundOrder $refundOrder): void
     {
-        $refundedAmount = (int) $this->refundOrderRepository->query()
-            ->where('pay_no', (string) $payOrder->pay_no)
-            ->where('status', TradeConstant::REFUND_STATUS_SUCCESS)
-            ->sum('refund_amount');
+        $refundedAmount = $this->refundOrderRepository->sumSuccessfulAmountByPayNo((string) $payOrder->pay_no);
         if ($refundedAmount < (int) $payOrder->pay_amount) {
             return;
         }
@@ -508,14 +669,12 @@ class RefundLifecycleService extends BaseService
      * @param string $refundNo 退款单号
      * @param string $result 查询结果摘要
      * @param string $error 错误摘要
-     * @param int $delaySeconds 下次查询延迟秒数
      * @return RefundOrder 最新退款单
      */
     public function recordRefundQueryAttempt(
         string $refundNo,
         string $result,
-        string $error = '',
-        int $delaySeconds = 60
+        string $error = ''
     ): RefundOrder {
         return $this->transactionRetry(function () use ($refundNo, $result, $error): RefundOrder {
             $refundOrder = $this->refundOrderRepository->findForUpdateByRefundNo($refundNo);
@@ -536,6 +695,8 @@ class RefundLifecycleService extends BaseService
 
     /**
      * 退款失败。
+     *
+     * 渠道引用在锁内先核对；已终态保持原状态，仅补可信缺失引用，不重复完成资金动作。
      *
      * @param string $refundNo 退款单号
      * @param array $input 输入参数
@@ -567,18 +728,19 @@ class RefundLifecycleService extends BaseService
      */
     public function markRefundFailedInCurrentTransaction(string $refundNo, array $input = [], bool &$shouldDispatchEvent = false): RefundOrder
     {
+        $shouldDispatchEvent = false;
         $refundOrder = $this->refundOrderRepository->findForUpdateByRefundNo($refundNo);
         if (!$refundOrder) {
             throw new ResourceNotFoundException('退款单不存在', ['refund_no' => $refundNo]);
         }
 
+        $this->applyChannelRefundReference($refundOrder, (string) ($input['channel_refund_no'] ?? ''));
         $currentStatus = (int) $refundOrder->status;
-        if ($currentStatus === TradeConstant::REFUND_STATUS_FAILED) {
-            return $refundOrder;
-        }
-
-        if (TradeConstant::isRefundTerminalStatus($currentStatus)) {
-            return $refundOrder;
+        if ($currentStatus === TradeConstant::REFUND_STATUS_FAILED || TradeConstant::isRefundTerminalStatus($currentStatus)) {
+            if ($refundOrder->isDirty()) {
+                $refundOrder->save();
+            }
+            return $refundOrder->refresh();
         }
 
         if ($currentStatus !== TradeConstant::REFUND_STATUS_CREATED && $currentStatus !== TradeConstant::REFUND_STATUS_PROCESSING) {
@@ -591,8 +753,12 @@ class RefundLifecycleService extends BaseService
         // 失败状态只更新失败信息，不再改动原支付单和业务单。
         $refundOrder->status = TradeConstant::REFUND_STATUS_FAILED;
         $refundOrder->failed_at = $input['failed_at'] ?? $this->now();
-        $refundOrder->channel_refund_no = (string) ($input['channel_refund_no'] ?? $refundOrder->channel_refund_no ?? '');
-        $refundOrder->last_error = (string) ($input['last_error'] ?? $refundOrder->last_error ?? '');
+        $refundOrder->last_error = mb_strcut(
+            (string) ($input['last_error'] ?? $refundOrder->last_error ?? ''),
+            0,
+            255,
+            'UTF-8'
+        );
         $extJson = (array) $refundOrder->ext_json;
         $reason = trim((string) ($input['reason'] ?? ''));
         if ($reason !== '') {
@@ -608,6 +774,29 @@ class RefundLifecycleService extends BaseService
         $shouldDispatchEvent = true;
 
         return $refundOrder->refresh();
+    }
+
+    /**
+     * 接纳当前事务中已锁定退款单的可信渠道退款号。
+     *
+     * 空值不擦除流水，非空冲突在幂等判断及账户冲正前拒绝。这里只修改模型；
+     * 进度、成功和失败调用方负责在各自的同一事务内保存，不能提前单独提交退款号。
+     *
+     * @param RefundOrder $refundOrder 当前事务中已加行锁的最新退款单
+     * @param string $channelRefundNo 已校验插件结果中的渠道退款号
+     * @throws BusinessStateException 两个非空渠道退款号不一致
+     */
+    private function applyChannelRefundReference(RefundOrder $refundOrder, string $channelRefundNo): void
+    {
+        $stored = (string) $refundOrder->channel_refund_no;
+        if ($stored !== '' && $channelRefundNo !== '' && !hash_equals($stored, $channelRefundNo)) {
+            throw new BusinessStateException('退款单渠道流水与已保存事实不一致', [
+                'refund_no' => (string) $refundOrder->refund_no, 'field' => 'channel_refund_no',
+            ]);
+        }
+        if ($channelRefundNo !== '') {
+            $refundOrder->channel_refund_no = $channelRefundNo;
+        }
     }
 
     /**

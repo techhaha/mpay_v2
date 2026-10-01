@@ -20,7 +20,6 @@ use app\repository\payment\config\PaymentTypeRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use support\Cache;
 use support\Db;
-use support\Log;
 use support\Request;
 use support\Response;
 
@@ -849,14 +848,6 @@ class AlipayBillReceiptPayment extends BasePayment implements PaymentInterface, 
             ]);
         }
 
-        if ($orders->count() > 1) {
-            Log::warning(sprintf(
-                '[AlipayBillReceiptPayment] 金额流水匹配到多笔订单，按时间最近选择 amount=%s count=%d',
-                FormatHelper::amount($amount),
-                $orders->count()
-            ));
-        }
-
         return $this->closestPayNo($orders->all(), $paidAt);
     }
 
@@ -913,14 +904,6 @@ class AlipayBillReceiptPayment extends BasePayment implements PaymentInterface, 
                 'paid_at' => date('Y-m-d H:i:s', $paidAt),
                 'record' => $record,
             ]);
-        }
-
-        if ($candidates->count() > 1) {
-            Log::warning(sprintf(
-                '[AlipayBillReceiptPayment] 备注流水匹配到多笔订单，按时间最近选择 remark=%s count=%d',
-                $remarkCode,
-                $candidates->count()
-            ));
         }
 
         return $this->closestPayNo($candidates->all(), $paidAt);

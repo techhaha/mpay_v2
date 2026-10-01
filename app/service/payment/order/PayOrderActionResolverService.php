@@ -5,6 +5,7 @@ namespace app\service\payment\order;
 use app\common\base\BaseService;
 use app\common\constant\PayOrderActionConstant;
 use app\common\constant\TradeConstant;
+use app\common\constant\RouteConstant;
 use app\model\payment\BizOrder;
 use app\model\payment\PayOrder;
 
@@ -70,18 +71,23 @@ class PayOrderActionResolverService extends BaseService
      *
      * @param PayOrder $payOrder 支付单
      * @param BizOrder|null $bizOrder 业务单
+     * @param int $refundAmount 当前支付单已成功退款金额，单位分，由调用方查询
      * @return array<string, mixed> 带操作项的轻量订单行
      */
-    public function resolveForPayOrder(PayOrder $payOrder, ?BizOrder $bizOrder = null): array
+    public function resolveForPayOrder(PayOrder $payOrder, ?BizOrder $bizOrder, int $refundAmount): array
     {
         return $this->resolveForRow([
             'pay_no' => (string) $payOrder->pay_no,
             'biz_no' => (string) $payOrder->biz_no,
             'status' => (int) $payOrder->status,
+            'channel_type' => (int) $payOrder->channel_type,
+            'service_fee_amount' => (int) $payOrder->service_fee_amount,
+            'service_fee_status' => (int) $payOrder->service_fee_status,
             'channel_id' => (int) $payOrder->channel_id,
             'plugin_code' => (string) ($payOrder->plugin_code ?? ''),
             'pay_amount' => (int) $payOrder->pay_amount,
             'biz_refund_amount' => (int) ($bizOrder?->refund_amount ?? 0),
+            'pay_refund_amount' => $refundAmount,
             'notify_url' => (string) ($payOrder->notify_url ?? ''),
             'biz_notify_url' => (string) ($bizOrder?->notify_url ?? ''),
             'ext_json' => (array) ($payOrder->ext_json ?? []),
@@ -99,6 +105,9 @@ class PayOrderActionResolverService extends BaseService
         $frozen = $this->riskControlService->isFrozen($row);
         $status = (int) ($row['status'] ?? -1);
         $isSuccess = $status === TradeConstant::ORDER_STATUS_SUCCESS;
+        $feeDue = $isSuccess && (int) ($row['channel_type'] ?? -1) === RouteConstant::CHANNEL_MODE_SELF
+            && (int) ($row['service_fee_amount'] ?? 0) > 0
+            && (int) ($row['service_fee_status'] ?? -1) === TradeConstant::SERVICE_FEE_STATUS_DUE;
         $hasNotifyUrl = trim((string) ($row['notify_url'] ?? '')) !== ''
             || trim((string) ($row['biz_notify_url'] ?? '')) !== '';
         $pluginCode = trim((string) ($row['plugin_code'] ?? ''));
@@ -109,6 +118,8 @@ class PayOrderActionResolverService extends BaseService
         $refundableAmount = $this->refundableAmount($row);
 
         return [
+            $this->action(PayOrderActionConstant::COLLECT_SERVICE_FEE, !$frozen && $feeDue,
+                $frozen ? '订单已冻结' : '订单没有待补扣的自收服务费', true, true),
             $this->action(
                 PayOrderActionConstant::MANUAL_SUCCESS,
                 !$frozen && !$isSuccess && in_array($status, [
@@ -192,15 +203,15 @@ class PayOrderActionResolverService extends BaseService
     /**
      * 计算列表展示用可退余额。
      *
-     * 列表只用业务单累计退款金额做轻量估算；真正创建退款时会重新锁定支付单和
-     * 退款单，按 CREATED/PROCESSING/SUCCESS 退款单重新计算可退余额。
+     * 只用当前支付单成功退款金额估算，不受同业务单其他支付退款影响；真正创建退款
+     * 时仍重新锁定支付单和退款单，将待派发、处理中、成功和失败单都计入占用额度。
      *
      * @param array<string, mixed> $row 支付单行
      * @return int 可退金额，单位分
      */
     private function refundableAmount(array $row): int
     {
-        return max(0, (int) ($row['pay_amount'] ?? 0) - (int) ($row['biz_refund_amount'] ?? 0));
+        return max(0, (int) ($row['pay_amount'] ?? 0) - (int) ($row['pay_refund_amount'] ?? 0));
     }
 
     /**

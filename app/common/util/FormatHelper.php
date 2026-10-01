@@ -186,6 +186,17 @@ class FormatHelper
         $masked = [];
         foreach ($value as $key => $item) {
             $keyText = strtolower((string) $key);
+            if ($keyText === 'content' && is_string($item)) {
+                $message = json_decode($item, true);
+                if (is_array($message) && ($message['event'] ?? '') === 'wxtool.officialAccount.message') {
+                    $masked[$key] = [
+                        'event' => 'wxtool.officialAccount.message',
+                        'length' => strlen($item),
+                        'sha256' => hash('sha256', $item),
+                    ];
+                    continue;
+                }
+            }
             if (in_array($keyText, ['req', 'response'], true)) {
                 $masked[$key] = self::maskStructuredPayload($item);
                 continue;

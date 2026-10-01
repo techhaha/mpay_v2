@@ -8,16 +8,15 @@ use app\common\constant\EpayProtocolConstant;
 use app\common\constant\PaymentIdentityConstant;
 use app\common\constant\RouteConstant;
 use app\common\util\FormatHelper;
-use app\exception\PaymentException;
 use app\exception\ValidationException;
 use app\model\payment\PayOrder;
 use app\model\payment\PaymentChannel;
 use app\repository\payment\config\PaymentChannelRepository;
 use app\repository\payment\config\PaymentPluginConfRepository;
-use app\repository\payment\trade\BizOrderRepository;
 use app\repository\payment\trade\PayOrderRepository;
 use app\service\payment\order\PayOrderService;
 use support\Log;
+use Webman\Exception\BusinessException;
 
 /**
  * 支付通道测试服务。
@@ -39,7 +38,6 @@ class PaymentChannelTestService extends BaseService
     public function __construct(
         protected PaymentChannelRepository $paymentChannelRepository,
         protected PaymentPluginConfRepository $paymentPluginConfRepository,
-        protected BizOrderRepository $bizOrderRepository,
         protected PayOrderRepository $payOrderRepository,
         protected PayOrderService $payOrderService
     ) {
@@ -137,13 +135,23 @@ class PaymentChannelTestService extends BaseService
                 ],
                 'identity_flow' => true,
             ], $channel);
-        } catch (PaymentException $e) {
-            $payOrder = $this->findPayOrderByMerchantOrderNo($merchantId, $merchantOrderNo);
-            if ($payOrder) {
-                return $this->formatTestResult($payOrder, $e->getMessage());
+        } catch (BusinessException $e) {
+            $payNo = (string) ($e->getData()['pay_no'] ?? '');
+            if ($payNo === '') {
+                throw $e;
             }
 
-            throw $e;
+            // 异常已定位真实支付单，直接返回承接地址；数据库故障时不能依赖再次回查。
+            $pagePath = $this->buildPaymentPagePath($payNo);
+            return [
+                'pay_no' => $payNo,
+                'merchant_id' => $merchantId,
+                'channel_id' => $channelId,
+                'money' => FormatHelper::amount($payAmount),
+                'payment_page_path' => $pagePath,
+                'payment_page_url' => $this->buildSiteUrl($pagePath),
+                'error_msg' => $e->getMessage(),
+            ];
         }
 
         if (($attempt['status'] ?? '') === PaymentIdentityConstant::STATUS_REQUIRED) {
@@ -331,30 +339,12 @@ class PaymentChannelTestService extends BaseService
     }
 
     /**
-     * 根据测试商户订单号查询支付单。
-     *
-     * @param int $merchantId 商户ID
-     * @param string $merchantOrderNo 商户订单号
-     * @return PayOrder|null 支付单
-     */
-    private function findPayOrderByMerchantOrderNo(int $merchantId, string $merchantOrderNo): ?PayOrder
-    {
-        $bizOrder = $this->bizOrderRepository->findByMerchantAndOrderNo($merchantId, $merchantOrderNo);
-        if (!$bizOrder) {
-            return null;
-        }
-
-        return $this->payOrderRepository->findLatestByBizNo((string) $bizOrder->biz_no);
-    }
-
-    /**
      * 格式化测试结果。
      *
      * @param PayOrder $payOrder 支付单
-     * @param string $errorMessage 错误消息，非空时返回给后台提示，承接页从订单快照读取错误
      * @return array<string, mixed> 测试订单与支付页信息
      */
-    private function formatTestResult(PayOrder $payOrder, string $errorMessage = ''): array
+    private function formatTestResult(PayOrder $payOrder): array
     {
         $payNo = (string) $payOrder->pay_no;
         $pagePath = $this->buildPaymentPagePath($payNo);
@@ -368,7 +358,7 @@ class PaymentChannelTestService extends BaseService
             'money' => FormatHelper::amount((int) $payOrder->pay_amount),
             'payment_page_path' => $pagePath,
             'payment_page_url' => $this->buildSiteUrl($pagePath),
-            'error_msg' => $errorMessage,
+            'error_msg' => '',
         ];
     }
 

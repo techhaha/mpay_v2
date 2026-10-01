@@ -14,6 +14,7 @@ use app\common\sdk\chinaums\ChinaumsSdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\model\payment\PayOrder;
 use app\repository\payment\trade\PayOrderRepository;
@@ -611,7 +612,7 @@ class ChinaumsApiPayment extends BasePayment implements PaymentInterface, PayPlu
             'wxpay' => $mini
                 ? $this->h5Pay($order, self::PRODUCT_WXPAY_MINI_H5, '/v1/netpay/wxpay/h5-to-minipay', false)
                 : $this->h5Pay($order, self::PRODUCT_WXPAY_H5, '/v1/netpay/wxpay/h5-pay', true),
-            default => throw new PaymentException('银联商务当前支付方式不支持H5产品', 40200, [
+            default => throw new PaymentProductUnavailableException('银联商务当前支付方式不支持H5产品', 40200, [
                 'channel_error_code' => 'PRODUCT_NOT_OPEN',
             ]),
         };
@@ -1234,7 +1235,7 @@ class ChinaumsApiPayment extends BasePayment implements PaymentInterface, PayPlu
     private function ensureProduct(string $product): void
     {
         if (!in_array($product, $this->enabledProducts(), true)) {
-            throw new PaymentException('当前银联商务通道未开启该支付产品', 40200, [
+            throw new PaymentProductUnavailableException('当前银联商务通道未开启该支付产品', 40200, [
                 'channel_error_code' => 'PRODUCT_NOT_OPEN',
                 'product' => $product,
             ]);

@@ -7,12 +7,15 @@ namespace app\common\payment;
 use app\common\base\BasePayment;
 use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
+use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\jlpay\JlpayClient;
 use app\common\sdk\jlpay\JlpaySdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
+use app\common\trait\DirectPaymentIdentityTrait;
 use app\exception\PaymentException;
+use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentUncertainException;
 use support\Request;
 use support\Response;
@@ -23,9 +26,10 @@ use support\Response;
  * 提供支付宝、微信和银联的扫码、JSAPI、付款码、查单、关单、支付通知与退款能力，
  * 并按终端场景映射到嘉联对应的开放接口产品。
  */
-class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
+class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
 {
     use DirectPaymentProductSelectorTrait;
+    use DirectPaymentIdentityTrait;
 
     private const PRODUCT_MICROPAY = 'micropay';
     private const PRODUCT_OPEN_TRANS_WAPH5PAY = 'open/trans/waph5pay';
@@ -68,11 +72,12 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             ['type' => 'switch', 'field' => 'is_test', 'title' => '测试环境', 'value' => false],
             $this->directPaymentEnabledProductsField([
                 self::PRODUCT_MICROPAY => '付款码支付',
-                self::PRODUCT_OPEN_TRANS_WAPH5PAY => '支付宝 JSAPI/H5',
+                self::PRODUCT_OPEN_TRANS_WAPH5PAY => '支付宝 UID/JSAPI',
                 self::PRODUCT_OPEN_TRANS_OFFICIALPAY => '微信 JSAPI',
-                self::PRODUCT_OPEN_TRANS_UNIONJSPAY => '银联 JSAPI',
+                self::PRODUCT_OPEN_TRANS_UNIONJSPAY => '银联 JSAPI（身份链路待核验，不参与当前选择）',
                 self::PRODUCT_QRCODEPAY => '扫码支付',
             ]),
+            ...$this->directPaymentIdentityConfigFields(['wechat_oauth', 'alipay_oauth']),
         ];
     }
 
@@ -84,8 +89,38 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
      */
     public function pay(array $order): array
     {
-        return $this->executeDirectPaymentProduct($order, [
+        return $this->executeDirectPaymentProduct($order, $this->paymentProducts($order), '嘉联支付');
+    }
 
+    /**
+     * 为公众号/支付宝 UID 产品声明身份，付款码和扫码不触发授权。
+     *
+     * officialpay 当前按公众号能力注册，不用 mini_openid 填公众号 open_id；
+     * 银联 userAuth/userId 换取及客户端环境未核验，不放开通用 JSAPI 环境限制。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>|null 身份需求
+     */
+    public function identityRequirement(array $order): ?array
+    {
+        $product = $this->directPaymentSelection($order, $this->paymentProducts($order))['product'];
+
+        return match ($product) {
+            self::PRODUCT_OPEN_TRANS_OFFICIALPAY => $this->directPaymentIdentityRequirement($order, $product, 'wechat_oauth'),
+            self::PRODUCT_OPEN_TRANS_WAPH5PAY => $this->directPaymentIdentityRequirement($order, $product, 'alipay_oauth'),
+            default => null,
+        };
+    }
+
+    /**
+     * 声明插件支持的产品，由身份预检和真实下单共同消费。
+     *
+     * @param array<string, mixed> $order 处理器消费的标准下单参数
+     * @return array<string, array<string, mixed>> 产品与请求处理器，不执行上游请求
+     */
+    private function paymentProducts(array $order): array
+    {
+        return [
             'auth_code' => [
                 'products' => [
                     'alipay' => self::PRODUCT_MICROPAY,
@@ -112,7 +147,7 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
                 ],
                 'handler' => fn (): array => $this->qrcodePay($order),
             ],
-        ], '嘉联支付');
+        ];
     }
 
     /**
@@ -302,16 +337,22 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
             default => '/open/trans/waph5pay',
         };
         $payload = $this->basePayload($order) + ['pay_type' => $this->channelPayType($payType)];
-        if ($payType === 'wxpay') {
-            $payload['open_id'] = (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? '');
-            $payload['sub_appid'] = (string) ($payment['sub_appid'] ?? '');
-        } elseif ($payType === 'bank') {
-            $payload['user_id'] = (string) ($payment['sub_openid'] ?? '');
+        if ($payType === 'bank') {
+            $payload['user_id'] = (string) ($payment['unionpay_user_id'] ?? '');
             $payload['app_up_identifier'] = (string) ($payment['app_up_identifier'] ?? '');
-            $payload['user_auth_code'] = (string) ($payment['user_auth_code'] ?? '');
+            $payload['user_auth_code'] = (string) ($payment['unionpay_auth_code'] ?? '');
             $payload['qr_code'] = (string) $order['return_url'];
         } else {
-            $payload['buyer_id'] = (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? '');
+            $identity = $this->directPaymentIdentityData($order, $payType === 'wxpay' ? 'wechat_oauth' : 'alipay_oauth');
+            if ($identity['identity'] === '') {
+                throw new PaymentDefinitiveException('嘉联 JSAPI 支付缺少 ' . $identity['identity_field'] . '，请先完成身份授权', 40200);
+            }
+            if ($payType === 'wxpay') {
+                $payload['open_id'] = $identity['identity'];
+                $payload['sub_appid'] = $identity['app_id'];
+            } else {
+                $payload['buyer_id'] = $identity['identity'];
+            }
         }
 
         try {
@@ -321,7 +362,7 @@ class JlpayApiPayment extends BasePayment implements PaymentInterface, PayPlugin
         }
 
         $payInfo = $data['pay_info'] ?? [];
-        if (is_string($payInfo)) {
+        if ($payType !== 'bank' && is_string($payInfo)) {
             $decoded = json_decode($payInfo, true);
             $payInfo = is_array($decoded) ? $decoded : ['tradeNO' => $payInfo];
         }

@@ -13,10 +13,12 @@ use app\common\constant\PaymentPluginStatusConstant;
 use app\common\constant\TransferConstant;
 use app\common\interface\PaymentInterface;
 use app\common\interface\PayPluginInterface;
+use app\common\interface\RefundQueryInterface;
 use app\common\interface\TransferPluginInterface;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentUncertainException;
 use app\service\payment\epay\EpaySignerManager;
 use support\Request;
 use support\Response;
@@ -28,7 +30,7 @@ use support\Response;
  * V2 使用 RSA 签名；成功响应和携带签名的失败响应必须验签后才能交给业务服务层，
  * 未携带签名的失败响应只用于返回明确错误，不作为成功业务结果。
  */
-class EpayV2Payment extends BasePayment implements PaymentInterface, PayPluginInterface, TransferPluginInterface
+class EpayV2Payment extends BasePayment implements PaymentInterface, PayPluginInterface, TransferPluginInterface, RefundQueryInterface
 {
     /**
      * ePay 协议签名管理器。
@@ -152,7 +154,19 @@ class EpayV2Payment extends BasePayment implements PaymentInterface, PayPluginIn
             return $this->pendingPaymentResult($order, $this->submitPay($payload));
         }
 
-        return $this->pendingPaymentResult($order, $this->apiPay($payload, $order));
+        try {
+            return $this->pendingPaymentResult($order, $this->apiPay($payload, $order));
+        } catch (\Throwable $e) {
+            // 网关 API 调用产品使用标准 method；保留本地请求事实，不证明上游已建单或猜其内部产品。
+            $context = ['pay_type' => (string) $order['pay_type_code'],
+                'pay_product' => (string) $order['extra']['payment']['method']];
+            if ($e instanceof PaymentException) {
+                $e->data(array_replace($e->getData(), $context));
+                throw $e;
+            }
+            throw new PaymentUncertainException('上游 V2 创建响应无法确认', 40200,
+                $context + ['exception_class' => $e::class]);
+        }
     }
 
     /**
@@ -217,26 +231,29 @@ class EpayV2Payment extends BasePayment implements PaymentInterface, PayPluginIn
             ]);
         }
 
-        $channelOrderNo = (string) ($response['trade_no'] ?? '');
-        if ($channelOrderNo === '') {
-            throw new PaymentException('上游 V2 未返回平台订单号', 40200, [
-                'response' => $response,
-            ]);
+        $payType = (string) ($response['pay_type'] ?? '');
+        $payParams = $this->payParams($payType, $response);
+        if ($payType === 'scan' && $response['pay_info']['status'] === PaymentPluginStatusConstant::SUCCESS
+            && (!is_int($response['pay_info']['paid_amount'] ?? null)
+                || $response['pay_info']['paid_amount'] !== (int) $order['amount'])) {
+            throw new PaymentUncertainException('上游 V2 付款码成功摘要的金额不匹配', 40200);
         }
-
-        $payAction = strtolower((string) ($response['pay_type'] ?? ''));
-        if ($payAction === '') {
-            throw new PaymentException('上游 V2 未返回支付承接类型', 40200, [
-                'response' => $response,
-            ]);
+        $channelOrderNo = (string) ($response['trade_no'] ?? '');
+        // 身份授权发生在上游建单之前，不能写本地单号占位而阻止后续回调补入真实上游号。
+        if ($channelOrderNo === '' && $payType !== 'identity') {
+            throw new PaymentUncertainException('上游 V2 未返回平台订单号', 40200);
         }
 
         return [
-            'pay_page' => $this->payPage($payAction),
+            'pay_page' => match ($payType) {
+                'jump', 'identity' => 'jump',
+                'html', 'qrcode', 'urlscheme', 'jsapi' => $payType,
+                'app', 'scan' => 'page',
+            },
             'pay_type' => (string) $payload['type'],
             'pay_product' => (string) $payload['method'],
-            'pay_action' => $payAction,
-            'pay_params' => $this->payParams($payAction, $response),
+            'pay_action' => $payType,
+            'pay_params' => $payParams,
             'chan_order_no' => $channelOrderNo,
             'chan_trade_no' => (string) ($response['api_trade_no'] ?? ''),
         ];
@@ -372,13 +389,85 @@ class EpayV2Payment extends BasePayment implements PaymentInterface, PayPluginIn
             throw new PaymentDefinitiveException((string) ($response['msg'] ?? '上游 V2 退款失败'), 40200);
         }
 
+        $result = $this->refundResult($response, $order);
+        if ($result['status'] === PaymentPluginStatusConstant::FAILED) {
+            throw new PaymentDefinitiveException('上游 V2 退款失败', 40200, ['refund_no' => $refundNo]);
+        }
+
+        return $result;
+    }
+
+    /**
+     * 查询原退款单，不重新派发退款。
+     *
+     * @param array<string, mixed> $order 标准退款查询参数
+     * @return array<string, mixed> 已核对身份、金额和状态的退款事实
+     */
+    public function queryRefund(array $order): array
+    {
+        $response = $this->requestSignedJson('/api/pay/refundquery', [
+            'pid' => (string) $this->getConfig('pid'),
+            'out_refund_no' => (string) $order['refund_no'],
+            'timestamp' => (string) time(),
+        ], '上游 V2 退款查询响应验签失败');
+        if ((int) ($response['code'] ?? -1) !== 0) {
+            throw new PaymentUncertainException((string) ($response['msg'] ?? '上游 V2 退款查询失败'), 40200);
+        }
+
+        return $this->refundResult($response, $order);
+    }
+
+    /**
+     * 创建和查询共用同一响应契约；通信成功不能代替资金退款成功。
+     *
+     * @param array<string, mixed> $response 已验签的上游响应
+     * @param array<string, mixed> $order 本地标准退款参数
+     * @return array<string, mixed> 标准退款结果
+     */
+    private function refundResult(array $response, array $order): array
+    {
+        foreach (['out_refund_no' => 'refund_no', 'out_trade_no' => 'pay_no'] as $remote => $local) {
+            if (!hash_equals((string) $order[$local], (string) ($response[$remote] ?? ''))) {
+                throw new PaymentUncertainException('上游 V2 退款返回订单标识不匹配', 40200, ['field' => $remote]);
+            }
+        }
+        $channelOrderNo = (string) ($order['chan_order_no'] ?? '');
+        if ((string) ($response['trade_no'] ?? '') === ''
+            || ($channelOrderNo !== '' && $channelOrderNo !== (string) $order['pay_no']
+                && !hash_equals($channelOrderNo, (string) $response['trade_no']))) {
+            throw new PaymentUncertainException('上游 V2 退款返回平台订单号不匹配', 40200);
+        }
+        try {
+            $refundAmount = $this->yuanToCents($response['money'] ?? null, '上游 V2 退款金额');
+        } catch (PaymentException $e) {
+            throw new PaymentUncertainException($e->getMessage(), 40200);
+        }
+        if ($refundAmount !== (int) $order['refund_amount']) {
+            throw new PaymentUncertainException('上游 V2 退款返回金额不匹配', 40200);
+        }
+        $channelRefundNo = (string) ($response['refund_no'] ?? '');
+        $storedRefundNo = (string) ($order['chan_refund_no'] ?? '');
+        if ($channelRefundNo === '' || ($storedRefundNo !== '' && !hash_equals($storedRefundNo, $channelRefundNo))) {
+            throw new PaymentUncertainException('上游 V2 退款返回平台退款单号不匹配', 40200);
+        }
+        $status = match ($response['status'] ?? null) {
+            EpayProtocolConstant::V2_REFUND_STATUS_SUCCESS => PaymentPluginStatusConstant::SUCCESS,
+            EpayProtocolConstant::V2_REFUND_STATUS_PENDING => PaymentPluginStatusConstant::PENDING,
+            EpayProtocolConstant::V2_REFUND_STATUS_FAILED => PaymentPluginStatusConstant::FAILED,
+            default => throw new PaymentUncertainException('上游 V2 未返回可确认的退款状态', 40200),
+        };
+
         return [
-            'status' => PaymentPluginStatusConstant::SUCCESS,
-            'refund_no' => $refundNo,
-            'pay_no' => $payNo,
-            'refund_amount' => (int) $order['refund_amount'],
-            'chan_refund_no' => (string) ($response['refund_no'] ?? ''),
-            'message' => (string) ($response['msg'] ?? 'success'),
+            'status' => $status,
+            'refund_no' => (string) $order['refund_no'],
+            'pay_no' => (string) $order['pay_no'],
+            'refund_amount' => $refundAmount,
+            'chan_refund_no' => $channelRefundNo,
+            'message' => match ($status) {
+                PaymentPluginStatusConstant::SUCCESS => '上游 V2 退款成功',
+                PaymentPluginStatusConstant::PENDING => '上游 V2 退款尚未完成',
+                default => '上游 V2 退款失败或关闭',
+            },
         ];
     }
 
@@ -601,25 +690,10 @@ class EpayV2Payment extends BasePayment implements PaymentInterface, PayPluginIn
     }
 
     /**
-     * 将上游 pay_type 映射为前端收银台承接页类型。
-     *
-     * @param string $payType 上游支付内容类型
-     * @return string 平台承接页类型
-     */
-    private function payPage(string $payType): string
-    {
-        return match ($payType) {
-            'jump' => 'jump',
-            'html' => 'html',
-            'qrcode' => 'qrcode',
-            'urlscheme' => 'urlscheme',
-            'jsapi' => 'jsapi',
-            default => 'page',
-        };
-    }
-
-    /**
      * 按承接页组件固定字段包装 V2 原始支付参数。
+     *
+     * 只消费文档公开类型，未知动作名不能当作组件名。JSAPI 允许对象或 JSON 对象字符串；
+     * scan 摘要不推进本地资金状态，仍由原查单/回调链路确认。响应结构不完整按不确定处理。
      *
      * @param string $payType 上游返回的支付内容类型
      * @param array<string, mixed> $response 上游原始响应
@@ -627,53 +701,39 @@ class EpayV2Payment extends BasePayment implements PaymentInterface, PayPluginIn
      */
     private function payParams(string $payType, array $response): array
     {
-        $payInfo = $response['pay_info'] ?? '';
-
-        return match ($payType) {
-            'qrcode' => [
-                'qrcode' => (string) $payInfo,
-                'raw' => $response,
-            ],
-            'html' => [
-                'html' => (string) $payInfo,
-                'raw' => $response,
-            ],
-            'jump' => [
-                'url' => (string) $payInfo,
-                'raw' => $response,
-            ],
-            'urlscheme' => [
-                'urlscheme' => (string) $payInfo,
-                'raw' => $response,
-            ],
-            'jsapi' => $this->jsapiPayParams($payInfo, $response),
-            default => [
-                '_page' => $payType,
-                'params' => $payInfo,
-                'raw' => $response,
-            ],
-        };
-    }
-
-    /**
-     * 兼容 V2 JSAPI 可能返回数组或 JSON 字符串两种形态。
-     *
-     * @param mixed $payInfo V2 pay_info
-     * @param array<string, mixed> $response 上游原始响应
-     * @return array<string, mixed>
-     */
-    private function jsapiPayParams(mixed $payInfo, array $response): array
-    {
-        if (is_array($payInfo)) {
-            $params = $payInfo;
-        } else {
-            $decoded = json_decode((string) $payInfo, true);
-            $params = is_array($decoded) ? $decoded : ['params' => (string) $payInfo];
+        $payInfo = $response['pay_info'] ?? null;
+        if (in_array($payType, ['qrcode', 'html', 'jump', 'identity', 'urlscheme'], true)) {
+            if (!is_string($payInfo) || $payInfo === '') {
+                throw new PaymentUncertainException('上游 V2 支付内容缺少有效文本', 40200);
+            }
+            $field = match ($payType) {
+                'qrcode' => 'qrcode', 'html' => 'html', 'jump', 'identity' => 'url', 'urlscheme' => 'urlscheme',
+            };
+            return [$field => $payInfo];
         }
 
-        $params['raw'] = $response;
+        if ($payType === 'jsapi') {
+            $params = is_string($payInfo) ? json_decode($payInfo, true) : $payInfo;
+            if (!is_array($params) || $params === [] || array_is_list($params)) {
+                throw new PaymentUncertainException('上游 V2 JSAPI 内容不是有效参数对象', 40200);
+            }
+            return $params;
+        }
+        if ($payType === 'app') {
+            if ((!is_string($payInfo) && !is_array($payInfo)) || $payInfo === '' || $payInfo === []
+                || (is_array($payInfo) && array_is_list($payInfo))) {
+                throw new PaymentUncertainException('上游 V2 APP 内容缺少调起参数', 40200);
+            }
+            return ['_page' => 'page', 'params' => $payInfo, 'description' => '请在商户 App 内调用支付 SDK 继续付款。'];
+        }
+        if ($payType === 'scan') {
+            if (!is_array($payInfo) || !in_array($payInfo['status'] ?? null, ['pending', 'success'], true)) {
+                throw new PaymentUncertainException('上游 V2 付款码结果缺少明确状态', 40200);
+            }
+            return ['_page' => 'paymentPending', 'description' => '付款码请求已受理，等待平台回调或查单确认支付结果。'];
+        }
 
-        return $params;
+        throw new PaymentUncertainException('上游 V2 返回了未约定的支付内容类型', 40200, ['pay_type' => $payType]);
     }
 
     /**

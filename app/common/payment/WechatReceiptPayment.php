@@ -16,6 +16,10 @@ use app\exception\PaymentException;
 use app\exception\UnsupportedPaymentOperationException;
 use app\model\payment\PayOrder;
 use app\repository\payment\trade\PayOrderRepository;
+use DateTimeImmutable;
+use DateTimeZone;
+use DOMDocument;
+use DOMXPath;
 use support\Cache;
 use support\Db;
 use support\Request;
@@ -24,12 +28,12 @@ use support\Response;
 /**
  * 微信个人收款监听插件。
  *
- * 面向 SmsForwarder 手机通知栏监听场景，不对接微信官方支付 API。
+ * 面向 SmsForwarder 手机通知栏与 wxtool PC 公众号监听场景，不对接微信官方支付 API。
  *
  * 典型流程：
  * 1. pay() 返回个人微信收款码，并按配置分配“金额变动”或“付款备注”识别信息。
- * 2. /api/pay/{chanId}/notify 先调用 channelNotify() 定位 pay_no。
- * 3. 服务层确认支付单后再调用 notify()，由插件恢复原始金额并返回标准支付成功结果。
+ * 2. 两类监听工具都向 /api/pay/{chanId}/notify 提交签名表单，插件先定位 pay_no。
+ * 3. 服务层确认支付单后再调用 notify()，由插件重新验签、恢复原始金额并返回标准结果。
  *
  * 金额口径：
  * - 变动后的金额只用于通知反查订单，不作为业务单统计金额。
@@ -38,6 +42,18 @@ use support\Response;
  */
 class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayPluginInterface, ChannelNotifyInterface
 {
+    private const WECHAT_PAY_OFFICIAL_ID = 'gh_3dfda90e39d6';
+
+    private const WECHAT_RECEIPT_ASSISTANT_ID = 'gh_f0a92aa7146c';
+
+    /** @var array<string, string> wxtool 允许投递的公众号 ID 与名称。 */
+    private const WXTOOL_ACCOUNTS = [
+        self::WECHAT_PAY_OFFICIAL_ID => '微信支付',
+        self::WECHAT_RECEIPT_ASSISTANT_ID => '微信收款助手',
+    ];
+
+    private const WXTOOL_EVENT = 'wxtool.officialAccount.message';
+
     /**
      * 构造方法。
      *
@@ -53,7 +69,8 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
     /**
      * 插件元信息和后台配置表单。
      *
-     * 这里配置的是个人收款监听所需信息：匹配模式、识别有效期、金额偏移、SmsForwarder 密钥和收款码。
+     * 这里配置的是个人收款监听所需信息：匹配模式、识别有效期、金额偏移、通知密钥和收款码。
+     * `sms_forwarder_secret` 保留稳定字段名，SmsForwarder 与 wxtool 使用同一签名密钥。
      *
      * @var array<string, mixed>
      */
@@ -104,19 +121,19 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
             [
                 'type' => 'password',
                 'field' => 'sms_forwarder_secret',
-                'title' => 'SmsForwarder密钥',
+                'title' => '监听通知密钥',
                 'value' => '',
                 'props' => [
-                    'placeholder' => '用于校验 SmsForwarder sign',
+                    'placeholder' => '须与 SmsForwarder 或 wxtool 通知通道的密钥一致',
                 ],
                 'validate' => [
-                    ['required' => true, 'message' => 'SmsForwarder密钥不能为空'],
+                    ['required' => true, 'message' => '监听通知密钥不能为空'],
                 ],
             ],
             [
                 'type' => 'inputNumber',
                 'field' => 'sms_forwarder_time_tolerance',
-                'title' => '签名时间容差(秒)',
+                'title' => '通知时间容差(秒)',
                 'value' => 300,
                 'props' => [
                     'min' => 30,
@@ -211,7 +228,7 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
     /**
      * 通道级通知定位支付单。
      *
-     * 此入口先完成 SmsForwarder 验签，再根据通知内容定位 pay_no，但不直接推进支付状态。
+     * 此入口识别 SmsForwarder 或 wxtool 协议，验签并定位 pay_no，但不直接推进支付状态。
      * 服务层完成幂等编排后会调用 notify() 重新校验通知并生成标准支付结果。
      *
      * @param Request $request 请求对象
@@ -219,7 +236,7 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
      */
     public function channelNotify(Request $request): array
     {
-        $payload = $this->verifiedSmsForwarderPayload($request);
+        $payload = $this->verifiedReceiptPayload($request);
 
         return ['pay_no' => $this->locatePayNo($payload)];
     }
@@ -238,7 +255,7 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
             'paid_amount' => null,
             'chan_order_no' => (string) ($order['chan_order_no'] ?? ''),
             'chan_trade_no' => (string) ($order['chan_trade_no'] ?? ''),
-            'message' => '个人收款监听通道等待 SmsForwarder 通知',
+            'message' => '个人收款监听通道等待手机或 PC 监听通知',
         ];
     }
 
@@ -273,7 +290,7 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
     }
 
     /**
-     * 解析并校验 SmsForwarder 通知。
+     * 解析并校验手机通知栏或 PC 公众号通知。
      *
      * 这是第二阶段：服务层确认 pay_no 后调用。插件再次校验通知并恢复原始金额，
      * 然后返回统一的支付成功结果给核心支付流程。
@@ -283,7 +300,7 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
      */
     public function notify(Request $request): array
     {
-        $payload = $this->verifiedSmsForwarderPayload($request);
+        $payload = $this->verifiedReceiptPayload($request);
         ['msg' => $content] = $this->wechatNotificationFromPayload($payload);
         $tradeNo = $this->channelTradeNo($payload);
         $payNo = $this->locatePayNo($payload);
@@ -298,7 +315,9 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
             'message' => mb_strcut(preg_replace('/\s+/', ' ', $content) ?? $content, 0, 180, 'UTF-8'),
             'chan_order_no' => $tradeNo,
             'chan_trade_no' => $tradeNo,
-            'channel_status' => 'sms_forwarder_received',
+            'channel_status' => ($payload['_receipt_source'] ?? '') === 'wxtool'
+                ? 'wxtool_received'
+                : 'sms_forwarder_received',
             'paid_at' => $this->paidAtFromPayload($payload),
         ];
     }
@@ -613,46 +632,308 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
     }
 
     /**
-     * 校验并读取 SmsForwarder 载荷。
+     * 验证监听工具表单并归一化为现有微信通知结构。
      *
-     * 签名规则按 SmsForwarder 文档：使用 timestamp、密钥和 HMAC-SHA256 校验 sign。
+     * 两类工具共用 timestamp、sign、content 和 from 四字段表单及同一 HMAC 密钥。
+     * SmsForwarder 的 content 是通知栏 JSON；wxtool 的 content 是公众号完整消息事件。
+     * 归一化后，订单匹配与金额恢复不区分通知来自手机还是 PC。
      *
-     * @param Request $request 请求对象
-     * @return array<string, mixed>
+     * @return array<string, mixed> 可供现有订单匹配逻辑使用的微信通知载荷
+     * @throws PaymentException 签名、来源、消息身份或收款模板无效时抛出
      */
-    private function verifiedSmsForwarderPayload(Request $request): array
+    private function verifiedReceiptPayload(Request $request): array
     {
-        $payload = $this->requestPayload($request);
-        $timestamp = trim((string) ($payload['timestamp'] ?? ''));
-        $sign = trim((string) ($payload['sign'] ?? ''));
-        $secret = (string) $this->getConfig('sms_forwarder_secret', '');
-        if ($timestamp === '' || $sign === '' || $secret === '') {
-            throw new PaymentException('SmsForwarder 通知签名参数不完整', 40200);
+        $fields = $this->requestPayload($request);
+        $content = (string) ($fields['content'] ?? '');
+        if ($content === '' || strlen($content) > 2 * 1024 * 1024) {
+            throw new PaymentException('监听通知内容为空或过大', 40200);
         }
 
-        $timestampSeconds = (int) floor(((int) $timestamp) / 1000);
-        $tolerance = max(30, (int) $this->getConfig('sms_forwarder_time_tolerance', 300));
-        if ($timestampSeconds <= 0 || abs(time() - $timestampSeconds) > $tolerance) {
-            throw new PaymentException('SmsForwarder 通知时间已失效', 40200);
+        $decoded = json_decode($content, true);
+        if (is_array($decoded) && !array_is_list($decoded)
+            && ($decoded['event'] ?? '') === self::WXTOOL_EVENT) {
+            return $this->verifiedWxtoolPayload($fields, $decoded);
         }
 
-        $expected = base64_encode(hash_hmac('sha256', $timestamp . "\n" . $secret, $secret, true));
-        if (!hash_equals($expected, rawurldecode($sign))) {
-            throw new PaymentException('SmsForwarder 通知签名校验失败', 40200);
-        }
+        return $this->verifiedSmsForwarderPayload($fields);
+    }
 
-        if (trim((string) ($payload['content'] ?? '')) === '') {
-            throw new PaymentException('SmsForwarder 通知内容为空', 40200);
-        }
-
+    /**
+     * 校验 SmsForwarder 通知栏载荷。
+     *
+     * @param array<string, mixed> $payload 四字段表单
+     * @return array<string, mixed> 原 SmsForwarder 载荷
+     */
+    private function verifiedSmsForwarderPayload(array $payload): array
+    {
+        $this->assertSignedPayload($payload);
         $from = trim((string) ($payload['from'] ?? ''));
         if ($from !== '' && $from !== 'com.tencent.mm') {
             throw new PaymentException('非微信通知来源', 40200, ['from' => $from]);
         }
 
         $this->wechatNotificationFromPayload($payload);
-
         return $payload;
+    }
+
+    /**
+     * 校验 wxtool 公众号完整消息并转换为通知栏等价结构。
+     *
+     * 这里只接受“微信支付”和“微信收款助手”两个固定公众号、incoming appmsg
+     * 以及已确认的收款模板。消息游标组成稳定渠道流水号，投递路由和重试次数
+     * 不参与编号。
+     *
+     * @param array<string, mixed> $fields 四字段表单
+     * @param array<string, mixed> $payload wxtool content 事件
+     * @return array<string, mixed> 归一化微信通知载荷
+     */
+    private function verifiedWxtoolPayload(array $fields, array $payload): array
+    {
+        $this->assertSignedPayload($fields);
+        $accountId = (string) ($fields['from'] ?? '');
+        $accountName = self::WXTOOL_ACCOUNTS[$accountId] ?? '';
+        $message = (array) ($payload['message'] ?? []);
+        if ($accountName === ''
+            || (string) ($payload['account']['username'] ?? '') !== $accountId
+            || (string) ($message['username'] ?? '') !== $accountId
+            || (string) ($message['source'] ?? '') !== 'message'
+            || ($message['isFallback'] ?? false) !== false) {
+            throw new PaymentException('PC 监听通知不是受支持公众号的完整消息', 40200);
+        }
+        if ((string) ($message['direction'] ?? '') !== 'incoming'
+            || (string) ($message['senderUsername'] ?? '') !== $accountId) {
+            throw new PaymentException('PC 监听通知的公众号发送方无法验证', 40200);
+        }
+        $messageTime = (int) ($message['createTime'] ?? 0);
+        if ($messageTime <= 0 || $messageTime > time() + 300) {
+            throw new PaymentException('PC 监听通知的消息时间无效', 40200);
+        }
+        $appMessage = $this->wxtoolAppMessage((string) ($message['content'] ?? ''));
+        if (!hash_equals($accountId, $appMessage['from_username'])) {
+            throw new PaymentException('PC 监听通知的 XML 发送方不一致', 40200);
+        }
+
+        $receipt = $this->wxtoolReceipt($accountId, $appMessage, $messageTime);
+        $normalizedContent = json_encode([
+            'title' => $accountName,
+            'msg' => $appMessage['title'] . "\n" . $appMessage['description'],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($normalizedContent === false) {
+            throw new PaymentException('PC 监听通知内容无法归一化', 40200);
+        }
+
+        return [
+            'from' => $accountId,
+            'timestamp' => (string) ($receipt['event_at'] * 1000),
+            'content' => $normalizedContent,
+            '_receipt_source' => 'wxtool',
+            '_receipt_scene' => $receipt['scene'],
+            '_payer_remark' => $receipt['payer_remark'],
+            '_notified_amount' => $receipt['amount'],
+            '_channel_trade_no' => $this->wxtoolTradeNo($payload, $message, $accountId, $messageTime),
+        ];
+    }
+
+    /**
+     * 校验监听表单签名和投递时间。
+     *
+     * 签名原文为毫秒 timestamp、换行和 secret，HMAC-SHA256 密钥也是 secret；
+     * Base64 结果由发送端 URL 编码。该规则与 SmsForwarder 和 wxtool 当前协议一致。
+     *
+     * @param array<string, mixed> $fields 四字段表单
+     */
+    private function assertSignedPayload(array $fields): void
+    {
+        $timestamp = trim((string) ($fields['timestamp'] ?? ''));
+        $sign = trim((string) ($fields['sign'] ?? ''));
+        $secret = trim((string) $this->getConfig('sms_forwarder_secret', ''));
+        if (preg_match('/^\d{13}$/', $timestamp) !== 1 || $sign === '' || $secret === '') {
+            throw new PaymentException('监听通知签名参数不完整', 40200);
+        }
+
+        $tolerance = min(1800, max(30, (int) $this->getConfig('sms_forwarder_time_tolerance', 300)));
+        if (abs(time() - intdiv((int) $timestamp, 1000)) > $tolerance) {
+            throw new PaymentException('监听通知时间已失效', 40200);
+        }
+
+        $expected = base64_encode(hash_hmac('sha256', $timestamp . "\n" . $secret, $secret, true));
+        if (!hash_equals($expected, rawurldecode($sign))) {
+            throw new PaymentException('监听通知签名校验失败', 40200);
+        }
+    }
+
+    /**
+     * 提取 wxtool appmsg 的消息身份和明细键值。
+     *
+     * @return array{title:string,description:string,from_username:string,fields:array<string,string>}
+     */
+    private function wxtoolAppMessage(string $content): array
+    {
+        if ($content === '' || strlen($content) > 2 * 1024 * 1024
+            || stripos($content, '<!DOCTYPE') !== false
+            || stripos($content, '<!ENTITY') !== false) {
+            throw new PaymentException('PC 监听公众号消息 XML 不合法', 40200);
+        }
+
+        $old = libxml_use_internal_errors(true);
+        try {
+            $xml = new DOMDocument();
+            if (!$xml->loadXML($content, LIBXML_NONET | LIBXML_NOBLANKS)) {
+                throw new PaymentException('PC 监听公众号消息 XML 解析失败', 40200);
+            }
+            $xpath = new DOMXPath($xml);
+            $titles = $xpath->query('/msg/appmsg/title');
+            $descriptions = $xpath->query('/msg/appmsg/des');
+            $senders = $xpath->query('/msg/fromusername');
+            if ($titles === false || $descriptions === false || $senders === false
+                || $titles->length !== 1 || $descriptions->length !== 1 || $senders->length !== 1) {
+                throw new PaymentException('PC 监听公众号消息缺少唯一消息身份', 40200);
+            }
+
+            $fields = [];
+            $lines = $xpath->query(
+                '/msg/appmsg/mmreader/template_detail/line_content/topline'
+                . ' | /msg/appmsg/mmreader/template_detail/line_content/lines/line'
+            );
+            if ($lines === false || $lines->length === 0) {
+                throw new PaymentException('PC 监听公众号消息缺少收款明细', 40200);
+            }
+            foreach ($lines as $line) {
+                $keys = $xpath->query('./key/word', $line);
+                $values = $xpath->query('./value/word', $line);
+                if ($keys === false || $values === false
+                    || $keys->length !== 1 || $values->length !== 1) {
+                    throw new PaymentException('PC 监听公众号消息明细结构不一致', 40200);
+                }
+                $key = trim($keys->item(0)->textContent);
+                if ($key === '' || array_key_exists($key, $fields)) {
+                    throw new PaymentException('PC 监听公众号消息明细字段为空或重复', 40200);
+                }
+                $fields[$key] = trim($values->item(0)->textContent);
+            }
+
+            return [
+                'title' => trim($titles->item(0)->textContent),
+                'description' => trim($descriptions->item(0)->textContent),
+                'from_username' => trim($senders->item(0)->textContent),
+                'fields' => $fields,
+            ];
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($old);
+        }
+    }
+
+    /**
+     * 按固定公众号模板确认收款场景、金额和业务到账时间。
+     *
+     * 个人码和店员通知可以携带“付款方备注”；经营码和赞赏码中的“备注”是系统
+     * 状态或汇总，不作为付款备注。标题金额必须与结构化“收款金额”一致。
+     *
+     * @param array{title:string,description:string,from_username:string,
+     *     fields:array<string,string>} $appMessage appmsg 结构
+     * @return array{amount:int,event_at:int,scene:string,payer_remark:string}
+     */
+    private function wxtoolReceipt(
+        string $accountId,
+        array $appMessage,
+        int $messageTime
+    ): array {
+        $title = $appMessage['title'];
+        $fields = $appMessage['fields'];
+        if ($accountId === self::WECHAT_PAY_OFFICIAL_ID) {
+            $titlePattern = '/^二维码赞赏到账(\d+(?:\.\d{1,2})?)元(?:$|[（(])/u';
+            $scene = 'reward';
+        } elseif ($accountId === self::WECHAT_RECEIPT_ASSISTANT_ID) {
+            if (array_key_exists('收款店铺', $fields)) {
+                $titlePattern = '/^微信支付收款(\d+(?:\.\d{1,2})?)元(?:$|[（(])/u';
+                $scene = 'business';
+                $status = (string) ($fields['备注'] ?? '');
+                if (!str_contains($status, '收款成功') || !str_contains($status, '经营账户')) {
+                    throw new PaymentException('经营码消息未确认收款成功', 40200);
+                }
+            } elseif (str_starts_with($title, '[店员消息]')) {
+                $titlePattern = '/^\[店员消息\]收款到账(\d+(?:\.\d{1,2})?)元$/u';
+                $scene = 'clerk';
+                $explanation = (string) ($fields['说明'] ?? '');
+                if (!str_contains($explanation, '已存入店长')
+                    || !str_contains($explanation, '零钱')) {
+                    throw new PaymentException('店员消息未确认收款成功', 40200);
+                }
+            } else {
+                $titlePattern = '/^微信支付收款(\d+(?:\.\d{1,2})?)元(?:$|[（(])/u';
+                $scene = 'personal';
+                $status = (string) ($fields['备注'] ?? '');
+                if (!str_contains($status, '收款成功') || !str_contains($status, '零钱')) {
+                    throw new PaymentException('个人码消息未确认收款成功', 40200);
+                }
+            }
+        } else {
+            throw new PaymentException('PC 监听消息的公众号不受支持', 40200);
+        }
+        if (preg_match($titlePattern, $title, $titleMatch) !== 1
+            || preg_match('/^[¥￥]\s*(\d+(?:\.\d{1,2})?)\s*(?:元)?$/u', (string) ($fields['收款金额'] ?? ''), $amountMatch) !== 1) {
+            throw new PaymentException('PC 监听消息不是支持的微信收款模板', 40200);
+        }
+
+        $titleAmount = $this->moneyToCents((string) $titleMatch[1]);
+        $fieldAmount = $this->moneyToCents((string) $amountMatch[1]);
+        if ($titleAmount <= 0 || $titleAmount !== $fieldAmount) {
+            throw new PaymentException('PC 监听消息的标题金额与收款金额不一致', 40200);
+        }
+
+        $eventAt = $messageTime;
+        if ($accountId === self::WECHAT_PAY_OFFICIAL_ID) {
+            $paidAt = (string) ($fields['到账时间'] ?? '');
+            if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $paidAt) !== 1) {
+                throw new PaymentException('微信支付收款消息缺少到账时间', 40200);
+            }
+            $date = DateTimeImmutable::createFromFormat(
+                '!Y-m-d H:i:s',
+                $paidAt,
+                new DateTimeZone('Asia/Shanghai')
+            );
+            if (!$date || $date->format('Y-m-d H:i:s') !== $paidAt) {
+                throw new PaymentException('微信支付收款消息的到账时间无效', 40200);
+            }
+            $eventAt = $date->getTimestamp();
+        }
+
+        return [
+            'amount' => $titleAmount,
+            'event_at' => $eventAt,
+            'scene' => $scene,
+            'payer_remark' => trim((string) ($fields['付款方备注'] ?? '')),
+        ];
+    }
+
+    /**
+     * 使用公众号消息身份生成稳定渠道流水号。
+     *
+     * messageKey 必须与公众号和三个消息游标字段完全一致；同一消息重投时编号不变。
+     */
+    private function wxtoolTradeNo(
+        array $payload,
+        array $message,
+        string $accountId,
+        int $messageTime
+    ): string {
+        $key = (string) ($payload['delivery']['messageKey'] ?? '');
+        $parts = explode(':', $key);
+        if (count($parts) !== 5
+            || !ctype_digit($parts[0]) || (int) $parts[0] <= 0
+            || $parts[1] !== $accountId
+            || !ctype_digit($parts[2]) || !ctype_digit($parts[4])
+            || $parts[2] !== (string) ($message['sortSeq'] ?? '')
+            || $parts[3] !== (string) $messageTime
+            || $parts[4] !== (string) ($message['localId'] ?? '')) {
+            throw new PaymentException('PC 监听公众号消息缺少一致的消息标识', 40200);
+        }
+
+        $time = (new DateTimeImmutable('@' . $messageTime))
+            ->setTimezone(new DateTimeZone('Asia/Shanghai'))
+            ->format('YmdHis');
+        return 'WX' . $time . substr(hash('sha256', $key), 0, 16);
     }
 
     /**
@@ -703,8 +984,7 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
      */
     private function locatePayNoByRemark(array $payload): string
     {
-        ['msg' => $content] = $this->wechatNotificationFromPayload($payload);
-        $remarkCode = $this->remarkFromContent($content);
+        $remarkCode = $this->remarkFromPayload($payload);
         $amount = $this->amountFromPayload($payload);
         $payNo = (string) Cache::get($this->remarkCacheKey($remarkCode), '');
         if ($payNo === '') {
@@ -737,7 +1017,7 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
     }
 
     /**
-     * 从 SmsForwarder content JSON 中提取微信通知标题和正文。
+     * 从归一化 content JSON 中提取微信通知标题和正文。
      *
      * @param array<string, mixed> $payload 通知载荷
      * @return array{title:string,msg:string}
@@ -746,13 +1026,13 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
     {
         $content = json_decode((string) ($payload['content'] ?? ''), true);
         if (!is_array($content)) {
-            throw new PaymentException('SmsForwarder 通知内容格式不合法', 40200);
+            throw new PaymentException('微信收款通知内容格式不合法', 40200);
         }
 
         $title = trim((string) ($content['title'] ?? ''));
         $msg = trim((string) ($content['msg'] ?? ''));
         if ($title === '' || $msg === '') {
-            throw new PaymentException('SmsForwarder 通知标题或正文为空', 40200);
+            throw new PaymentException('微信收款通知标题或正文为空', 40200);
         }
 
         return ['title' => $title, 'msg' => $msg];
@@ -766,6 +1046,14 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
      */
     private function amountFromPayload(array $payload): int
     {
+        if (array_key_exists('_notified_amount', $payload)) {
+            $amount = (int) $payload['_notified_amount'];
+            if ($amount <= 0) {
+                throw new PaymentException('PC 监听通知金额无效', 40200);
+            }
+            return $amount;
+        }
+
         ['title' => $title, 'msg' => $msg] = $this->wechatNotificationFromPayload($payload);
         if (!in_array($title, ['微信支付', '微信收款助手', '微信收款商业版'], true)) {
             throw new PaymentException('未支持的微信通知标题', 40200, ['title' => $title]);
@@ -791,6 +1079,26 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
         }
 
         return (string) $matches[1];
+    }
+
+    /**
+     * 从对应监听协议提取订单备注码。
+     *
+     * wxtool 只使用结构化“付款方备注”，避免把经营码或赞赏码的系统“备注”
+     * 当作用户输入；SmsForwarder 继续兼容既有通知栏文本解析。
+     */
+    private function remarkFromPayload(array $payload): string
+    {
+        if (($payload['_receipt_source'] ?? '') === 'wxtool') {
+            $remark = trim((string) ($payload['_payer_remark'] ?? ''));
+            if (preg_match('/^\d{4}$/', $remark) !== 1) {
+                throw new PaymentException('PC 收款通知没有有效的 4 位付款备注', 40200);
+            }
+            return $remark;
+        }
+
+        ['msg' => $content] = $this->wechatNotificationFromPayload($payload);
+        return $this->remarkFromContent($content);
     }
 
     /**
@@ -821,18 +1129,23 @@ class WechatReceiptPayment extends BasePayment implements PaymentInterface, PayP
     }
 
     /**
-     * 为 SmsForwarder 通知生成稳定的渠道交易号。
+     * 读取监听工具提供的稳定渠道交易号。
      *
      * @param array<string, mixed> $payload 通知载荷
      * @return string 渠道交易号
      */
     private function channelTradeNo(array $payload): string
     {
+        $tradeNo = (string) ($payload['_channel_trade_no'] ?? '');
+        if ($tradeNo !== '') {
+            return $tradeNo;
+        }
+
         return 'SF' . substr(hash('sha256', (string) ($payload['from'] ?? '') . '|' . (string) $payload['timestamp'] . '|' . (string) $payload['content']), 0, 30);
     }
 
     /**
-     * 从 SmsForwarder 毫秒时间戳提取支付时间。
+     * 从归一化毫秒时间戳提取支付时间。
      *
      * @param array<string, mixed> $payload 通知载荷
      * @return string|null 支付时间

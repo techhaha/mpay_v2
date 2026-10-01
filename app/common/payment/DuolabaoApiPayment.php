@@ -16,6 +16,7 @@ use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\common\util\FormatHelper;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use app\exception\UnsupportedPaymentOperationException;
 use app\repository\payment\trade\PayOrderRepository;
@@ -710,7 +711,7 @@ class DuolabaoApiPayment extends BasePayment implements
         $payment = $this->paymentPayload($order);
         $method = strtolower(trim((string) ($payment['method'] ?? '')));
         if ($method !== '' && !in_array($method, ['qrcode', 'jsapi', 'mini'], true)) {
-            throw new PaymentDefinitiveException('哆啦宝不支持指定的支付产品', 40200);
+            throw new PaymentProductUnavailableException('哆啦宝不支持指定的支付产品', 40200);
         }
         if ($method === 'qrcode') {
             return $this->requireProduct(self::PRODUCT_QRCODE_TRAD);
@@ -745,7 +746,7 @@ class DuolabaoApiPayment extends BasePayment implements
     private function requireProduct(string $product): string
     {
         if (!$this->productEnabled($product)) {
-            throw new PaymentDefinitiveException('哆啦宝支付产品未开通：' . $product, 40200);
+            throw new PaymentProductUnavailableException('哆啦宝支付产品未开通：' . $product, 40200);
         }
 
         return $product;
@@ -786,9 +787,12 @@ class DuolabaoApiPayment extends BasePayment implements
             return false;
         }
         $payment = $this->paymentPayload($order);
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
 
-        return strtolower(trim((string) ($payment['method'] ?? ''))) === 'mini'
-            || trim((string) ($payment['mini_openid'] ?? '')) !== ''
+        return trim((string) ($payment['mini_openid'] ?? '')) !== ''
             || trim((string) ($payment['wx_login_code'] ?? '')) !== ''
             || trim((string) ($payment['mini_code'] ?? '')) !== ''
             || filter_var($payment['is_mini'] ?? false, FILTER_VALIDATE_BOOL);

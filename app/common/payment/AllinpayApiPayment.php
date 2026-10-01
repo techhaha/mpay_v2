@@ -15,6 +15,7 @@ use app\common\sdk\allinpay\AllinpaySdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\PaymentUncertainException;
 use DateTimeImmutable;
 use support\Request;
@@ -988,6 +989,11 @@ class AllinpayApiPayment extends BasePayment implements
             return false;
         }
         $payment = $this->paymentPayload($order);
+        $method = strtolower(trim((string) ($payment['method'] ?? '')));
+        if ($method !== '') {
+            return $method === 'mini';
+        }
+
         return $this->firstText(
             $payment['mini_openid'] ?? '',
             $payment['wx_login_code'] ?? '',
@@ -1202,7 +1208,7 @@ class AllinpayApiPayment extends BasePayment implements
     private function ensureProduct(string $product): void
     {
         if (!in_array($product, $this->enabledProducts(), true)) {
-            throw new PaymentException('当前通联通道未开启该支付产品', 40200, ['product' => $product]);
+            throw new PaymentProductUnavailableException('当前通联通道未开启该支付产品', 40200, ['product' => $product]);
         }
     }
 

@@ -11,10 +11,10 @@ use app\common\interface\PaymentInterface;
 use app\exception\PaymentException;
 use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentUncertainException;
+use Closure;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use Psr\Http\Message\ResponseInterface;
-use support\Log;
 
 /**
  * 支付插件基类。
@@ -48,6 +48,43 @@ abstract class BasePayment implements PayPluginInterface, PaymentInterface
     protected array $channelConfig = [];
 
     private ?Client $httpClient = null;
+
+    /** @var Closure(string):void|null 当前下单的产品请求前持久化入口 */
+    private ?Closure $payProductPreflight = null;
+
+    /**
+     * 在本次支付中注入外呼前产品持久化动作；未声明多产品的插件保持原下单行为。
+     *
+     * 插件选品仍由自身完成；在核心派发时，持久化事务提交后才能执行选中产品的请求。
+     * 回调只在本次 pay() 调用期间有效，防止长驻进程把订单上下文带入下一笔支付。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @param callable(string):void $persist 产品持久化动作
+     * @return array<string, mixed> 插件原始标准结果
+     */
+    final public function payWithProductPreflight(array $order, callable $persist): array
+    {
+        $this->payProductPreflight = Closure::fromCallable($persist);
+        try {
+            return $this->pay($order);
+        } finally {
+            $this->payProductPreflight = null;
+        }
+    }
+
+    /** 在调用已选产品处理器前完成本地持久化；直接调用插件时不触发数据库操作。 */
+    final protected function preparePayProduct(string $product): void
+    {
+        if ($this->payProductPreflight !== null) {
+            ($this->payProductPreflight)($product);
+        }
+    }
+
+    /** 自动兜底不得在已预写产品且可能发出请求之后重新选择其他产品。 */
+    final protected function hasPayProductPreflight(): bool
+    {
+        return $this->payProductPreflight !== null;
+    }
 
     /**
      * 初始化插件，加载通道配置并创建 HTTP 客户端。
@@ -311,7 +348,6 @@ abstract class BasePayment implements PayPluginInterface, PaymentInterface
         try {
             return $this->httpClient->request($method, $url, $options);
         } catch (GuzzleException $e) {
-            Log::error(sprintf('[BasePayment] HTTP 请求失败: %s %s, error=%s', $method, $url, $e->getMessage()));
             throw new PaymentUncertainException('渠道请求结果不确定', 40200, [
                 'method' => $method,
                 'url' => $url,

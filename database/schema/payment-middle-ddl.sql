@@ -341,7 +341,7 @@ CREATE TABLE IF NOT EXISTS `ma_pay_order` (
   `split_rate_bp_snapshot` int unsigned NOT NULL DEFAULT 9000 COMMENT '商户分账比例bp快照',
   `service_fee_amount` bigint unsigned NOT NULL DEFAULT 0 COMMENT '平台服务费金额（分）',
   `status` tinyint unsigned NOT NULL DEFAULT 0 COMMENT '状态：0-待创建,1-支付中,2-成功,3-失败,4-关闭,5-超时',
-  `service_fee_status` tinyint unsigned NOT NULL DEFAULT 0 COMMENT '平台服务费状态：0-无,1-冻结,2-已扣,3-已释放',
+  `service_fee_status` tinyint unsigned NOT NULL DEFAULT 0 COMMENT '平台服务费状态：0-无,1-冻结,2-已扣,3-已释放,4-待补扣',
   `settlement_status` tinyint unsigned NOT NULL DEFAULT 0 COMMENT '清算状态：0-无,1-待清算,2-已清算,3-已冲正',
   `channel_request_no` varchar(64) NOT NULL DEFAULT '' COMMENT '渠道请求号（幂等）',
   `channel_order_no` varchar(64) DEFAULT NULL COMMENT '渠道订单号',
@@ -369,6 +369,8 @@ CREATE TABLE IF NOT EXISTS `ma_pay_order` (
   KEY `idx_channel_request_no` (`channel_request_no`),
   KEY `idx_channel_trade_no` (`channel_trade_no`),
   KEY `idx_channel_id_status` (`channel_id`, `status`),
+  KEY `idx_status_request_id` (`status`, `request_at`, `id`),
+  KEY `idx_status_expire_id` (`status`, `expire_at`, `id`),
   KEY `idx_poll_group_id` (`poll_group_id`),
   KEY `idx_created_id` (`created_at`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付单表';
@@ -656,6 +658,7 @@ CREATE TABLE IF NOT EXISTS `ma_channel_notify_log` (
 CREATE TABLE IF NOT EXISTS `ma_pay_callback_log` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `pay_no` varchar(32) NOT NULL DEFAULT '' COMMENT '支付单号',
+  `refund_no` varchar(32) NOT NULL DEFAULT '' COMMENT '退款单号，支付回调为空',
   `channel_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '通道ID',
   `callback_type` tinyint unsigned NOT NULL DEFAULT 0 COMMENT '回调类型：0-异步通知,1-同步返回',
   `request_data` longtext COMMENT '请求原始数据（完整回调参数）',
@@ -666,6 +669,7 @@ CREATE TABLE IF NOT EXISTS `ma_pay_callback_log` (
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`),
   KEY `idx_pay_created` (`pay_no`, `created_at`),
+  KEY `idx_refund_created` (`refund_no`, `created_at`),
   KEY `idx_channel_created` (`channel_id`, `created_at`),
   KEY `idx_callback_type` (`callback_type`),
   KEY `idx_request_hash` (`request_hash`),

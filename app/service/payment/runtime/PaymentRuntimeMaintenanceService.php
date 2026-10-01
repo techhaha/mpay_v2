@@ -31,6 +31,20 @@ use support\Log;
 class PaymentRuntimeMaintenanceService extends BaseService
 {
     /**
+     * 主动查单轮转游标。
+     *
+     * payment-runtime 固定单进程运行，使用进程内游标避免长期处理中订单占满每批结果。
+     */
+    private string $activeQueryCursorRequestAt = '';
+
+    private int $activeQueryCursorId = 0;
+
+    /** 过期扫描独立轮转，查单失败或冻结的订单不能阻塞后续批次。 */
+    private string $expiredCursorExpireAt = '';
+
+    private int $expiredCursorId = 0;
+
+    /**
      * 构造方法。
      *
      * @param MerchantNotifyDispatcherService $merchantNotifyDispatcherService 商户通知派发服务
@@ -94,11 +108,36 @@ class PaymentRuntimeMaintenanceService extends BaseService
             'failed' => 0,
         ];
 
-        foreach ($this->payOrderRepository->listExpiredMutable($this->now(), $limit) as $payOrder) {
+        $orders = $this->payOrderRepository->listExpiredMutable(
+            $this->now(), $limit, $this->expiredCursorExpireAt, $this->expiredCursorId
+        );
+        if ($orders->isEmpty() && $this->expiredCursorExpireAt !== '') {
+            $this->expiredCursorExpireAt = '';
+            $this->expiredCursorId = 0;
+            $orders = $this->payOrderRepository->listExpiredMutable($this->now(), $limit);
+        }
+
+        foreach ($orders as $payOrder) {
+            $this->expiredCursorExpireAt = (string) $payOrder->expire_at;
+            $this->expiredCursorId = (int) $payOrder->id;
             $summary['scanned']++;
 
             try {
-                $this->syncOnePayOrderByQuery($payOrder, 'runtime_timeout_final_query');
+                $queryResult = $this->syncOnePayOrderByQuery($payOrder, 'runtime_timeout_final_query');
+                if (($queryResult['reason_code'] ?? '') === 'RISK_FROZEN') {
+                    $summary['skipped']++;
+                    continue;
+                }
+                if (($queryResult['status'] ?? '') === 'error') {
+                    // 最终查单本身失败时不能据此释放支付占用，保留原状态等待下次确认。
+                    $summary['failed']++;
+                    continue;
+                }
+                if ($queryResult['status'] === PaymentPluginStatusConstant::UNKNOWN) {
+                    // 上游资金结果未确认，保留原状态和占用，由既有过期轮转继续核实。
+                    $summary['skipped']++;
+                    continue;
+                }
                 $latest = $this->payOrderRepository->findByPayNo((string) $payOrder->pay_no);
                 if (!$latest || !in_array((int) $latest->status, TradeConstant::orderMutableStatuses(), true)) {
                     $summary['skipped']++;
@@ -137,11 +176,26 @@ class PaymentRuntimeMaintenanceService extends BaseService
             'failed' => 0,
             'closed' => 0,
             'pending' => 0,
+            'unknown' => 0,
             'skipped' => 0,
             'error' => 0,
         ];
 
-        foreach ($this->payOrderRepository->listPayingForActiveQuery($before, $limit) as $payOrder) {
+        $orders = $this->payOrderRepository->listPayingForActiveQuery(
+            $before,
+            $limit,
+            $this->activeQueryCursorRequestAt,
+            $this->activeQueryCursorId
+        );
+        if ($orders->isEmpty() && $this->activeQueryCursorRequestAt !== '') {
+            $this->activeQueryCursorRequestAt = '';
+            $this->activeQueryCursorId = 0;
+            $orders = $this->payOrderRepository->listPayingForActiveQuery($before, $limit);
+        }
+
+        foreach ($orders as $payOrder) {
+            $this->activeQueryCursorRequestAt = (string) $payOrder->request_at;
+            $this->activeQueryCursorId = (int) $payOrder->id;
             $summary['scanned']++;
             $result = $this->syncOnePayOrderByQuery($payOrder, 'runtime_active_query');
             $status = (string) ($result['status'] ?? 'error');
@@ -289,10 +343,13 @@ class PaymentRuntimeMaintenanceService extends BaseService
                     $this->recoveryTaskService->succeed($task);
                     $summary['failed']++;
                 } else {
-                    $delaySeconds = str_contains((string) $latest->last_error, '不支持退款主动查询') ? 900 : 120;
-                    $this->recoveryTaskService->retry($task, $delaySeconds, (string) $latest->last_error);
+                    $this->recoveryTaskService->retry($task, 120, (string) $latest->last_error);
                     $summary['pending']++;
                 }
+            } catch (UnsupportedPaymentOperationException $e) {
+                // 完成的是查询任务，不是退款；无查询能力时保留退款事实等待通知或人工核对。
+                $this->recoveryTaskService->succeed($task);
+                $summary['pending']++;
             } catch (\Throwable $e) {
                 $this->recoveryTaskService->retry($task, 300, $e->getMessage());
                 $summary['error']++;
@@ -392,6 +449,7 @@ class PaymentRuntimeMaintenanceService extends BaseService
                 'pay_no' => $payNo,
                 'status' => 'skipped',
                 'message' => '支付单已冻结，跳过主动查单',
+                'reason_code' => 'RISK_FROZEN',
             ];
         }
 
@@ -418,6 +476,8 @@ class PaymentRuntimeMaintenanceService extends BaseService
 
             if ($normalized['status'] === PaymentPluginStatusConstant::CLOSED) {
                 $this->payOrderLifecycleService->closePayOrder($payNo, [
+                    'channel_order_no' => $normalized['channel_order_no'],
+                    'channel_trade_no' => $normalized['channel_trade_no'],
                     'reason' => '主动查单返回渠道已关闭',
                 ]);
                 $this->recordActiveQueryLog($payOrder, $snapshot, NotifyConstant::PROCESS_STATUS_SUCCESS);
@@ -450,7 +510,7 @@ class PaymentRuntimeMaintenanceService extends BaseService
 
             return [
                 'pay_no' => $payNo,
-                'status' => 'pending',
+                'status' => $normalized['status'],
                 'snapshot' => $snapshot,
             ];
         } catch (UnsupportedPaymentOperationException $e) {
@@ -461,6 +521,7 @@ class PaymentRuntimeMaintenanceService extends BaseService
                 'pay_no' => $payNo,
                 'status' => 'skipped',
                 'snapshot' => $snapshot,
+                'reason_code' => 'QUERY_UNSUPPORTED',
             ];
         } catch (PaymentException $e) {
             $snapshot = $this->recordQueryError($payOrder, $e->getMessage(), (string) $e->getCode(), $source);
@@ -469,6 +530,7 @@ class PaymentRuntimeMaintenanceService extends BaseService
                 'pay_no' => $payNo,
                 'status' => 'error',
                 'snapshot' => $snapshot,
+                'reason_code' => (string) $e->getCode(),
             ];
         } catch (\Throwable $e) {
             $snapshot = $this->recordQueryError($payOrder, $e->getMessage(), 'QUERY_ERROR', $source);
@@ -477,6 +539,7 @@ class PaymentRuntimeMaintenanceService extends BaseService
                 'pay_no' => $payNo,
                 'status' => 'error',
                 'snapshot' => $snapshot,
+                'reason_code' => 'QUERY_ERROR',
             ];
         }
     }
@@ -583,8 +646,9 @@ class PaymentRuntimeMaintenanceService extends BaseService
 
         return [
             'status' => $status,
-            'channel_order_no' => trim((string) ($validated['chan_order_no'] ?? '')) ?: (string) ($payOrder->channel_order_no ?? ''),
-            'channel_trade_no' => trim((string) ($validated['chan_trade_no'] ?? '')) ?: (string) ($payOrder->channel_trade_no ?? ''),
+            // 只传本次外部事实；空值由生命周期基于锁内最新订单保留，不能用旧快照补齐。
+            'channel_order_no' => (string) ($validated['chan_order_no'] ?? ''),
+            'channel_trade_no' => (string) ($validated['chan_trade_no'] ?? ''),
             'channel_status' => (string) ($validated['channel_status'] ?? ''),
             'channel_error_code' => (string) ($validated['channel_error_code'] ?? ''),
             'channel_error_msg' => (string) ($validated['channel_error_msg'] ?? $validated['message'] ?? ''),

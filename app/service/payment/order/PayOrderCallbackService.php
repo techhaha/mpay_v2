@@ -74,11 +74,11 @@ class PayOrderCallbackService extends BaseService
                 ->withScene('notify_result')
                 ->withException(PaymentException::class)
                 ->validate();
-            $this->assertNotifyPayNoMatches($payOrder, $notifyResult);
+            $callbackPayload = $this->buildCallbackPayload($payOrder, $request->all(), $notifyResult);
             $payOrder = $this->freshPayOrder($payOrder);
+            $this->assertNotifyPayNoMatches($payOrder, $notifyResult);
             $this->assertNotifyAmountMatches($payOrder, $notifyResult);
             $this->assertNotifyChannelReferencesMatch($payOrder, $notifyResult);
-            $callbackPayload = $this->buildCallbackPayload($payOrder, $request->all(), $notifyResult);
             $this->applyNotifyResult($payOrder, $notifyResult, $callbackPayload);
 
             return $plugin->notifySuccess();
@@ -189,13 +189,12 @@ class PayOrderCallbackService extends BaseService
                 ->withScene('notify_result')
                 ->withException(PaymentException::class)
                 ->validate();
-            $this->assertNotifyPayNoMatches($payOrder, $notifyResult);
+            $callbackPayload = $this->buildCallbackPayload($payOrder, $payload, $notifyResult);
             $payOrder = $this->freshPayOrder($payOrder);
             $this->assertChannelMatches($payOrder, $channelId);
+            $this->assertNotifyPayNoMatches($payOrder, $notifyResult);
             $this->assertNotifyAmountMatches($payOrder, $notifyResult);
             $this->assertNotifyChannelReferencesMatch($payOrder, $notifyResult);
-
-            $callbackPayload = $this->buildCallbackPayload($payOrder, $payload, $notifyResult);
             $this->applyNotifyResult($payOrder, $notifyResult, $callbackPayload);
 
             return $callbackPayload;
@@ -271,6 +270,9 @@ class PayOrderCallbackService extends BaseService
 
     /**
      * 已保存的渠道单号是本次支付尝试的关联依据；重放通知不得替换为另一笔渠道交易。
+     *
+     * 这里保留外部结果预检查及只记日志的 pending 检查；成功、失败进入生命周期后，
+     * 还必须以锁内最新订单最终核对引用，普通重新读取不能代替行锁。
      *
      * @param array<string, mixed> $notifyResult 插件通知结果
      */

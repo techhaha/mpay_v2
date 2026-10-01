@@ -8,13 +8,16 @@ use app\common\base\BasePayment;
 use app\common\constant\PaymentPluginTypeConstant;
 use app\common\constant\PaymentPluginStatusConstant;
 use app\common\interface\PaymentInterface;
+use app\common\interface\PaymentIdentityRequirementInterface;
 use app\common\interface\PayPluginInterface;
 use app\common\sdk\hnapay\HnapayClient;
 use app\common\sdk\hnapay\HnapaySdkException;
 use app\common\trait\DirectPaymentProductSelectorTrait;
+use app\common\trait\DirectPaymentIdentityTrait;
 use app\common\util\FormatHelper;
+use app\exception\PaymentDefinitiveException;
 use app\exception\PaymentException;
-use app\exception\PaymentUncertainException;
+use app\exception\PaymentProductUnavailableException;
 use app\exception\UnsupportedPaymentOperationException;
 use support\Request;
 use support\Response;
@@ -22,17 +25,21 @@ use support\Response;
 /**
  * 新生支付 API 插件。
  *
- * 提供支付宝、微信和银联的扫码/JSAPI、支付宝 H5、支付通知与退款能力，并兼容
+ * 提供支付宝、微信和银联扫码、支付宝/微信 JSAPI、小程序、支付宝 H5 与支付通知，并区分
  * 扫码整数分通知和聚合支付元金额通知两种金额口径。当前没有可确认的统一查单与关单接口。
  */
-class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface
+class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPluginInterface, PaymentIdentityRequirementInterface
 {
     use DirectPaymentProductSelectorTrait;
+    use DirectPaymentIdentityTrait;
 
     private const PRODUCT_ALIPAY = 'ALIPAY';
     private const PRODUCT_WECHATPAY = 'WECHATPAY';
     private const PRODUCT_UNIONPAY = 'UNIONPAY';
     private const PRODUCT_HNA_ZFB = 'HnaZFB';
+    private const PRODUCT_ALIPAY_JSAPI = 'alipay_jsapi';
+    private const PRODUCT_WXPAY_MP = 'wxpay_mp';
+    private const PRODUCT_WXPAY_MINI = 'wxpay_mini';
 
     private ?HnapayClient $client = null;
 
@@ -67,11 +74,15 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             ['type' => 'input', 'field' => 'merchant_id', 'title' => '报备编号', 'value' => ''],
             ['type' => 'select', 'field' => 'interface_type', 'title' => '接口类型', 'value' => 'scan', 'options' => [['label' => '扫码支付', 'value' => 'scan'], ['label' => '公众号/生活号支付', 'value' => 'jsapi'], ['label' => '支付宝H5', 'value' => 'h5']]],
             $this->directPaymentEnabledProductsField([
-                self::PRODUCT_ALIPAY => '支付宝扫码/JSAPI',
-                self::PRODUCT_WECHATPAY => '微信扫码/JSAPI',
-                self::PRODUCT_UNIONPAY => '银联扫码/JSAPI',
+                self::PRODUCT_ALIPAY => '支付宝扫码',
+                self::PRODUCT_WECHATPAY => '微信扫码',
+                self::PRODUCT_UNIONPAY => '银联扫码',
+                self::PRODUCT_ALIPAY_JSAPI => '支付宝生活号',
+                self::PRODUCT_WXPAY_MP => '微信公众号',
+                self::PRODUCT_WXPAY_MINI => '微信小程序',
                 self::PRODUCT_HNA_ZFB => '支付宝 H5',
             ]),
+            ...$this->directPaymentIdentityConfigFields(['wechat_oauth', 'mini_program', 'alipay_oauth']),
         ];
     }
 
@@ -83,43 +94,78 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      */
     public function pay(array $order): array
     {
-        return $this->executeDirectPaymentProduct($order, [
+        return $this->executeDirectPaymentProduct($order, $this->paymentProducts($order), '新生支付');
+    }
 
+    /**
+     * 与下单使用同一接口类型和产品预选，不请求上游。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, mixed>|null 当前产品的身份需求
+     */
+    public function identityRequirement(array $order): ?array
+    {
+        $product = $this->directPaymentSelection($order, $this->paymentProducts($order))['product'];
+        if ($product === self::PRODUCT_ALIPAY_JSAPI) {
+            // 新生生活号请求同时需要 aliAppId；已有 UID 也不能省略所属应用。
+            $identity = $this->directPaymentIdentityData($order, 'alipay_oauth');
+            if ($identity['identity'] !== '' && $identity['app_id'] === '') {
+                throw new PaymentDefinitiveException('新生支付宝生活号必须提供 op_app_id 或配置支付宝授权 AppID', 40200);
+            }
+        }
+
+        return match ($product) {
+            self::PRODUCT_WXPAY_MP => $this->directPaymentIdentityRequirement($order, $product, 'wechat_oauth'),
+            self::PRODUCT_WXPAY_MINI => $this->directPaymentIdentityRequirement($order, $product, 'mini_program'),
+            self::PRODUCT_ALIPAY_JSAPI => $this->directPaymentIdentityRequirement($order, $product, 'alipay_oauth'),
+            default => null,
+        };
+    }
+
+    /**
+     * 接口类型限定本通道协议；已开通产品再由选择器过滤，不跨接口自动尝试。
+     *
+     * @param array<string, mixed> $order 标准插件下单参数
+     * @return array<string, array<string, mixed>> 产品与处理器声明
+     */
+    private function paymentProducts(array $order): array
+    {
+        return match ((string) $this->getConfig('interface_type', 'scan')) {
             'jsapi' => [
-                'products' => [
-                    'alipay' => self::PRODUCT_ALIPAY,
-                    'wxpay' => self::PRODUCT_WECHATPAY,
-                    'bank' => self::PRODUCT_UNIONPAY,
+                'jsapi' => [
+                    'products' => [
+                        'alipay' => self::PRODUCT_ALIPAY_JSAPI,
+                        'wxpay' => self::PRODUCT_WXPAY_MP,
+                    ],
+                    'handler' => fn (): array => $this->jsapiPay($order),
                 ],
-                'handler' => fn (): array => $this->jsapiPay($order),
+                'mini' => [
+                    'products' => ['wxpay' => self::PRODUCT_WXPAY_MINI],
+                    'handler' => fn (): array => $this->jsapiPay($order, true),
+                ],
             ],
             'h5' => [
-                'products' => [
-                    'alipay' => self::PRODUCT_HNA_ZFB,
+                'h5' => [
+                    'products' => ['alipay' => self::PRODUCT_HNA_ZFB],
+                    'handler' => fn (): array => $this->h5Pay($order),
                 ],
-                'handler' => fn (): array => (string) $order['pay_type_code'] === 'alipay'
-                    ? $this->h5Pay($order)
-                    : throw new PaymentException('新生支付当前支付方式不支持H5产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
-            ],
-
-            'jump' => [
-                'products' => [
-                    'alipay' => self::PRODUCT_HNA_ZFB,
+                'jump' => [
+                    'products' => ['alipay' => self::PRODUCT_HNA_ZFB],
+                    'handler' => fn (): array => $this->h5Pay($order),
                 ],
-                'handler' => fn (): array => (string) $order['pay_type_code'] === 'alipay'
-                ? $this->h5Pay($order)
-                : throw new PaymentException('新生支付当前支付方式不支持跳转产品', 40200, ['channel_error_code' => 'PRODUCT_NOT_OPEN']),
             ],
-
-            'qrcode' => [
-                'products' => [
-                    'alipay' => self::PRODUCT_ALIPAY,
-                    'wxpay' => self::PRODUCT_WECHATPAY,
-                    'bank' => self::PRODUCT_UNIONPAY,
+            'scan' => [
+                'qrcode' => [
+                    'products' => [
+                        'alipay' => self::PRODUCT_ALIPAY,
+                        'wxpay' => self::PRODUCT_WECHATPAY,
+                        'bank' => self::PRODUCT_UNIONPAY,
+                    ],
+                    'handler' => fn (): array => $this->scanPay($order),
                 ],
-                'handler' => fn (): array => $this->scanPay($order),
             ],
-        ], '新生支付');
+            default => throw new PaymentProductUnavailableException('新生支付接口类型未正确配置', 40200),
+        };
     }
 
     /**
@@ -193,31 +239,14 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
     }
 
     /**
-     * 申请退款。
+     * EXP09 退款尚未取得可核验的完整结果协议，暂不向上游请求。
      *
      * @param array<string, mixed> $order 标准插件退款参数
      * @return array<string, mixed> 标准退款结果
      */
     public function refund(array $order): array
     {
-        try {
-            $data = $this->client()->refund((string) $order['pay_no'], [
-                'orgHnapayOrderId' => (string) ($order['chan_trade_no'] ?? ''),
-                'refundAmt' => FormatHelper::amount((int) $order['refund_amount']),
-                'notifyServerUrl' => (string) ($order['refund_callback_url'] ?? ''),
-            ]);
-        } catch (HnapaySdkException $e) {
-            throw new PaymentUncertainException('新生支付退款结果不确定：' . $e->getMessage(), 40200);
-        }
-
-        return [
-            'status' => PaymentPluginStatusConstant::SUCCESS,
-            'refund_no' => (string) $order['refund_no'],
-            'pay_no' => (string) $order['pay_no'],
-            'refund_amount' => (int) $order['refund_amount'],
-            'chan_refund_no' => (string) ($data['hnapayOrderId'] ?? ''),
-            'message' => '退款申请成功',
-        ];
+        throw new UnsupportedPaymentOperationException('新生支付 EXP09 退款协议尚未核验，暂不支持接口退款', 40200);
     }
 
     /**
@@ -310,11 +339,17 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
      * JSAPI 支付。
      *
      * @param array<string, mixed> $order 标准插件下单参数
+     * @param bool $mini 是否调用已选定的小程序产品
      * @return array<string, mixed> 标准支付结果
      */
-    private function jsapiPay(array $order): array
+    private function jsapiPay(array $order, bool $mini = false): array
     {
-        $payment = (array) ($order['extra']['payment'] ?? []);
+        $authType = (string) $order['pay_type_code'] === 'alipay' ? 'alipay_oauth' : ($mini ? 'mini_program' : 'wechat_oauth');
+        $identity = $this->directPaymentIdentityData($order, $authType);
+        if ($identity['identity'] === '' || $identity['app_id'] === '') {
+            throw new PaymentDefinitiveException('新生 JSAPI 必须先取得当前产品的用户身份及 AppID', 40200);
+        }
+        $product = $authType === 'alipay_oauth' ? self::PRODUCT_ALIPAY_JSAPI : ($mini ? self::PRODUCT_WXPAY_MINI : self::PRODUCT_WXPAY_MP);
         $orgCode = $this->orgCode((string) $order['pay_type_code']);
         $payload = [
             'tranAmt' => FormatHelper::amount((int) $order['amount']),
@@ -326,11 +361,11 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             'merchantId' => $this->configText('merchant_id'),
         ];
         if ($orgCode === 'WECHATPAY') {
-            $payload['appId'] = (string) ($payment['sub_appid'] ?? '');
-            $payload['openId'] = (string) ($payment['mini_openid'] ?? $payment['sub_openid'] ?? '');
+            $payload['appId'] = $identity['app_id'];
+            $payload['openId'] = $identity['identity'];
         } else {
-            $payload['aliAppId'] = (string) ($payment['sub_appid'] ?? '');
-            $payload['buyerId'] = (string) ($payment['sub_openid'] ?? $payment['buyer_id'] ?? '');
+            $payload['aliAppId'] = $identity['app_id'];
+            $payload['buyerId'] = $identity['identity'];
         }
 
         try {
@@ -345,7 +380,11 @@ class HnapayApiPayment extends BasePayment implements PaymentInterface, PayPlugi
             $payInfo = is_array($decoded) ? $decoded : ['tradeNO' => $payInfo];
         }
 
-        return $this->payResult('jsapi', (string) $order['pay_type_code'], $orgCode, 'jsapiPay', ((array) $payInfo) + ['raw' => $data], $data, $order);
+        $params = $mini
+            ? ['_page' => 'wechatMini', 'request_payment' => (array) $payInfo, 'raw' => $data]
+            : ((array) $payInfo) + ['raw' => $data];
+
+        return $this->payResult($mini ? 'page' : 'jsapi', (string) $order['pay_type_code'], $product, 'jsapiPay', $params, $data, $order);
     }
 
     /**

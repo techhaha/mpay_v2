@@ -137,13 +137,13 @@ class HnapayClient
      * @param array<string, mixed> $payload 业务参数
      * @return array<string, mixed>
      */
-    public function refund(string $payNo, array $payload): array
+    public function refund(string $refundNo, array $payload): array
     {
         $params = [
             'version' => '2.0',
             'tranCode' => 'EXP09',
             'merId' => $this->config['mer_id'],
-            'merOrderId' => $payNo,
+            'merOrderId' => $refundNo,
             'submitTime' => date('YmdHis'),
             'signType' => '1',
             'charset' => '1',
