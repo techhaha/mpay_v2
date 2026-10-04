@@ -781,7 +781,7 @@ class AlipayReceiptPayment extends BasePayment implements PaymentInterface, PayP
     private function amountFromPayload(array $payload): int
     {
         $content = $this->notificationTextFromPayload($payload);
-        if (preg_match('/(?:到账|收款|成功收款)\s*(\d+(?:\.\d{1,2})?)\s*元/u', $content, $matches) === 1) {
+        if (preg_match('/(?:到账|收款|成功收款|付款)\s*(\d+(?:\.\d{1,2})?)\s*元/u', $content, $matches) === 1) {
             return $this->moneyToCents((string) $matches[1]);
         }
 
